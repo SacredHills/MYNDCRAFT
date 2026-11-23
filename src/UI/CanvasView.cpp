@@ -38,6 +38,7 @@ void CanvasView::updateCursor() {
 }
 
 void CanvasView::setDocument(Document* d) {
+    endTextEdit(false);
     if (m_conn) disconnect(m_conn);
     if (m_tool) m_tool->cancel();
     m_doc = d;
@@ -86,6 +87,7 @@ QTransform CanvasView::docToView() const {
 QPointF CanvasView::viewToDoc(const QPointF& v) const { return docToView().inverted().map(v); }
 
 void CanvasView::zoomAt(double factor, const QPointF& anchor) {
+    if (m_textEdit) endTextEdit(true);
     m_autoFit = false;
     const QPointF before = viewToDoc(anchor);
     m_zoom = std::clamp(m_zoom * factor, 0.02, 64.0);
@@ -97,6 +99,7 @@ void CanvasView::zoomAt(double factor, const QPointF& anchor) {
 void CanvasView::setZoom(double z) { zoomAt(z / m_zoom, QPointF(width() / 2.0, height() / 2.0)); }
 
 void CanvasView::rotateBy(double deg) {
+    if (m_textEdit) endTextEdit(true);
     m_autoFit = false;
     m_rotation = std::fmod(m_rotation + deg, 360.0);
     if (m_rotation < 0) m_rotation += 360.0;
@@ -106,6 +109,7 @@ void CanvasView::rotateBy(double deg) {
 void CanvasView::resetRotation() { m_rotation = 0; update(); emit viewChanged(); }
 
 void CanvasView::panBy(const QPointF& d) {
+    if (m_textEdit) endTextEdit(true);
     m_autoFit = false;
     const QPointF c(width() / 2.0, height() / 2.0);
     m_center += viewToDoc(c) - viewToDoc(c + d);
@@ -136,6 +140,7 @@ void CanvasView::actualPixels() {
 }
 
 void CanvasView::resizeEvent(QResizeEvent*) {
+    if (m_textEdit) endTextEdit(true);
     if (m_autoFit) fitToView();  // keep the whole canvas visible until the user zooms/pans
     emit viewChanged();
 }
@@ -397,5 +402,87 @@ void CanvasView::keyReleaseEvent(QKeyEvent* e) {
     QWidget::keyReleaseEvent(e);
 }
 void CanvasView::leaveEvent(QEvent*) { m_hasHover = false; update(); }
+
+// ------------------------------------------------------------------ inline text editing
+void CanvasView::beginTextEdit(const QUuid& layerId, const QPointF& docPos) {
+    if (!m_doc) return;
+    endTextEdit(true);
+    Layer* existing = layerId.isNull() ? nullptr : m_doc->findLayer(layerId);
+    if (existing && existing->type != LayerType::Text) existing = nullptr;
+    if (existing) { m_editBase = existing->textContent; m_editLayer = existing->id; }
+    else {
+        m_editBase = m_session->textStyle();
+        m_editBase.color = m_session->foreground();
+        m_editBase.pos = docPos;
+        m_editBase.text.clear();
+        m_editLayer = {};
+    }
+    m_textEdit = new QPlainTextEdit(this);
+    m_textEdit->setFrameShape(QFrame::NoFrame);
+    m_textEdit->setLineWrapMode(QPlainTextEdit::NoWrap);
+    m_textEdit->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_textEdit->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_textEdit->document()->setDocumentMargin(0);
+    m_textEdit->setPlainText(m_editBase.text);
+    QFont f = m_editBase.font();
+    f.setPixelSize(std::max(6, int(std::lround(m_editBase.sizePx * m_zoom))));
+    if (m_editBase.tracking != 0) f.setLetterSpacing(QFont::AbsoluteSpacing, m_editBase.tracking * m_zoom);
+    m_textEdit->setFont(f);
+    // Opaque backdrop so the layer's own rendering does not show through while editing.
+    const bool lightText = m_editBase.color.lightness() > 140;
+    m_textEdit->setStyleSheet(QString("QPlainTextEdit { color: %1; background: %2; selection-background-color: #2a82da; }")
+                                  .arg(m_editBase.color.name(), lightText ? "#303030" : "#f4f4f4"));
+    auto fit = [this] {
+        const QSizeF s = m_textEdit->document()->size();
+        m_textEdit->resize(int(std::max(60.0, s.width() + 24)), int(std::max<double>(m_editBase.sizePx * m_zoom * 1.3, s.height() + 4)));
+    };
+    connect(m_textEdit, &QPlainTextEdit::textChanged, this, fit);
+    fit();
+    m_textEdit->move(docToView().map(m_editBase.pos).toPoint());
+    m_textEdit->installEventFilter(this);
+    m_textEdit->show();
+    m_textEdit->setFocus();
+    m_textEdit->selectAll();
+}
+
+void CanvasView::endTextEdit(bool accept) {
+    if (!m_textEdit || m_endingEdit) return;
+    m_endingEdit = true;
+    QPlainTextEdit* ed = m_textEdit;
+    const QString text = ed->toPlainText();
+    m_textEdit = nullptr;
+    ed->removeEventFilter(this);
+    ed->hide();
+    ed->deleteLater();
+    if (accept && m_doc) {
+        TextContent c = m_editBase;
+        c.text = text;
+        if (!m_editLayer.isNull()) {
+            if (c.isEmpty()) m_doc->removeLayer(m_editLayer);          // emptied text layer disappears
+            else m_doc->setTextContent(m_editLayer, c, tr("Edit Text"));
+        } else if (!c.isEmpty()) {
+            QString name = text.trimmed().section('\n', 0, 0);
+            if (name.size() > 24) name = name.left(24) + "…";
+            m_session->addTextLayerAboveActive(c, name);
+        }
+    }
+    m_editLayer = {};
+    m_endingEdit = false;
+    setFocus();
+    update();
+}
+
+bool CanvasView::eventFilter(QObject* o, QEvent* e) {
+    if (o == m_textEdit) {
+        if (e->type() == QEvent::KeyPress) {
+            auto* k = static_cast<QKeyEvent*>(e);
+            if (k->key() == Qt::Key_Escape) { endTextEdit(false); return true; }
+            if ((k->key() == Qt::Key_Return || k->key() == Qt::Key_Enter) && (k->modifiers() & Qt::ControlModifier)) { endTextEdit(true); return true; }
+        } else if (e->type() == QEvent::FocusOut) {
+            QMetaObject::invokeMethod(this, [this] { endTextEdit(true); }, Qt::QueuedConnection);
+        }
+    }
+    return QWidget::eventFilter(o, e);
+}
 
 }  // namespace mynd

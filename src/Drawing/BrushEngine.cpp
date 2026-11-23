@@ -5,8 +5,14 @@
 
 namespace mynd {
 
+BrushStroke::BrushStroke(QImage* layer, const BrushSettings& s, const QColor& color, BrushMode mode)
+    : BrushStroke(layer, s, color, mode == BrushMode::Erase) {
+    m_mode = mode;
+}
+
 BrushStroke::BrushStroke(QImage* layer, const BrushSettings& s, const QColor& color, bool erase)
     : m_layer(layer), m_s(s), m_color(color), m_erase(erase) {
+    m_mode = erase ? BrushMode::Erase : BrushMode::Paint;
     m_original = layer->copy();
     m_buffer = QImage(layer->size(), QImage::Format_ARGB32_Premultiplied);
     m_buffer.fill(Qt::transparent);
@@ -82,6 +88,7 @@ void BrushStroke::lineTo(const QPointF& p, double pressure) {
 }
 
 void BrushStroke::stamp(const QPointF& c, double pressure) {
+    if (m_mode == BrushMode::Smudge) { smudgeDab(c, pressure); return; }
     const double diam = m_s.size * (m_s.pressureSize ? std::max(0.05, pressure) : 1.0);
     const double r = diam / 2.0;
     const double flow = m_s.flow * (m_s.pressureOpacity ? std::clamp(pressure, 0.0, 1.0) : 1.0);
@@ -137,6 +144,7 @@ void BrushStroke::stamp(const QPointF& c, double pressure) {
 }
 
 void BrushStroke::composite(const QRect& rect) {
+    if (m_mode == BrushMode::Smudge) return;  // smudge edits the layer directly
     const QRect r = rect.intersected(m_layer->rect());
     if (r.isEmpty()) return;
     const float op = float(m_s.opacity);
@@ -164,6 +172,57 @@ void BrushStroke::composite(const QRect& rect) {
             }
         }
     }
+}
+
+void BrushStroke::smudgeDab(const QPointF& c, double pressure) {
+    const double diam = m_s.size * (m_s.pressureSize ? std::max(0.05, pressure) : 1.0);
+    const double r = diam / 2.0, inner = r * m_s.hardness;
+    const QRect box = QRect(int(std::floor(c.x() - r - 1)), int(std::floor(c.y() - r - 1)),
+                            int(std::ceil(diam)) + 3, int(std::ceil(diam)) + 3).intersected(m_layer->rect());
+    if (box.isEmpty()) return;
+    const QPoint ci(int(std::lround(c.x())), int(std::lround(c.y())));
+    if (!m_pickValid) {                // first dab only picks up what is under the brush
+        m_pick = m_layer->copy(box);
+        m_pickBox = box;
+        m_prevCi = ci;
+        m_pickValid = true;
+        m_pending = m_pending.isNull() ? box : m_pending.united(box);
+        m_dirty = m_dirty.isNull() ? box : m_dirty.united(box);
+        return;
+    }
+    const QPoint shift = ci - m_prevCi;
+    QImage next(box.size(), QImage::Format_ARGB32_Premultiplied);
+    const float strength = float(std::clamp(m_s.flow, 0.0, 1.0));
+    for (int y = box.top(); y <= box.bottom(); ++y) {
+        auto* lrow = reinterpret_cast<quint32*>(m_layer->scanLine(y));
+        auto* nrow = reinterpret_cast<quint32*>(next.scanLine(y - box.top()));
+        for (int x = box.left(); x <= box.right(); ++x) {
+            const double dx = x + 0.5 - c.x(), dy = y + 0.5 - c.y();
+            const double d = std::sqrt(dx * dx + dy * dy);
+            double f = 1.0;
+            if (d > inner && r > inner) { f = std::clamp((r - d) / (r - inner), 0.0, 1.0); f = f * f * (3 - 2 * f); }
+            const double cov = std::clamp(r - d + 0.5, 0.0, 1.0) * f;
+            const quint32 dst = lrow[x];
+            const QPoint sp(x - shift.x(), y - shift.y());   // where this pixel's carried paint came from
+            const quint32 src = m_pickBox.contains(sp)
+                                    ? reinterpret_cast<const quint32*>(m_pick.constScanLine(sp.y() - m_pickBox.top()))[sp.x() - m_pickBox.left()]
+                                    : dst;
+            const float k = float(cov) * strength;
+            quint32 out = dst;
+            if (k > 0) {
+                auto ch = [&](int sh) { return quint32(float((dst >> sh) & 0xff) * (1 - k) + float((src >> sh) & 0xff) * k + 0.5f); };
+                const quint32 a = ch(24);
+                out = (a << 24) | (std::min(ch(16), a) << 16) | (std::min(ch(8), a) << 8) | std::min(ch(0), a);
+                lrow[x] = out;
+            }
+            nrow[x - box.left()] = out;
+        }
+    }
+    m_pick = next;
+    m_pickBox = box;
+    m_prevCi = ci;
+    m_pending = m_pending.isNull() ? box : m_pending.united(box);
+    m_dirty = m_dirty.isNull() ? box : m_dirty.united(box);
 }
 
 }  // namespace mynd

@@ -30,6 +30,7 @@ QJsonObject layerToJson(const Layer& l) {
     o["blend"] = blendModeKey(l.props.blend);
     if (l.type == LayerType::Raster) o["asset"] = rasterAssetName(l.id);
     if (l.type == LayerType::Vector) o["shapes"] = shapesToJson(l.shapes);
+    if (l.type == LayerType::Text) o["text"] = l.textContent.toJson();
     if (l.type == LayerType::Group) {
         QJsonArray ch;
         for (const auto& c : l.children) ch.append(layerToJson(*c));
@@ -218,6 +219,8 @@ LayerPtr layerFromJson(const QJsonObject& o, zip_t* z, const Document& doc, QStr
         }
     } else if (t == LayerType::Vector) {
         if (!shapesFromJson(o["shapes"].toArray(), l->shapes, err)) return nullptr;
+    } else if (t == LayerType::Text) {
+        if (!TextContent::fromJson(o["text"].toObject(), l->textContent, err)) return nullptr;
     } else {
         for (const auto& v : o["children"].toArray()) {
             LayerPtr c = layerFromJson(v.toObject(), z, doc, warnings, err, depth + 1);

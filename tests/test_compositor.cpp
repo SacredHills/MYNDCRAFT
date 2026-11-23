@@ -96,6 +96,23 @@ private slots:
         const QRect r(7, 3, 20, 15);
         QCOMPARE(Compositor::render(*d, r, {}), full.copy(r));
     }
+
+    void textLayerRendersAndHonorsOpacityAndVisibility() {
+        auto d = doc(Qt::white);
+        TextContent c; c.text = "MMMM"; c.sizePx = 24; c.color = Qt::black; c.pos = {2, 2};
+        const QUuid id = d->addTextLayer(c, "t");
+        auto dark = [](const QImage& i) { int n = 0; for (int y = 0; y < i.height(); ++y) for (int x = 0; x < i.width(); ++x) if (i.pixelColor(x, y).lightness() < 100) ++n; return n; };
+        QVERIFY(dark(Compositor::render(*d)) > 40);
+        LayerProps p = d->findLayer(id)->props;
+        p.visible = false; d->setLayerProps(id, p);
+        QCOMPARE(dark(Compositor::render(*d)), 0);
+        p.visible = true; p.opacity = 0.5; d->setLayerProps(id, p);
+        const QImage half = Compositor::render(*d);
+        QCOMPARE(dark(half), 0);                                       // 50% black on white is mid grey, never dark
+        bool anyGrey = false;
+        for (int y = 0; y < half.height() && !anyGrey; ++y) for (int x = 0; x < half.width(); ++x) { const int l = half.pixelColor(x, y).lightness(); if (l > 100 && l < 180) { anyGrey = true; break; } }
+        QVERIFY(anyGrey);
+    }
 };
 
 QTEST_MAIN(TestCompositor)

@@ -114,6 +114,42 @@ private slots:
         QCOMPARE(d.comp().width, kMaxCanvasDim);
         QCOMPARE(d.comp().height, 1);
     }
+
+    void textLayerEditsMergeAndUndo() {
+        auto d = make();
+        TextContent c; c.text = "Hello"; c.pos = {5, 5}; c.sizePx = 20; c.color = Qt::black;
+        const QUuid id = d->addTextLayer(c, "Hello");
+        QCOMPARE(d->findLayer(id)->type, LayerType::Text);
+        const int base = d->undoStack()->count();
+        TextContent a = c; a.sizePx = 24;  d->setTextContent(id, a, "Change Text Style", "text-style");
+        TextContent b = c; b.sizePx = 30;  d->setTextContent(id, b, "Change Text Style", "text-style");
+        QCOMPARE(d->undoStack()->count(), base + 1);                   // merged
+        QCOMPARE(d->findLayer(id)->textContent.sizePx, 30.0);
+        d->undoStack()->undo();
+        QCOMPARE(d->findLayer(id)->textContent.sizePx, 20.0);
+        d->undoStack()->redo();
+        QCOMPARE(d->findLayer(id)->textContent.sizePx, 30.0);
+        TextContent e = b; e.text = "Other";
+        d->setTextContent(id, e, "Edit Text");                         // no merge key => own step
+        QCOMPARE(d->undoStack()->count(), base + 2);
+    }
+    void importedImageIsCenteredAndScaledToFit() {
+        auto d = make();                                              // 64x48 canvas
+        QImage small(16, 8, QImage::Format_ARGB32); small.fill(Qt::red);
+        const QUuid a = d->addImageLayer(small, "small");
+        const Layer* la = d->findLayer(a);
+        QCOMPARE(qAlpha(la->raster.pixel(32, 24)), 255);              // centered, not scaled
+        QCOMPARE(qAlpha(la->raster.pixel(32 - 9, 24)), 0);
+        QImage big(256, 96, QImage::Format_ARGB32); big.fill(Qt::blue);
+        const QUuid b = d->addImageLayer(big, "big");
+        const Layer* lb = d->findLayer(b);
+        QCOMPARE(qAlpha(lb->raster.pixel(1, 24)), 255);               // scaled by 4 to 64x24 -> spans full width
+        QCOMPARE(qAlpha(lb->raster.pixel(32, 0)), 0);
+        QCOMPARE(qAlpha(lb->raster.pixel(32, 24)), 255);
+        d->undoStack()->undo();
+        QVERIFY(!d->findLayer(b));
+        QCOMPARE(d->undoStack()->undoText(), QString("Import Image"));
+    }
 };
 
 QTEST_MAIN(TestDocument)

@@ -38,6 +38,7 @@ QString layerTypeKey(LayerType t) {
     case LayerType::Raster: return "raster";
     case LayerType::Vector: return "vector";
     case LayerType::Group: return "group";
+    case LayerType::Text: return "text";
     }
     return "raster";
 }
@@ -45,6 +46,7 @@ bool layerTypeFromKey(const QString& k, LayerType& out) {
     if (k == "raster") out = LayerType::Raster;
     else if (k == "vector") out = LayerType::Vector;
     else if (k == "group") out = LayerType::Group;
+    else if (k == "text") out = LayerType::Text;
     else return false;
     return true;
 }
@@ -57,6 +59,7 @@ LayerPtr Layer::cloneExact() const {
     c->props = props;
     c->raster = raster.copy();
     c->shapes = shapes;
+    c->textContent = textContent;
     for (const auto& ch : children) {
         auto cc = ch->cloneExact();
         cc->parent = c.get();
@@ -70,6 +73,7 @@ LayerPtr Layer::cloneWithNewIds() const {
     c->props = props;
     c->raster = raster.copy();
     c->shapes = shapes;
+    c->textContent = textContent;
     for (auto& s : c->shapes) s.id = QUuid::createUuid();  // group ids stay consistent within the layer
     QHash<QUuid, QUuid> gmap;
     for (auto& s : c->shapes) {

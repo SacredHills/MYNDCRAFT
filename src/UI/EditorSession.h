@@ -5,12 +5,13 @@
 
 #include "Drawing/BrushEngine.h"
 #include "Scene/Document.h"
+#include "Scene/TextContent.h"
 
 namespace mynd {
 
 enum class ToolId {
     Select, DirectSelect, Brush, Pencil, Eraser, Pen, Line, Rectangle, Ellipse, Polygon,
-    Bucket, Gradient, Eyedropper, Hand, Zoom
+    Bucket, Gradient, Eyedropper, Hand, Zoom, Smudge, FreeTransform, Text
 };
 QString toolName(ToolId t);
 
@@ -40,6 +41,8 @@ public:
     // creates one above the active layer. Emits message() when it cannot edit.
     Layer* editableLayer(LayerType t, bool autoCreate);
     QUuid addLayerAboveActive(LayerType t, const QString& name);
+    QUuid addTextLayerAboveActive(const TextContent& c, const QString& name);
+    QUuid addImageLayerAboveActive(const QImage& img, const QString& name);
 
     const QSet<QUuid>& selectedShapes() const { return m_selected; }
     void setSelectedShapes(const QSet<QUuid>& s, bool pullStyle = true);
@@ -67,6 +70,10 @@ public:
     void setStyle(const VectorStyle& s, bool applyToSelection = true);
     VectorShape styled(VectorShape s) const;  // apply current style to a new shape
 
+    // Text defaults (used for new text). If the active layer is a text layer, changes are applied to it too.
+    const TextContent& textStyle() const { return m_textStyle; }
+    void applyTextStyle(const TextContent& style);
+
     int polygonSides = 5;
     int bucketTolerance = 24;
 
@@ -80,6 +87,7 @@ signals:
     void toolChanged(ToolId t);
     void colorsChanged();
     void styleChanged();
+    void textStyleChanged();
     void brushChanged();
     void viewTogglesChanged();
     void message(const QString& text);
@@ -90,7 +98,8 @@ private:
     QSet<QUuid> m_selected;
     ToolId m_tool = ToolId::Brush;
     QColor m_fg = Qt::black, m_bg = Qt::white;
-    BrushSettings m_brush, m_pencil, m_eraser;
+    BrushSettings m_brush, m_pencil, m_eraser, m_smudge;
+    TextContent m_textStyle;
     VectorStyle m_style;
 };
 

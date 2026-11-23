@@ -69,6 +69,13 @@ struct VectorShape {
     void transform(const QTransform& t);
     void translate(const QPointF& d);
 
+    // Nearest point on the outline: segment index (segment i runs from node i to node i+1) and
+    // curve parameter t in [0,1]; seg = -1 if the path has fewer than 2 nodes.
+    struct SegmentHit { int seg = -1; double t = 0; double distance = 1e300; QPointF point; };
+    SegmentHit nearestSegment(const QPointF& p) const;
+    // Splits segment `seg` at `t` without changing the curve's shape; returns the new node's index.
+    int insertNode(int seg, double t);
+
     QJsonObject toJson() const;
     static bool fromJson(const QJsonObject& o, VectorShape& out, QString* err);
     bool operator==(const VectorShape& o) const;

@@ -11,6 +11,10 @@
 #include <QTreeWidget>
 #include <QUndoView>
 #include <QWidget>
+#include <QFontComboBox>
+#include <QComboBox>
+#include <QPushButton>
+#include <QDoubleSpinBox>
 
 #include "UI/EditorSession.h"
 
@@ -85,6 +89,15 @@ private:
     QSpinBox *m_sides, *m_tol;
     QList<QWidget*> m_brushRows, m_hardnessRows;
     QWidget *m_pressureRow, *m_sidesRow, *m_tolRow;
+    QLabel* m_flowLabel = nullptr;
+    QList<QWidget*> m_textRows;
+    QFontComboBox* m_font = nullptr;
+    QDoubleSpinBox *m_tSize = nullptr, *m_tTrack = nullptr, *m_tBox = nullptr;
+    QCheckBox *m_tBold = nullptr, *m_tItalic = nullptr;
+    QComboBox* m_tAlign = nullptr;
+    QPushButton* m_tColor = nullptr;
+    void buildTextRows();
+    void refreshText();
     bool m_busy = false;
 };
 

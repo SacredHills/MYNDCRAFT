@@ -29,7 +29,8 @@ public:
         m_layer = l->id;
         BrushSettings b = m_s->brush(m_id);
         const bool erase = m_id == ToolId::Eraser || e.eraserEnd;
-        m_stroke = std::make_unique<BrushStroke>(&l->raster, b, m_s->foreground(), erase);
+        const BrushMode mode = m_id == ToolId::Smudge ? BrushMode::Smudge : erase ? BrushMode::Erase : BrushMode::Paint;
+        m_stroke = std::make_unique<BrushStroke>(&l->raster, b, m_s->foreground(), mode);
         m_erase = erase;
         m_stroke->begin(e.doc, e.pressure);
         m_s->doc()->emitContentChanged(m_stroke->lastUpdateRect());
@@ -47,7 +48,7 @@ public:
         const QRect dirty = m_stroke->dirtyRect();
         const QImage before = m_stroke->original();
         m_stroke.reset();
-        m_s->doc()->commitRasterPatch(m_layer, dirty, before, m_erase ? QObject::tr("Erase") : QObject::tr("Brush Stroke"));
+        m_s->doc()->commitRasterPatch(m_layer, dirty, before, m_id == ToolId::Smudge ? QObject::tr("Smudge") : m_erase ? QObject::tr("Erase") : QObject::tr("Brush Stroke"));
     }
     void cancel() override {
         if (!m_stroke) return;
@@ -130,7 +131,7 @@ public:
     void press(const PointerEvent& e) override {
         if (e.button != Qt::LeftButton) return;
         Layer* l = m_s->activeLayer();
-        if (!l || l->isGroup()) { emit_msg(QObject::tr("Select a raster or vector layer.")); return; }
+        if (!l || l->isGroup() || l->type == LayerType::Text) { emit_msg(QObject::tr("Select a raster or vector layer.")); return; }
         if (l->props.locked || !l->props.visible) { emit_msg(QObject::tr("The active layer is locked or hidden.")); return; }
         if (l->type == LayerType::Raster) {
             const QPoint p = e.doc.toPoint();
@@ -164,7 +165,7 @@ public:
     void press(const PointerEvent& e) override {
         if (e.button != Qt::LeftButton) return;
         Layer* l = m_s->activeLayer();
-        if (!l || l->isGroup() || l->props.locked || !l->props.visible) {
+        if (!l || l->isGroup() || l->type == LayerType::Text || l->props.locked || !l->props.visible) {
             emit m_s->message(QObject::tr("Select an unlocked, visible raster or vector layer.")); return;
         }
         m_a = m_b = e.doc; m_down = true;
@@ -246,8 +247,15 @@ public:
 
     void press(const PointerEvent& e) override {
         if (e.button != Qt::LeftButton) return;
+        if (Layer* tl = m_s->activeLayer(); tl && tl->type == LayerType::Text) {   // text layers move as a unit
+            if (tl->props.locked) { emit m_s->message(QObject::tr("The active layer is locked.")); return; }
+            if (tl->textContent.bounds().adjusted(-4, -4, 4, 4).contains(e.doc)) {
+                m_mode = MovingText; m_start = e.doc; m_textBefore = tl->textContent;
+            }
+            return;
+        }
         Layer* l = activeVector(m_s);
-        if (!l) { emit m_s->message(QObject::tr("Select a vector layer to select shapes.")); return; }
+        if (!l) { emit m_s->message(QObject::tr("Select a vector or text layer to move things.")); return; }
         const int hit = topmostHit(*l, e.doc, kHitPx / m_c->zoom());
         QSet<QUuid> sel = m_s->selectedShapes();
         if (hit >= 0) {
@@ -273,6 +281,15 @@ public:
         }
     }
     void move(const PointerEvent& e) override {
+        if (m_mode == MovingText) {
+            Layer* tl = m_s->activeLayer();
+            if (!tl || tl->type != LayerType::Text) return;
+            QPointF d = e.doc - m_start;
+            if (e.shift()) { if (std::abs(d.x()) > std::abs(d.y())) d.setY(0); else d.setX(0); }
+            tl->textContent.pos = m_c->snap(m_textBefore.pos + d);
+            m_s->doc()->emitContentChanged({});
+            return;
+        }
         Layer* l = activeVector(m_s);
         if (!l) return;
         if (m_mode == Moving) {
@@ -293,6 +310,18 @@ public:
         }
     }
     void release(const PointerEvent&) override {
+        if (m_mode == MovingText) {
+            Layer* tl = m_s->activeLayer();
+            if (tl && tl->type == LayerType::Text) {
+                const TextContent after = tl->textContent;
+                tl->textContent = m_textBefore;                       // let the command apply it so undo is exact
+                m_s->doc()->setTextContent(tl->id, after, QObject::tr("Move Text"));
+                m_s->doc()->emitContentChanged({});
+            }
+            m_mode = Idle;
+            m_c->update();
+            return;
+        }
         Layer* l = activeVector(m_s);
         if (m_mode == Moving && l) {
             ShapeList after = l->shapes;
@@ -303,6 +332,7 @@ public:
     }
     void cancel() override {
         if (m_mode == Moving) if (Layer* l = activeVector(m_s)) { l->shapes = m_before; m_s->doc()->emitContentChanged({}); }
+        if (m_mode == MovingText) if (Layer* l = m_s->activeLayer()) if (l->type == LayerType::Text) { l->textContent = m_textBefore; m_s->doc()->emitContentChanged({}); }
         m_mode = Idle;
     }
     bool keyPress(QKeyEvent* k) override {
@@ -337,9 +367,10 @@ public:
         }
     }
 private:
-    enum Mode { Idle, Moving, Marquee } m_mode = Idle;
+    enum Mode { Idle, Moving, Marquee, MovingText } m_mode = Idle;
     QPointF m_start, m_cur, m_anchor;
     ShapeList m_before;
+    TextContent m_textBefore;
     QSet<QUuid> m_base;
 };
 
@@ -402,6 +433,8 @@ public:
         for (int i = 0; i < s->nodes.size(); ++i) {
             if (QLineF(e.doc, s->nodes[i].pos).length() > kHitPx / m_c->zoom()) continue;
             const ShapeList before = l->shapes;
+            l->shapes.detach();                       // `s` pointed into the shared buffer; re-point after detaching
+            s = current(*l);
             PathNode& n = s->nodes[i];
             if (n.smooth || !n.in.isNull() || !n.out.isNull()) { n.in = n.out = {}; n.smooth = false; }
             else {
@@ -420,6 +453,19 @@ public:
             m_node = i;
             m_s->doc()->setShapes(l->id, l->shapes, QObject::tr("Toggle Smooth Point"), &before);
             return;
+        }
+        // Double-click on the outline (not on a point) adds a point there without changing the shape.
+        const VectorShape::SegmentHit hit = s->nearestSegment(e.doc);
+        if (hit.seg >= 0 && hit.distance <= kHitPx / m_c->zoom()) {
+            const ShapeList before = l->shapes;
+            l->shapes.detach();
+            s = current(*l);
+            const int idx = s->insertNode(hit.seg, hit.t);
+            if (idx >= 0) {
+                m_node = idx;
+                m_s->doc()->setShapes(l->id, l->shapes, QObject::tr("Add Point"), &before);
+                emit m_s->selectionChanged();
+            }
         }
     }
     bool keyPress(QKeyEvent* k) override {
@@ -651,6 +697,198 @@ private:
     QUuid m_layer;
 };
 
+// ============================================================ Free transform
+QRect contentBounds(const QImage& img) {
+    int x0 = img.width(), y0 = img.height(), x1 = -1, y1 = -1;
+    for (int y = 0; y < img.height(); ++y) {
+        const auto* row = reinterpret_cast<const quint32*>(img.constScanLine(y));
+        for (int x = 0; x < img.width(); ++x) {
+            if (row[x] >> 24) { x0 = std::min(x0, x); x1 = std::max(x1, x); y0 = std::min(y0, y); y1 = std::max(y1, y); }
+        }
+    }
+    return x1 < 0 ? QRect() : QRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
+}
+
+class FreeTransformTool : public Tool {
+public:
+    using Tool::Tool;
+    ToolId id() const override { return ToolId::FreeTransform; }
+    bool busy() const override { return m_h != None; }
+    QCursor cursor() const override { return Qt::ArrowCursor; }
+
+    void press(const PointerEvent& e) override {
+        if (e.button != Qt::LeftButton) return;
+        Layer* l = m_s->activeLayer();
+        const QRectF box = currentBox();
+        if (!l || box.isNull()) { emit m_s->message(QObject::tr("Select shapes on a vector layer, or a raster layer with content, to transform.")); return; }
+        if (l->props.locked) { emit m_s->message(QObject::tr("The active layer is locked.")); return; }
+        m_h = hitHandle(box, e.doc);
+        if (m_h == None) return;
+        m_box0 = box; m_start = e.doc;
+        if (l->type == LayerType::Vector) m_before = l->shapes;
+        else m_orig = l->raster.copy();
+    }
+    void move(const PointerEvent& e) override {
+        if (m_h == None) return;
+        Layer* l = m_s->activeLayer();
+        if (!l) return;
+        m_t = compute(e);
+        apply(l);
+        m_c->update();
+    }
+    void release(const PointerEvent& e) override {
+        if (m_h == None) return;
+        Layer* l = m_s->activeLayer();
+        if (l) {
+            m_t = compute(e);
+            apply(l);
+            if (l->type == LayerType::Vector) {
+                const ShapeList after = l->shapes;
+                if (after != m_before) m_s->doc()->setShapes(l->id, after, QObject::tr("Transform Shapes"), &m_before);
+            } else if (!m_t.isIdentity()) {
+                m_s->doc()->commitRasterPatch(l->id, l->raster.rect(), m_orig, QObject::tr("Transform Layer"));
+            }
+        }
+        m_h = None; m_orig = QImage(); m_cacheIndex = -2;
+        m_c->update();
+    }
+    void cancel() override {
+        if (m_h == None) return;
+        Layer* l = m_s->activeLayer();
+        if (l) { m_t = QTransform(); apply(l); }
+        m_h = None; m_orig = QImage();
+    }
+    bool keyPress(QKeyEvent* k) override {
+        if (k->key() == Qt::Key_Escape && m_h != None) { cancel(); return true; }
+        return false;
+    }
+    void paintOverlay(QPainter& p, const QTransform& t) override {
+        QRectF box = m_h != None ? m_box0 : currentBox();
+        if (box.isNull()) return;
+        QPolygonF poly = QPolygonF(box);
+        if (m_h != None) poly = m_t.map(poly);
+        const QPolygonF v = t.map(poly);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(QColor(20, 120, 255), 1));
+        p.drawPolygon(v);
+        // eight handles at corners and edge midpoints
+        QVector<QPointF> pts;
+        for (int i = 0; i < 4; ++i) { pts << v[i]; pts << (v[i] + v[(i + 1) % 4]) / 2; }
+        for (const QPointF& q : pts) drawSquare(p, q, 4, false);
+    }
+
+private:
+    enum Handle { None, Move, Rotate, TL, T, TR, R, BR, B, BL, L };
+    static QPointF handlePoint(const QRectF& b, Handle h) {
+        switch (h) {
+        case TL: return b.topLeft(); case T: return {b.center().x(), b.top()}; case TR: return b.topRight();
+        case R: return {b.right(), b.center().y()}; case BR: return b.bottomRight();
+        case B: return {b.center().x(), b.bottom()}; case BL: return b.bottomLeft();
+        case L: return {b.left(), b.center().y()}; default: return b.center();
+        }
+    }
+    static Handle opposite(Handle h) {
+        switch (h) { case TL: return BR; case T: return B; case TR: return BL; case R: return L;
+                     case BR: return TL; case B: return T; case BL: return TR; case L: return R; default: return h; }
+    }
+    Handle hitHandle(const QRectF& b, const QPointF& p) const {
+        const double tol = 7.0 / m_c->zoom();
+        for (Handle h : {TL, TR, BR, BL, T, R, B, L})
+            if (QLineF(p, handlePoint(b, h)).length() <= tol) return h;
+        if (b.adjusted(-tol / 2, -tol / 2, tol / 2, tol / 2).contains(p)) return Move;
+        const double rz = 26.0 / m_c->zoom();
+        if (b.adjusted(-rz, -rz, rz, rz).contains(p)) return Rotate;   // just outside the box
+        return None;
+    }
+    QTransform compute(const PointerEvent& e) const {
+        QTransform t;
+        if (m_h == Move) {
+            QPointF d = e.doc - m_start;
+            if (e.shift()) { if (std::abs(d.x()) > std::abs(d.y())) d.setY(0); else d.setX(0); }
+            t.translate(d.x(), d.y());
+        } else if (m_h == Rotate) {
+            const QPointF c = m_box0.center();
+            double deg = qRadiansToDegrees(std::atan2(e.doc.y() - c.y(), e.doc.x() - c.x()) - std::atan2(m_start.y() - c.y(), m_start.x() - c.x()));
+            if (e.shift()) deg = std::round(deg / 15.0) * 15.0;
+            t.translate(c.x(), c.y()); t.rotate(deg); t.translate(-c.x(), -c.y());
+        } else {
+            const QPointF h0 = handlePoint(m_box0, m_h);
+            const QPointF a = e.alt() ? m_box0.center() : handlePoint(m_box0, opposite(m_h));
+            double sx = 1, sy = 1;
+            const bool horiz = m_h != T && m_h != B, vert = m_h != L && m_h != R;
+            if (horiz && std::abs(h0.x() - a.x()) > 1e-6) sx = (e.doc.x() - a.x()) / (h0.x() - a.x());
+            if (vert && std::abs(h0.y() - a.y()) > 1e-6) sy = (e.doc.y() - a.y()) / (h0.y() - a.y());
+            if (e.shift()) {   // keep proportions
+                const double s = (horiz && vert) ? (std::abs(sx) > std::abs(sy) ? sx : sy) : (horiz ? sx : sy);
+                sx = sy = s;
+            }
+            if (std::abs(sx) < 0.01) sx = 0.01 * (sx < 0 ? -1 : 1);
+            if (std::abs(sy) < 0.01) sy = 0.01 * (sy < 0 ? -1 : 1);
+            t.translate(a.x(), a.y()); t.scale(sx, sy); t.translate(-a.x(), -a.y());
+        }
+        return t;
+    }
+    void apply(Layer* l) {
+        if (l->type == LayerType::Vector) {
+            ShapeList s = m_before;
+            for (auto& sh : s) if (m_s->selectedShapes().contains(sh.id)) sh.transform(m_t);
+            l->shapes = s;
+        } else {
+            l->raster.fill(Qt::transparent);
+            QPainter p(&l->raster);
+            p.setRenderHint(QPainter::SmoothPixmapTransform);
+            p.setTransform(m_t);
+            p.drawImage(0, 0, m_orig);
+        }
+        m_s->doc()->emitContentChanged({});
+    }
+    QRectF currentBox() {
+        Layer* l = m_s->activeLayer();
+        if (!l) return {};
+        if (l->type == LayerType::Vector) {
+            QRectF r;
+            for (const auto& s : l->shapes) if (m_s->selectedShapes().contains(s.id)) r = r.united(s.path().boundingRect());
+            return r;
+        }
+        if (l->type == LayerType::Raster && !l->raster.isNull()) {
+            const int idx = m_s->doc()->undoStack()->index();
+            if (m_cacheLayer != l->id || m_cacheIndex != idx) { m_cacheBox = contentBounds(l->raster); m_cacheLayer = l->id; m_cacheIndex = idx; }
+            return QRectF(m_cacheBox);
+        }
+        return {};
+    }
+    Handle m_h = None;
+    QRectF m_box0;
+    QPointF m_start;
+    QTransform m_t;
+    ShapeList m_before;
+    QImage m_orig;
+    QRect m_cacheBox; QUuid m_cacheLayer; int m_cacheIndex = -2;
+};
+
+// ============================================================ Text
+class TextTool : public Tool {
+public:
+    using Tool::Tool;
+    ToolId id() const override { return ToolId::Text; }
+    QCursor cursor() const override { return Qt::IBeamCursor; }
+    void press(const PointerEvent& e) override {
+        if (e.button != Qt::LeftButton) return;
+        Layer* hit = nullptr;
+        Document::forEachLayer(m_s->doc()->root(), [&](Layer* l) {
+            if (l->type == LayerType::Text && l->props.visible && l->textContent.bounds().adjusted(-4, -4, 4, 4).contains(e.doc)) hit = l;
+        });
+        if (hit) {
+            if (hit->props.locked) { emit m_s->message(QObject::tr("That text layer is locked.")); return; }
+            m_s->setActiveLayer(hit->id);
+            m_c->beginTextEdit(hit->id, hit->textContent.pos);
+        } else {
+            m_c->beginTextEdit({}, m_c->snap(e.doc));
+        }
+    }
+};
+
 }  // namespace
 
 std::unique_ptr<Tool> createTool(ToolId id, EditorSession* s, CanvasView* c) {
@@ -659,6 +897,7 @@ std::unique_ptr<Tool> createTool(ToolId id, EditorSession* s, CanvasView* c) {
     case ToolId::DirectSelect: return std::make_unique<DirectSelectTool>(s, c);
     case ToolId::Brush:
     case ToolId::Pencil:
+    case ToolId::Smudge:
     case ToolId::Eraser: return std::make_unique<BrushTool>(id, s, c);
     case ToolId::Pen: return std::make_unique<PenTool>(s, c);
     case ToolId::Line:
@@ -670,6 +909,8 @@ std::unique_ptr<Tool> createTool(ToolId id, EditorSession* s, CanvasView* c) {
     case ToolId::Eyedropper: return std::make_unique<EyedropperTool>(s, c);
     case ToolId::Hand: return std::make_unique<HandTool>(s, c);
     case ToolId::Zoom: return std::make_unique<ZoomTool>(s, c);
+    case ToolId::FreeTransform: return std::make_unique<FreeTransformTool>(s, c);
+    case ToolId::Text: return std::make_unique<TextTool>(s, c);
     }
     return nullptr;
 }

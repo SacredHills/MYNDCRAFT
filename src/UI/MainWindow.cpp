@@ -7,6 +7,10 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QImageReader>
+#include <QMimeData>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QInputDialog>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -25,6 +29,7 @@ const char* kFilter = "MyndCraft Project (*.studio)";
 
 MainWindow::MainWindow() {
     setObjectName("MainWindow");
+    setAcceptDrops(true);
     resize(1500, 900);
     m_session = new EditorSession(this);
     m_canvas = new CanvasView(m_session, this);
@@ -116,6 +121,50 @@ bool MainWindow::openFile(const QString& path, QString* error) {
     return true;
 }
 
+bool MainWindow::importImage(const QString& path, QString* error) {
+    if (!m_doc) { if (error) *error = tr("No document is open."); return false; }
+    QImageReader rd(path);
+    rd.setAutoTransform(true);
+    if (rd.size().isValid() && (rd.size().width() > 16384 || rd.size().height() > 16384)) {
+        if (error) *error = tr("Image is larger than 16384 px.");
+        return false;
+    }
+    const QImage img = rd.read();
+    if (img.isNull()) { if (error) *error = rd.errorString(); return false; }
+    m_session->addImageLayerAboveActive(img, QFileInfo(path).completeBaseName());
+    statusBar()->showMessage(tr("Imported %1").arg(QFileInfo(path).fileName()), 5000);
+    return true;
+}
+
+void MainWindow::actImport() {
+    QStringList exts;
+    for (const QByteArray& f : QImageReader::supportedImageFormats()) exts << "*." + QString::fromLatin1(f).toLower();
+    const QString path = QFileDialog::getOpenFileName(this, tr("Import Image"), QString(),
+                                                      tr("Images (%1);;All files (*)").arg(exts.join(' ')));
+    if (path.isEmpty()) return;
+    QString err;
+    if (!importImage(path, &err)) QMessageBox::warning(this, tr("Cannot import image"), err);
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent* e) {
+    if (e->mimeData()->hasUrls()) e->acceptProposedAction();
+}
+
+void MainWindow::dropEvent(QDropEvent* e) {
+    for (const QUrl& u : e->mimeData()->urls()) {
+        if (!u.isLocalFile()) continue;
+        const QString p = u.toLocalFile();
+        QString err;
+        if (p.endsWith(".studio", Qt::CaseInsensitive)) {
+            if (!maybeSave()) return;
+            if (!openFile(p, &err) && !m_doc) QMessageBox::warning(this, tr("Cannot open project"), err);
+        } else if (!importImage(p, &err)) {
+            QMessageBox::warning(this, tr("Cannot import image"), err);
+        }
+    }
+    e->acceptProposedAction();
+}
+
 bool MainWindow::saveFile(const QString& path, QString* error) {
     if (!m_doc) return false;
     QString err;
@@ -192,6 +241,7 @@ void MainWindow::buildActions() {
     aOpen = mk(tr("&Open…"), QKeySequence::Open);    connect(aOpen, &QAction::triggered, this, &MainWindow::actOpen);
     aSave = mk(tr("&Save"), QKeySequence::Save);     connect(aSave, &QAction::triggered, this, [this] { actSave(); });
     aSaveAs = mk(tr("Save &As…"), QKeySequence::SaveAs); connect(aSaveAs, &QAction::triggered, this, [this] { actSaveAs(); });
+    aImport = mk(tr("&Import Image…"), QKeySequence("Ctrl+Shift+I")); connect(aImport, &QAction::triggered, this, &MainWindow::actImport);
     aExport = mk(tr("&Export Image…"), QKeySequence("Ctrl+E")); connect(aExport, &QAction::triggered, this, &MainWindow::actExport);
     aPrefs = mk(tr("&Preferences…"), QKeySequence::Preferences); connect(aPrefs, &QAction::triggered, this, &MainWindow::actPreferences);
     aQuit = mk(tr("&Quit"), QKeySequence::Quit); connect(aQuit, &QAction::triggered, this, &QWidget::close);
@@ -296,7 +346,8 @@ void MainWindow::buildActions() {
     const T tools[] = {{ToolId::Select, "V"}, {ToolId::DirectSelect, "A"}, {ToolId::Brush, "B"}, {ToolId::Pencil, "N"},
                        {ToolId::Eraser, "E"}, {ToolId::Pen, "P"}, {ToolId::Line, "L"}, {ToolId::Rectangle, "M"},
                        {ToolId::Ellipse, "O"}, {ToolId::Polygon, "Y"}, {ToolId::Bucket, "K"}, {ToolId::Gradient, "G"},
-                       {ToolId::Eyedropper, "I"}, {ToolId::Hand, "H"}, {ToolId::Zoom, "Z"}};
+                       {ToolId::Eyedropper, "I"}, {ToolId::Hand, "H"}, {ToolId::Zoom, "Z"},
+                       {ToolId::Smudge, "S"}, {ToolId::FreeTransform, "Q"}, {ToolId::Text, "T"}};
     for (const T& t : tools) {
         auto* a = new QAction(icons::tool(t.id), toolName(t.id), this);
         a->setCheckable(true);
@@ -319,7 +370,7 @@ void MainWindow::buildActions() {
 
 void MainWindow::adjustBrushSize(double f) {
     const ToolId t = m_session->tool();
-    if (t != ToolId::Brush && t != ToolId::Pencil && t != ToolId::Eraser) return;
+    if (t != ToolId::Brush && t != ToolId::Pencil && t != ToolId::Eraser && t != ToolId::Smudge) return;
     BrushSettings& b = m_session->brushFor(t);
     const double ns = std::clamp(b.size * f + (f > 1 ? 1 : -1), 1.0, 500.0);
     b.size = ns;
@@ -349,8 +400,8 @@ void MainWindow::buildToolbars() {
     int i = 0;
     for (auto it = m_toolActions.begin(); it != m_toolActions.end(); ++it, ++i) {}
     const ToolId order[] = {ToolId::Select, ToolId::DirectSelect, ToolId::Hand, ToolId::Zoom, ToolId::Brush, ToolId::Pencil,
-                            ToolId::Eraser, ToolId::Bucket, ToolId::Gradient, ToolId::Eyedropper, ToolId::Pen, ToolId::Line,
-                            ToolId::Rectangle, ToolId::Ellipse, ToolId::Polygon};
+                            ToolId::Eraser, ToolId::Smudge, ToolId::Bucket, ToolId::Gradient, ToolId::Eyedropper, ToolId::Pen, ToolId::Line,
+                            ToolId::Rectangle, ToolId::Ellipse, ToolId::Polygon, ToolId::Text, ToolId::FreeTransform};
     for (ToolId id : order) {
         tb->addAction(m_toolActions[id]);
         if (id == ToolId::Zoom || id == ToolId::Eyedropper) tb->addSeparator();
@@ -390,7 +441,7 @@ void MainWindow::buildMenus() {
     file->addSeparator();
     file->addActions({aSave, aSaveAs});
     file->addSeparator();
-    file->addActions({aExport});
+    file->addActions({aImport, aExport});
     file->addSeparator();
     file->addActions({aPrefs, aQuit});
     updateRecentMenu();

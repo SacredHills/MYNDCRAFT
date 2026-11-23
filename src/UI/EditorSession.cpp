@@ -19,6 +19,9 @@ QString toolName(ToolId t) {
     case ToolId::Eyedropper: return "Eyedropper";
     case ToolId::Hand: return "Hand";
     case ToolId::Zoom: return "Zoom";
+    case ToolId::Smudge: return "Smudge";
+    case ToolId::FreeTransform: return "Free Transform";
+    case ToolId::Text: return "Text";
     }
     return {};
 }
@@ -30,6 +33,7 @@ EditorSession::EditorSession(QObject* parent) : QObject(parent) {
     m_pencil.pressureSize = false; m_pencil.spacing = 0.2;
     m_eraser = BrushSettings{};
     m_eraser.size = 40; m_eraser.hardness = 0.9;
+    m_smudge.size = 30; m_smudge.hardness = 0.6; m_smudge.flow = 0.6; m_smudge.spacing = 0.08; m_smudge.pressureSize = false;
 }
 
 void EditorSession::setDocument(Document* d) {
@@ -79,6 +83,46 @@ QUuid EditorSession::addLayerAboveActive(LayerType t, const QString& name) {
     const QUuid id = m_doc->addLayer(t, name, parent, idx);
     setActiveLayer(id);
     return id;
+}
+
+QUuid EditorSession::addTextLayerAboveActive(const TextContent& content, const QString& name) {
+    if (!m_doc) return {};
+    QUuid parent; int idx = -1;
+    if (Layer* a = activeLayer()) {
+        if (a->isGroup()) parent = a->id;
+        else { parent = a->parent && a->parent != m_doc->root() ? a->parent->id : QUuid(); idx = m_doc->indexInParent(a) + 1; }
+    }
+    const QUuid id = m_doc->addTextLayer(content, name, parent, idx);
+    setActiveLayer(id);
+    return id;
+}
+
+QUuid EditorSession::addImageLayerAboveActive(const QImage& img, const QString& name) {
+    if (!m_doc) return {};
+    QUuid parent; int idx = -1;
+    if (Layer* a = activeLayer()) {
+        if (a->isGroup()) parent = a->id;
+        else { parent = a->parent && a->parent != m_doc->root() ? a->parent->id : QUuid(); idx = m_doc->indexInParent(a) + 1; }
+    }
+    const QUuid id = m_doc->addImageLayer(img, name, parent, idx);
+    if (!id.isNull()) setActiveLayer(id);
+    return id;
+}
+
+void EditorSession::applyTextStyle(const TextContent& style) {
+    const TextContent old = m_textStyle;
+    m_textStyle = style;
+    m_textStyle.text.clear();
+    m_textStyle.pos = {};
+    Layer* l = activeLayer();
+    if (m_doc && l && l->type == LayerType::Text && !l->props.locked) {
+        TextContent c = l->textContent;
+        c.family = style.family; c.sizePx = style.sizePx; c.bold = style.bold; c.italic = style.italic;
+        c.color = style.color; c.tracking = style.tracking; c.align = style.align; c.boxWidth = style.boxWidth;
+        m_doc->setTextContent(l->id, c, tr("Change Text Style"), "text-style");
+    }
+    Q_UNUSED(old);
+    emit textStyleChanged();
 }
 
 Layer* EditorSession::editableLayer(LayerType t, bool autoCreate) {
@@ -138,6 +182,7 @@ void EditorSession::swapColors() { std::swap(m_fg, m_bg); emit colorsChanged(); 
 BrushSettings& EditorSession::brushFor(ToolId t) {
     if (t == ToolId::Pencil) return m_pencil;
     if (t == ToolId::Eraser) return m_eraser;
+    if (t == ToolId::Smudge) return m_smudge;
     return m_brush;
 }
 BrushSettings EditorSession::brush(ToolId t) const { return const_cast<EditorSession*>(this)->brushFor(t); }

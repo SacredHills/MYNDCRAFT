@@ -72,6 +72,12 @@ public:
     void setLayerProps(const QUuid& id, const LayerProps& p, const QString& mergeKey = {});
     void setShapes(const QUuid& layerId, const ShapeList& after, const QString& text,
                    const ShapeList* before = nullptr);
+    QUuid addTextLayer(const TextContent& content, const QString& name, QUuid parentId = {}, int index = -1);
+    // Replaces the content of a text layer. Edits with the same non-empty mergeKey collapse into one undo step.
+    void setTextContent(const QUuid& layerId, const TextContent& after, const QString& text,
+                        const QString& mergeKey = {});
+    // Adds a raster layer holding `image` (scaled down to fit the canvas if larger, centered).
+    QUuid addImageLayer(const QImage& image, const QString& name, QUuid parentId = {}, int index = -1);
     // The pixels of `layer` inside `rect` were already modified in place; record for undo.
     void commitRasterPatch(const QUuid& layerId, const QRect& rect, const QImage& before,
                            const QString& text);

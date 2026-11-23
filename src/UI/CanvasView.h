@@ -1,5 +1,6 @@
 #pragma once
 #include <QImage>
+#include <QPlainTextEdit>
 #include <QWidget>
 #include <memory>
 
@@ -41,6 +42,11 @@ public:
     QImage compositeImage() const { return m_cache; }
     void rebuildCache();
 
+    // Inline text editing (used by the Text tool). layerId null = create a new text layer at docPos.
+    void beginTextEdit(const QUuid& layerId, const QPointF& docPos);
+    void endTextEdit(bool accept);
+    QPlainTextEdit* textEditor() const { return m_textEdit; }
+
 signals:
     void viewChanged();
     void cursorMoved(const QPointF& docPos);
@@ -57,6 +63,7 @@ protected:
     void keyPressEvent(QKeyEvent*) override;
     void keyReleaseEvent(QKeyEvent*) override;
     void leaveEvent(QEvent*) override;
+    bool eventFilter(QObject* o, QEvent* e) override;
 
 private:
     void pointer(QEvent::Type type, const QPointF& viewPos, Qt::MouseButton button,
@@ -86,6 +93,10 @@ private:
     int m_dragGuide = -1;    // index of guide being dragged, -1 none
     bool m_creatingGuide = false;
     Qt::Orientation m_newGuideOrient = Qt::Horizontal;
+    QPlainTextEdit* m_textEdit = nullptr;
+    QUuid m_editLayer;
+    TextContent m_editBase;
+    bool m_endingEdit = false;
     static constexpr int kRuler = 20;
 };
 

@@ -92,6 +92,66 @@ void VectorShape::translate(const QPointF& d) {
     fill.gradEnd += d;
 }
 
+namespace {
+QPointF lerp(const QPointF& a, const QPointF& b, double t) { return a + (b - a) * t; }
+QPointF bez(const QPointF& p0, const QPointF& p1, const QPointF& p2, const QPointF& p3, double t) {
+    const QPointF a = lerp(p0, p1, t), b = lerp(p1, p2, t), c = lerp(p2, p3, t);
+    return lerp(lerp(a, b, t), lerp(b, c, t), t);
+}
+}  // namespace
+
+VectorShape::SegmentHit VectorShape::nearestSegment(const QPointF& p) const {
+    SegmentHit best;
+    const int n = nodes.size();
+    if (n < 2) return best;
+    const int segs = closed ? n : n - 1;
+    constexpr int kSteps = 64;
+    for (int i = 0; i < segs; ++i) {
+        const PathNode& a = nodes[i];
+        const PathNode& b = nodes[(i + 1) % n];
+        const QPointF p0 = a.pos, p1 = a.pos + a.out, p2 = b.pos + b.in, p3 = b.pos;
+        auto dist = [&](double t) { return QLineF(bez(p0, p1, p2, p3, t), p).length(); };
+        double bt = 0, bd = dist(0);
+        for (int s = 1; s <= kSteps; ++s) {
+            const double t = double(s) / kSteps, d = dist(t);
+            if (d < bd) { bd = d; bt = t; }
+        }
+        double lo = std::max(0.0, bt - 1.0 / kSteps), hi = std::min(1.0, bt + 1.0 / kSteps);  // refine
+        for (int it = 0; it < 24; ++it) {
+            const double m1 = lo + (hi - lo) / 3, m2 = hi - (hi - lo) / 3;
+            if (dist(m1) < dist(m2)) hi = m2; else lo = m1;
+        }
+        const double rt = (lo + hi) / 2, rd = dist(rt);
+        if (rd < bd) { bd = rd; bt = rt; }
+        if (bd < best.distance) { best.seg = i; best.t = bt; best.distance = bd; best.point = bez(p0, p1, p2, p3, bt); }
+    }
+    return best;
+}
+
+int VectorShape::insertNode(int seg, double t) {
+    const int n = nodes.size();
+    if (seg < 0 || seg >= (closed ? n : n - 1)) return -1;
+    t = std::clamp(t, 0.0, 1.0);
+    PathNode& a = nodes[seg];
+    PathNode& b = nodes[(seg + 1) % n];
+    PathNode mid;
+    if (a.out.isNull() && b.in.isNull()) {         // straight segment
+        mid.pos = lerp(a.pos, b.pos, t);
+    } else {                                      // de Casteljau split keeps the curve identical
+        const QPointF p0 = a.pos, p1 = a.pos + a.out, p2 = b.pos + b.in, p3 = b.pos;
+        const QPointF q0 = lerp(p0, p1, t), q1 = lerp(p1, p2, t), q2 = lerp(p2, p3, t);
+        const QPointF r0 = lerp(q0, q1, t), r1 = lerp(q1, q2, t);
+        mid.pos = lerp(r0, r1, t);
+        mid.in = r0 - mid.pos;
+        mid.out = r1 - mid.pos;
+        mid.smooth = true;
+        a.out = q0 - p0;
+        b.in = q2 - p3;
+    }
+    nodes.insert(seg + 1, mid);
+    return seg + 1;
+}
+
 bool VectorShape::operator==(const VectorShape& o) const {
     return id == o.id && groupId == o.groupId && name == o.name && nodes == o.nodes &&
            closed == o.closed && fill == o.fill && stroke == o.stroke;

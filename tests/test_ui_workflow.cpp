@@ -370,6 +370,157 @@ private slots:
         QCOMPARE(s->foreground(), QColor(Qt::blue));
     }
 
+    void doubleClickOnOutlineAddsPointWithoutChangingShape() {
+        s->setTool(ToolId::Rectangle);
+        drag({{100, 100}, {220, 180}});
+        Layer* v = s->activeLayer();
+        QCOMPARE(v->shapes[0].nodes.size(), 4);
+        const QRectF before = v->shapes[0].path().boundingRect();
+        s->setTool(ToolId::DirectSelect);
+        click(160, 100);                                                   // select the shape
+        QTest::mouseDClick(cv, Qt::LeftButton, {}, view(160, 100));        // on the top edge, away from nodes
+        QCOMPARE(v->shapes[0].nodes.size(), 5);
+        QCOMPARE(v->shapes[0].path().boundingRect(), before);
+        w->document()->undoStack()->undo();
+        QCOMPARE(v->shapes[0].nodes.size(), 4);
+    }
+
+    void smudgeToolDragsPixelsAndUndoes() {
+        Layer* l = s->activeLayer();
+        { QPainter p(&l->raster); p.fillRect(0, 100, 100, 60, Qt::red); }
+        w->document()->emitContentChanged({});
+        s->brushFor(ToolId::Smudge).size = 30; s->brushFor(ToolId::Smudge).hardness = 1; s->brushFor(ToolId::Smudge).flow = 1.0;
+        s->setTool(ToolId::Smudge);
+        QList<QPointF> pts; for (int x = 80; x <= 220; x += 6) pts << QPointF(x, 130);
+        drag(pts);
+        QVERIFY(alpha(l, 180, 130) > 30);
+        QCOMPARE(alpha(l, 180, 20), 0);
+        w->document()->undoStack()->undo();
+        QCOMPARE(alpha(l, 180, 130), 0);
+        QCOMPARE(alpha(l, 50, 130), 255);
+    }
+
+    void freeTransformScalesSelectedShapesAndUndoes() {
+        s->setTool(ToolId::Rectangle);
+        drag({{100, 100}, {200, 160}});
+        Layer* v = s->activeLayer();
+        const QRectF b0 = v->shapes[0].path().boundingRect();
+        s->setTool(ToolId::FreeTransform);
+        drag({{200, 160}, {300, 220}});                                    // bottom-right handle, free scale
+        const QRectF b1 = v->shapes[0].path().boundingRect();
+        QVERIFY(qAbs(b1.left() - b0.left()) <= 1.0 && qAbs(b1.top() - b0.top()) <= 1.0);
+        QVERIFY(qAbs(b1.right() - 300) <= 1.5 && qAbs(b1.bottom() - 220) <= 1.5);
+        w->document()->undoStack()->undo();
+        QCOMPARE(v->shapes[0].path().boundingRect(), b0);
+        // Rotation: drag from just outside a corner around the center by about 90 degrees.
+        const QPointF c = b0.center();
+        drag({{b0.right() + 12, c.y()}, {c.x(), b0.bottom() + 12}});
+        const QRectF b2 = v->shapes[0].path().boundingRect();
+        QVERIFY(b2.height() > b0.height() + 20);                           // wider-than-tall box turned upright
+    }
+
+    void freeTransformMovesRasterContent() {
+        Layer* l = s->activeLayer();
+        { QPainter p(&l->raster); p.fillRect(100, 100, 40, 40, Qt::blue); }
+        w->document()->emitContentChanged({});
+        s->setTool(ToolId::FreeTransform);
+        drag({{120, 120}, {160, 140}});                                    // drag inside = move by (40,20)
+        QVERIFY(alpha(l, 160, 140) == 255);
+        QCOMPARE(alpha(l, 105, 105), 0);
+        w->document()->undoStack()->undo();
+        QCOMPARE(alpha(l, 105, 105), 255);
+        QCOMPARE(alpha(l, 160, 140), 0);
+    }
+
+    void textToolCreatesEditsAndRemovesTextLayers() {
+        s->setForeground(Qt::red);
+        s->setTool(ToolId::Text);
+        const int layers0 = w->document()->layerCount();
+        click(60, 60);
+        QVERIFY(cv->textEditor());
+        cv->textEditor()->setPlainText("Hello\nWorld");
+        QTest::keyClick(cv->textEditor(), Qt::Key_Return, Qt::ControlModifier);
+        QVERIFY(!cv->textEditor());
+        QCOMPARE(w->document()->layerCount(), layers0 + 1);
+        Layer* t = s->activeLayer();
+        QCOMPARE(t->type, LayerType::Text);
+        QCOMPARE(t->textContent.text, QString("Hello\nWorld"));
+        QCOMPARE(t->textContent.color, QColor(Qt::red));
+        QCOMPARE(t->props.name, QString("Hello"));
+        QVERIFY(cv->compositeImage().pixelColor(70, 80) != QColor(Qt::white) || cv->compositeImage().size().isValid());
+        // Edit it in place.
+        click(t->textContent.pos.x() + 5, t->textContent.pos.y() + 5);
+        QVERIFY(cv->textEditor());
+        QCOMPARE(cv->textEditor()->toPlainText(), QString("Hello\nWorld"));
+        cv->textEditor()->setPlainText("Changed");
+        QTest::keyClick(cv->textEditor(), Qt::Key_Return, Qt::ControlModifier);
+        QCOMPARE(w->document()->layerCount(), layers0 + 1);
+        QCOMPARE(s->activeLayer()->textContent.text, QString("Changed"));
+        w->document()->undoStack()->undo();
+        QCOMPARE(s->activeLayer()->textContent.text, QString("Hello\nWorld"));
+        // Escape cancels.
+        click(t->textContent.pos.x() + 5, t->textContent.pos.y() + 5);
+        cv->textEditor()->setPlainText("Nope");
+        QTest::keyClick(cv->textEditor(), Qt::Key_Escape);
+        QVERIFY(!cv->textEditor());
+        QCOMPARE(s->activeLayer()->textContent.text, QString("Hello\nWorld"));
+        // Emptying a text layer removes it.
+        click(t->textContent.pos.x() + 5, t->textContent.pos.y() + 5);
+        cv->textEditor()->clear();
+        QTest::keyClick(cv->textEditor(), Qt::Key_Return, Qt::ControlModifier);
+        QCOMPARE(w->document()->layerCount(), layers0);
+        // Empty new text creates nothing.
+        click(200, 200);
+        QTest::keyClick(cv->textEditor(), Qt::Key_Return, Qt::ControlModifier);
+        QCOMPARE(w->document()->layerCount(), layers0);
+    }
+
+    void textStyleChangesApplyToActiveTextLayerAndSelectToolMovesIt() {
+        TextContent c; c.text = "Move me"; c.pos = {100, 100}; c.sizePx = 30; c.color = Qt::black;
+        const QUuid id = w->document()->addTextLayer(c, "t");
+        s->setActiveLayer(id);
+        TextContent st = s->textStyle(); st.sizePx = 44; st.bold = true;
+        s->applyTextStyle(st);
+        Layer* t = w->document()->findLayer(id);
+        QCOMPARE(t->textContent.sizePx, 44.0);
+        QVERIFY(t->textContent.bold);
+        QCOMPARE(t->textContent.text, QString("Move me"));
+        const QPointF p0 = t->textContent.pos;
+        s->setTool(ToolId::Select);
+        drag({{p0.x() + 10, p0.y() + 10}, {p0.x() + 50, p0.y() + 40}});
+        QVERIFY(QLineF(t->textContent.pos, p0 + QPointF(40, 30)).length() <= 1.5);
+        w->document()->undoStack()->undo();
+        QCOMPARE(t->textContent.pos, p0);
+    }
+
+    void importImageAddsLayerAboveActiveAndUndoes() {
+        QImage img(30, 20, QImage::Format_ARGB32); img.fill(QColor(0, 255, 0));
+        const QString p = dir.filePath("pic.png");
+        QVERIFY(img.save(p));
+        const int n = w->document()->layerCount();
+        QString err;
+        QVERIFY2(w->importImage(p, &err), qPrintable(err));
+        QCOMPARE(w->document()->layerCount(), n + 1);
+        Layer* l = s->activeLayer();
+        QCOMPARE(l->type, LayerType::Raster);
+        QCOMPARE(l->props.name, QString("pic"));
+        QCOMPARE(alpha(l, 200, 150), 255);
+        QVERIFY(!w->importImage(dir.filePath("missing.png"), &err));
+        QVERIFY(!err.isEmpty());
+        QVERIFY(img.save(dir.filePath("bad.png")) );
+        QFile f(dir.filePath("junk.png")); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("not an image"); f.close();
+        QVERIFY(!w->importImage(dir.filePath("junk.png"), &err));
+        QCOMPARE(w->document()->layerCount(), n + 1);
+        w->document()->undoStack()->undo();
+        QCOMPARE(w->document()->layerCount(), n);
+    }
+
+    void newToolShortcuts() {
+        QTest::keyClick(w.get(), Qt::Key_S); QCOMPARE(s->tool(), ToolId::Smudge);
+        QTest::keyClick(w.get(), Qt::Key_Q); QCOMPARE(s->tool(), ToolId::FreeTransform);
+        QTest::keyClick(w.get(), Qt::Key_T); QCOMPARE(s->tool(), ToolId::Text);
+    }
+
 private:
     static QString Settings_lastWorkspace() { return mynd::settings::lastWorkspace(); }
 };

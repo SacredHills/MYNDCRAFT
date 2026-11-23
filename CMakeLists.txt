@@ -35,6 +35,7 @@ add_library(myndcore STATIC
   src/Core/ProjectIO.cpp
   src/Core/Autosave.cpp
   src/Scene/VectorShape.cpp
+  src/Scene/TextContent.cpp
   src/Scene/Layer.cpp
   src/Scene/Document.cpp
   src/Drawing/BrushEngine.cpp

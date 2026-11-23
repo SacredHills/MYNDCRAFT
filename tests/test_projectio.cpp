@@ -201,6 +201,24 @@ private slots:
         settings::removeWorkspace("Mine");
         QVERIFY(!settings::workspaceNames().contains("Mine"));
     }
+
+    void textLayerRoundTrips() {
+        CompositionSettings cs; cs.width = 100; cs.height = 60;
+        Document d(cs);
+        TextContent c; c.text = "Line one\nLine two"; c.family = "DejaVu Sans"; c.sizePx = 31; c.bold = true; c.italic = true;
+        c.color = QColor(10, 200, 30, 180); c.tracking = 1.5; c.align = TextAlign::Center; c.pos = {12.5, 7}; c.boxWidth = 80;
+        const QUuid id = d.addTextLayer(c, "My text");
+        QString err;
+        QVERIFY2(ProjectIO::save(d, path("t.studio"), &err), qPrintable(err));
+        LoadResult r = ProjectIO::load(path("t.studio"));
+        QVERIFY2(r.doc, qPrintable(r.error));
+        QVERIFY(r.warnings.isEmpty());
+        const Layer* l = r.doc->findLayer(id);
+        QVERIFY(l);
+        QCOMPARE(l->type, LayerType::Text);
+        QVERIFY(l->textContent == c);
+        QCOMPARE(l->props.name, QString("My text"));
+    }
 };
 
 QTEST_MAIN(TestProjectIO)

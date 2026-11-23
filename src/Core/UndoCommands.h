@@ -66,4 +66,16 @@ private:
     Document* m_doc; QUuid m_layer; ShapeList m_before, m_after;
 };
 
+class TextStateCommand : public QUndoCommand {
+public:
+    TextStateCommand(Document* d, const QUuid& layer, const TextContent& before, const TextContent& after,
+                     const QString& text, const QString& mergeKey);
+    void undo() override;
+    void redo() override;
+    int id() const override { return m_mergeKey.isEmpty() ? -1 : 1002; }
+    bool mergeWith(const QUndoCommand* other) override;
+private:
+    Document* m_doc; QUuid m_layer; TextContent m_before, m_after; QString m_mergeKey;
+};
+
 }  // namespace mynd

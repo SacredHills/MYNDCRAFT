@@ -4,6 +4,8 @@
 #include <QComboBox>
 #include <QLabel>
 #include <QMainWindow>
+class QDragEnterEvent;
+class QDropEvent;
 #include <memory>
 
 #include "Core/Autosave.h"
@@ -31,6 +33,7 @@ public:
     // Non-interactive API (used by menu handlers after dialogs, by tests and by command line).
     void newDocument(const CompositionSettings& s, bool withLayer = true);
     bool openFile(const QString& path, QString* error = nullptr);
+    bool importImage(const QString& path, QString* error = nullptr);
     bool saveFile(const QString& path, QString* error = nullptr);
     bool exportImage(const QString& path, QString* error = nullptr);
     void adoptDocument(std::unique_ptr<Document> d);
@@ -40,6 +43,8 @@ public:
 
 protected:
     void closeEvent(QCloseEvent*) override;
+    void dragEnterEvent(QDragEnterEvent*) override;
+    void dropEvent(QDropEvent*) override;
 
 private:
     void buildActions();
@@ -54,6 +59,7 @@ private:
     bool actSave();
     bool actSaveAs();
     void actExport();
+    void actImport();
     void actPreferences();
     void actAbout();
     void rebuildWorkspaceMenu();
@@ -70,7 +76,7 @@ private:
     QMap<QString, QDockWidget*> m_docks;
     QActionGroup* m_toolGroup;
     QMap<ToolId, QAction*> m_toolActions;
-    QAction *aNew, *aOpen, *aSave, *aSaveAs, *aExport, *aPrefs, *aQuit;
+    QAction *aNew, *aOpen, *aSave, *aSaveAs, *aExport, *aImport, *aPrefs, *aQuit;
     QAction *aUndo, *aRedo, *aSelAll, *aDeselect, *aDeleteSel;
     QAction *aZoomIn, *aZoomOut, *aFit, *aActual, *aRotL, *aRotR, *aRotReset, *aGrid, *aRulers, *aGuides, *aSnap, *aClearGuides;
     QAction *aGroupShapes, *aUngroupShapes, *aFront, *aForward, *aBackward, *aBack;

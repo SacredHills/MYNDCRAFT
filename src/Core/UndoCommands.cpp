@@ -99,4 +99,21 @@ void VectorStateCommand::undo() {
     if (Layer* l = m_doc->findLayer(m_layer)) { l->shapes = m_before; m_doc->emitContentChanged({}); }
 }
 
+// ---------------- Text ----------------
+TextStateCommand::TextStateCommand(Document* d, const QUuid& layer, const TextContent& b, const TextContent& a,
+                                   const QString& text, const QString& key)
+    : m_doc(d), m_layer(layer), m_before(b), m_after(a), m_mergeKey(key) { setText(text); }
+void TextStateCommand::redo() {
+    if (Layer* l = m_doc->findLayer(m_layer)) { l->textContent = m_after; m_doc->emitContentChanged({}); }
+}
+void TextStateCommand::undo() {
+    if (Layer* l = m_doc->findLayer(m_layer)) { l->textContent = m_before; m_doc->emitContentChanged({}); }
+}
+bool TextStateCommand::mergeWith(const QUndoCommand* other) {
+    auto* o = dynamic_cast<const TextStateCommand*>(other);
+    if (!o || o->m_layer != m_layer || o->m_mergeKey != m_mergeKey || m_mergeKey.isEmpty()) return false;
+    m_after = o->m_after;
+    return true;
+}
+
 }  // namespace mynd

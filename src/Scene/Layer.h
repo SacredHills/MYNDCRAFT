@@ -5,11 +5,12 @@
 #include <memory>
 #include <vector>
 
+#include "Scene/TextContent.h"
 #include "Scene/VectorShape.h"
 
 namespace mynd {
 
-enum class LayerType { Raster, Vector, Group };
+enum class LayerType { Raster, Vector, Group, Text };
 enum class BlendMode { Normal, Multiply, Screen, Overlay, Darken, Lighten, Add, Difference };
 
 QString blendModeName(BlendMode m);
@@ -44,6 +45,7 @@ public:
     LayerProps props;
     QImage raster;          // Raster layers: canvas-sized ARGB32_Premultiplied
     ShapeList shapes;       // Vector layers: bottom -> top
+    TextContent textContent; // Text layers
     std::vector<LayerPtr> children;  // Group layers
     Layer* parent = nullptr;         // maintained by Document
 

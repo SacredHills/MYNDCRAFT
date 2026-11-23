@@ -392,8 +392,71 @@ ToolOptionsPanel::ToolOptionsPanel(EditorSession* s, QWidget* parent) : QWidget(
     m_tolRow = m_form->itemAt(m_form->rowCount() - 1, QFormLayout::FieldRole)->widget();
     connect(m_tol, &QSpinBox::valueChanged, this, [this](int v) { m_s->bucketTolerance = v; });
 
+    if (m_brushRows.size() > 2) m_flowLabel = qobject_cast<QLabel*>(m_form->labelForField(m_brushRows[2]));
+    buildTextRows();
+
     connect(m_s, &EditorSession::toolChanged, this, &ToolOptionsPanel::refresh);
+    connect(m_s, &EditorSession::textStyleChanged, this, &ToolOptionsPanel::refreshText);
+    connect(m_s, &EditorSession::activeLayerChanged, this, &ToolOptionsPanel::refresh);
     refresh();
+}
+
+void ToolOptionsPanel::buildTextRows() {
+    auto addRow = [&](const QString& label, QWidget* w) {
+        m_form->addRow(label, w);
+        m_textRows.append(w);
+    };
+    m_font = new QFontComboBox;
+    addRow(tr("Font"), m_font);
+    m_tSize = new QDoubleSpinBox; m_tSize->setRange(1, 2000); m_tSize->setDecimals(0); m_tSize->setSuffix(" px");
+    addRow(tr("Text size"), m_tSize);
+    auto* styleRow = new QWidget; auto* sl = new QHBoxLayout(styleRow); sl->setContentsMargins(0, 0, 0, 0);
+    m_tBold = new QCheckBox(tr("Bold")); m_tItalic = new QCheckBox(tr("Italic"));
+    sl->addWidget(m_tBold); sl->addWidget(m_tItalic); sl->addStretch();
+    addRow(tr("Style"), styleRow);
+    m_tAlign = new QComboBox; m_tAlign->addItems({tr("Left"), tr("Center"), tr("Right")});
+    addRow(tr("Align"), m_tAlign);
+    m_tTrack = new QDoubleSpinBox; m_tTrack->setRange(-50, 200); m_tTrack->setDecimals(1); m_tTrack->setSuffix(" px");
+    addRow(tr("Tracking"), m_tTrack);
+    m_tBox = new QDoubleSpinBox; m_tBox->setRange(0, 20000); m_tBox->setDecimals(0); m_tBox->setSuffix(" px");
+    m_tBox->setSpecialValueText(tr("Auto (point text)"));
+    addRow(tr("Wrap width"), m_tBox);
+    m_tColor = new QPushButton;
+    addRow(tr("Color"), m_tColor);
+
+    auto edit = [this](const std::function<void(TextContent&)>& fn) {
+        if (m_busy) return;
+        TextContent s = m_s->textStyle();
+        fn(s);
+        m_s->applyTextStyle(s);
+    };
+    connect(m_font, &QFontComboBox::currentFontChanged, this, [=](const QFont& f) { edit([&](TextContent& s) { s.family = f.family(); }); });
+    connect(m_tSize, &QDoubleSpinBox::valueChanged, this, [=](double v) { edit([&](TextContent& s) { s.sizePx = v; }); });
+    connect(m_tBold, &QCheckBox::toggled, this, [=](bool v) { edit([&](TextContent& s) { s.bold = v; }); });
+    connect(m_tItalic, &QCheckBox::toggled, this, [=](bool v) { edit([&](TextContent& s) { s.italic = v; }); });
+    connect(m_tAlign, &QComboBox::currentIndexChanged, this, [=](int i) { edit([&](TextContent& s) { s.align = TextAlign(i); }); });
+    connect(m_tTrack, &QDoubleSpinBox::valueChanged, this, [=](double v) { edit([&](TextContent& s) { s.tracking = v; }); });
+    connect(m_tBox, &QDoubleSpinBox::valueChanged, this, [=](double v) { edit([&](TextContent& s) { s.boxWidth = v; }); });
+    connect(m_tColor, &QPushButton::clicked, this, [this] {
+        const QColor c = QColorDialog::getColor(m_s->textStyle().color, this, tr("Text Color"), QColorDialog::ShowAlphaChannel);
+        if (!c.isValid()) return;
+        TextContent s = m_s->textStyle(); s.color = c; m_s->applyTextStyle(s);
+    });
+}
+
+void ToolOptionsPanel::refreshText() {
+    const bool was = m_busy;
+    m_busy = true;
+    const TextContent& s = m_s->textStyle();
+    m_font->setCurrentFont(QFont(s.family));
+    m_tSize->setValue(s.sizePx);
+    m_tBold->setChecked(s.bold); m_tItalic->setChecked(s.italic);
+    m_tAlign->setCurrentIndex(int(s.align));
+    m_tTrack->setValue(s.tracking);
+    m_tBox->setValue(s.boxWidth);
+    m_tColor->setText(s.color.name(QColor::HexArgb));
+    m_tColor->setStyleSheet(QString("QPushButton { background:%1; color:%2; }").arg(s.color.name(), s.color.lightness() > 128 ? "#000" : "#fff"));
+    m_busy = was;
 }
 
 QWidget* ToolOptionsPanel::sliderRow(const QString& label, double mn, double mx, int dec, const QString& suffix,
@@ -431,14 +494,20 @@ void ToolOptionsPanel::refresh() {
     m_busy = true;
     const ToolId t = m_s->tool();
     m_title->setText(toolName(t));
-    const bool brushy = t == ToolId::Brush || t == ToolId::Pencil || t == ToolId::Eraser;
+    const bool brushy = t == ToolId::Brush || t == ToolId::Pencil || t == ToolId::Eraser || t == ToolId::Smudge;
+    const Layer* al = m_s->activeLayer();
+    const bool textUi = t == ToolId::Text || (al && al->type == LayerType::Text && t == ToolId::Select);
     for (auto& r : m_refreshers) r.second();
+    if (m_flowLabel) m_flowLabel->setText(t == ToolId::Smudge ? tr("Strength") : tr("Flow"));
+    for (QWidget* w : m_textRows) m_form->setRowVisible(w, textUi);
+    refreshText();
     auto vis = [&](QWidget* w, bool v) { m_form->setRowVisible(w, v); };
     for (QWidget* w : m_brushRows) vis(w, brushy);
     for (QWidget* w : m_hardnessRows) vis(w, brushy && t != ToolId::Pencil);
     vis(m_pressureRow, brushy);
     vis(m_sidesRow, t == ToolId::Polygon);
     vis(m_tolRow, t == ToolId::Bucket);
+    if (textUi && t != ToolId::Text) m_title->setText(tr("Text Layer"));
     if (brushy) {
         const BrushSettings b = m_s->brush(t);
         m_pSize->setChecked(b.pressureSize);

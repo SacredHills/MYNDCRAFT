@@ -145,6 +145,54 @@ private slots:
         QCOMPARE(QColor(c.pixel(30, 30)), QColor(100, 100, 100));   // other side of the wall kept
         QCOMPARE(QColor(d.pixel(30, 30)), QColor(Qt::white));       // global fill crosses the wall
     }
+
+    void smudgeDragsColorAlongTheStroke() {
+        QImage img = blank(200, 80);
+        { QPainter p(&img); p.fillRect(0, 0, 60, 80, Qt::red); }   // red on the left, transparent right
+        BrushSettings b; b.size = 24; b.hardness = 1; b.flow = 1.0; b.spacing = 0.05; b.pressureSize = false;
+        BrushStroke s(&img, b, Qt::black, BrushMode::Smudge);
+        s.begin({40, 40});
+        for (int x = 44; x <= 130; x += 4) s.addPoint({double(x), 40.0});
+        s.end();
+        QVERIFY(alphaAt(img, 90, 40) > 40);                       // red was dragged right over empty pixels
+        QVERIFY(qRed(img.pixel(90, 40)) > qBlue(img.pixel(90, 40)) + 40);
+        QCOMPARE(alphaAt(img, 90, 10), 0);                        // outside the brush path stays untouched
+        QCOMPARE(qBlue(img.pixel(40, 40)), 0);                    // smudge never paints the foreground color
+    }
+    void smudgeOnEmptyLayerDoesNothing() {
+        QImage img = blank();
+        BrushSettings b; b.size = 20; b.flow = 1.0; b.pressureSize = false;
+        BrushStroke s(&img, b, Qt::black, BrushMode::Smudge);
+        s.begin({20, 60}); s.addPoint({150, 60}); s.end();
+        for (int x = 0; x < img.width(); x += 7) QCOMPARE(alphaAt(img, x, 60), 0);
+    }
+    void insertNodePreservesCurveShape() {
+        VectorShape sh = VectorShape::makeEllipse(QRectF(10, 10, 100, 60));
+        const QPainterPath before = sh.path();
+        const int n = sh.nodes.size();
+        const auto hit = sh.nearestSegment(QPointF(60, 8));
+        QVERIFY(hit.seg >= 0);
+        QVERIFY(hit.distance < 4);
+        const int idx = sh.insertNode(hit.seg, hit.t);
+        QCOMPARE(idx, hit.seg + 1);
+        QCOMPARE(sh.nodes.size(), n + 1);
+        const QPainterPath after = sh.path();
+        for (double t = 0; t <= 1.0; t += 0.05) {                  // same outline within tolerance
+            const QPointF p = before.pointAtPercent(t);
+            VectorShape probe = sh;
+            QVERIFY(probe.nearestSegment(p).distance < 0.6);
+        }
+        QVERIFY(qAbs(after.boundingRect().width() - before.boundingRect().width()) < 0.5);
+    }
+    void insertNodeOnStraightSegmentStaysStraight() {
+        VectorShape sh = VectorShape::makeRect(QRectF(0, 0, 100, 50));
+        const auto hit = sh.nearestSegment(QPointF(50, -1));
+        const int idx = sh.insertNode(hit.seg, hit.t);
+        QVERIFY(idx > 0);
+        QVERIFY(qAbs(sh.nodes[idx].pos.y()) < 1e-6);               // lies on the top edge
+        QVERIFY(qAbs(sh.nodes[idx].pos.x() - 50) < 2);
+        QCOMPARE(sh.path().boundingRect(), QRectF(0, 0, 100, 50));
+    }
 };
 
 QTEST_MAIN(TestDrawing)

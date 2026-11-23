@@ -80,6 +80,17 @@ QIcon tool(ToolId id) {
             h.lineTo(11, 5); h.lineTo(11, 11); h.lineTo(13, 4.5); h.lineTo(15, 5); h.lineTo(14, 11); h.lineTo(17, 7);
             h.lineTo(19, 8); h.lineTo(16, 20); h.closeSubpath(); p.drawPath(h); break;
         }
+        case ToolId::Smudge: {
+            QPainterPath s; s.moveTo(5, 17); s.cubicTo(9, 9, 12, 19, 19, 7);
+            p.setPen(QPen(c, 3.2, Qt::SolidLine, Qt::RoundCap)); p.drawPath(s);
+            p.setPen(QPen(c, 1.2)); p.drawLine(5, 21, 19, 21); break;
+        }
+        case ToolId::FreeTransform:
+            p.drawRect(QRectF(6.5, 6.5, 11, 11));
+            for (QPointF q : {QPointF(6.5, 6.5), QPointF(17.5, 6.5), QPointF(6.5, 17.5), QPointF(17.5, 17.5)}) { p.setBrush(c); p.drawRect(QRectF(q.x() - 2, q.y() - 2, 4, 4)); }
+            break;
+        case ToolId::Text:
+            p.drawLine(6, 6, 18, 6); p.drawLine(12, 6, 12, 19); p.drawLine(9, 19, 15, 19); break;
         case ToolId::Zoom:
             p.drawEllipse(QPointF(10, 10), 6, 6); p.drawLine(14.5, 14.5, 20, 20);
             p.drawLine(7.5, 10, 12.5, 10); p.drawLine(10, 7.5, 10, 12.5); break;
@@ -96,6 +107,8 @@ QIcon layerType(LayerType t) {
         } else if (t == LayerType::Vector) {
             QPainterPath b; b.moveTo(4, 18); b.cubicTo(8, 2, 16, 2, 20, 18); p.drawPath(b);
             p.setBrush(c); p.drawRect(QRectF(2.5, 16.5, 3, 3)); p.drawRect(QRectF(18.5, 16.5, 3, 3));
+        } else if (t == LayerType::Text) {
+            p.drawLine(6, 6, 18, 6); p.drawLine(12, 6, 12, 19); p.drawLine(9, 19, 15, 19);
         } else {
             QPainterPath f; f.moveTo(3.5, 7); f.lineTo(9, 7); f.lineTo(11, 9); f.lineTo(20.5, 9);
             f.lineTo(20.5, 19.5); f.lineTo(3.5, 19.5); f.closeSubpath(); p.drawPath(f);

@@ -2,8 +2,8 @@
 
 **Current phase:** 1 — Foundation and Drawing (complete for the scope below; see limitations)
 **Build:** Linux x86-64, GCC 13.3, Qt 6.4.2, CMake 3.28 — builds with no warnings.
-**Tests:** 5 CTest suites, 60 test cases, all passing (also clean under AddressSanitizer + UBSan).
-**Not built or tested:** Windows, macOS, installers, packaging, CI workflow itself (see bottom).
+**Tests:** 5 CTest suites, 76 test cases, all passing (also clean under AddressSanitizer + UBSan).
+**Other platforms:** Windows and macOS are built and tested in CI on every push (see bottom). The Windows portable build was run by hand by the project owner; the macOS build has not been run by a person. No installers.
 
 ## Phase 1 acceptance check
 > A user can create a project, draw with raster and vector tools, organize layers, save the project,
@@ -36,6 +36,20 @@ shapes are still editable. Interactive use on a real display with a real tablet 
 - **UI:** dark theme, dockable/floating/tabbable panels (Tool Options, Color & Style, Layers, History),
   tool bar, menus (File, Edit, View, Object, Layer, Window, Help), status bar, New/Open/Save/Save As/
   recent files/Export PNG-JPEG-BMP, Preferences (autosave, grid size).
+- **Text:** text layers (point text or wrapped in a fixed-width box), inline editing on canvas with the
+  Text tool (T): click empty canvas to create, click existing text to edit, Ctrl+Enter commits, Esc cancels,
+  emptying a text layer deletes it. Font family, size, bold, italic, alignment, tracking, wrap width, color;
+  options apply to the active text layer and are undoable (slider-style edits merge). Select tool moves text.
+  Saved in the `.studio` file as text (not rasterized) and re-rendered on load. Text is not converted to
+  outlines and not animatable yet.
+- **Smudge brush (S):** drags existing pixels along the stroke on a raster layer (size, hardness, strength, spacing).
+- **Free transform (Q):** scale (8 handles, Shift keeps proportions, Alt from center), rotate (drag just outside
+  the box, Shift snaps 15°), move (drag inside) for selected vector shapes (baked into the path nodes) or the
+  content of a raster layer (resampled once, so repeated transforms lose sharpness; each is one undo step).
+- **Add point to a path:** Direct Select, double-click on the outline; shape is unchanged (curve is split exactly).
+- **Image import:** File > Import Image… (Ctrl+Shift+I) or drag files onto the window; formats are whatever
+  Qt's image plugins provide. Becomes a new raster layer above the active one, centered, scaled down if larger
+  than the canvas. Dropping a `.studio` file opens it.
 - **Workspaces:** Drawing and Illustration presets, user-saved named layouts (persisted).
 
 ## Partially implemented
@@ -46,8 +60,8 @@ shapes are still editable. Interactive use on a real display with a real tablet 
 - Layer compositing re-renders the dirty region on the CPU via `QPainter` (no GPU, no render cache).
 
 ## Not implemented (Phase 1 scope items deliberately left out)
-Smudge/blending brushes · text tool and text layers · free-transform tool · boolean path operations ·
-adding points to an existing path · image import · custom shortcuts · multi-document tabs ·
+Colour-mixing (wet) brushes · boolean path operations · text-to-outlines · SVG import (needs QtSvg, not
+available in the current dev environment) · custom shortcuts · multi-document tabs ·
 the other five workspaces (they are added in the phase that introduces their panels) ·
 everything in Phases 2–11 (animation, timeline, graph editor, 3D, effects, audio, video export, packaging).
 
@@ -57,6 +71,11 @@ everything in Phases 2–11 (animation, timeline, graph editor, 3D, effects, aud
 - Gradient/paint-bucket on raster has no gap-closing and no anti-aliased edge expansion.
 - Group layers are isolated only when opacity < 1 or blend ≠ Normal (pass-through otherwise).
 - Bucket fill samples the active layer only (no "sample merged").
+- Free transform on raster is destructive resampling; it works on the layer's whole canvas and does not
+  extend beyond the canvas (content moved off-canvas is cropped).
+- Raster free-transform bounds ignore partially transparent noise only by alpha > 0; a faint stray pixel enlarges the box.
+- Text rendering depends on installed fonts; a project opened on a machine without the font falls back to a
+  substitute (the family name is kept in the file).
 - The "fps" setting is stored and saved but nothing consumes it yet.
 
 ## Next tasks (Phase 2 — Traditional animation)
@@ -65,5 +84,6 @@ with playback clock; onion skin renderer; drawing substitution; then re-evaluate
 (Skia vs. QPainter) before the GPU/3D work in Phase 6.
 
 ## Build / CI status
-`.github/workflows/build.yml` (Ubuntu + macOS) is written but **has never run**. No Windows job exists.
-No packaging (AppImage/DEB/RPM/DMG/installer) exists.
+`.github/workflows/build.yml` builds and runs the tests on Linux, Windows (MSVC, Qt 6.8.3, vcpkg libzip) and
+macOS. The Windows job also uploads a portable zip (windeployqt) after a headless `--screenshot` smoke test.
+No installers (MSI/DMG/AppImage/DEB/RPM) exist.

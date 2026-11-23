@@ -60,6 +60,7 @@ void Compositor::drawLayer(QPainter& p, const Layer& l, const QRect& region, con
     } else if (plain) {
         // Fast path: no isolation needed.
         if (l.type == LayerType::Vector) drawShapes(p, l.shapes);
+        else if (l.type == LayerType::Text) l.textContent.draw(p);
         else drawGroup(p, l, region, canvas);
     } else {
         // Isolated: render to a transparent buffer sized to the region, then blend as a unit.
@@ -70,6 +71,7 @@ void Compositor::drawLayer(QPainter& p, const Layer& l, const QRect& region, con
         bp.translate(-region.topLeft());
         bp.setClipRect(region);
         if (l.type == LayerType::Vector) drawShapes(bp, l.shapes);
+        else if (l.type == LayerType::Text) l.textContent.draw(bp);
         else drawGroup(bp, l, region, canvas);
         bp.end();
         p.setOpacity(l.props.opacity);

@@ -107,6 +107,39 @@ QUuid Document::addLayer(LayerType type, const QString& name, QUuid parentId, in
     return id;
 }
 
+QUuid Document::addTextLayer(const TextContent& content, const QString& name, QUuid parentId, int index) {
+    auto l = std::make_shared<Layer>(LayerType::Text, name);
+    l->textContent = content;
+    const QUuid id = l->id;
+    auto* cmd = new AddLayerCommand(this, parentId, index, l);
+    cmd->setText(tr("Add Text"));
+    m_undo.push(cmd);
+    return id;
+}
+
+void Document::setTextContent(const QUuid& layerId, const TextContent& after, const QString& text, const QString& mergeKey) {
+    Layer* l = findLayer(layerId);
+    if (!l || l->type != LayerType::Text || l->textContent == after) return;
+    m_undo.push(new TextStateCommand(this, layerId, l->textContent, after, text, mergeKey));
+}
+
+QUuid Document::addImageLayer(const QImage& image, const QString& name, QUuid parentId, int index) {
+    if (image.isNull()) return {};
+    QImage src = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    if (src.width() > m_comp.width || src.height() > m_comp.height)
+        src = src.scaled(canvasSize(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    auto l = std::make_shared<Layer>(LayerType::Raster, name);
+    l->raster = newRasterImage();
+    QPainter p(&l->raster);
+    p.drawImage((m_comp.width - src.width()) / 2, (m_comp.height - src.height()) / 2, src);
+    p.end();
+    const QUuid id = l->id;
+    auto* cmd = new AddLayerCommand(this, parentId, index, l);
+    cmd->setText(tr("Import Image"));
+    m_undo.push(cmd);
+    return id;
+}
+
 void Document::removeLayer(const QUuid& id) {
     if (findLayer(id)) m_undo.push(new RemoveLayerCommand(this, id));
 }
