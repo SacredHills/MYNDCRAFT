@@ -1,6 +1,9 @@
-# NOTE: this workflow has not been run yet. The same Ubuntu steps were run by hand and pass.
 name: build
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
 jobs:
   linux:
     runs-on: ubuntu-24.04
@@ -10,11 +13,64 @@ jobs:
       - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
       - run: cmake --build build
       - run: QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
-  macos:   # experimental, untested
-    runs-on: macos-14
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.3'
+          arch: win64_msvc2022_64
+          cache: true
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Install libzip (vcpkg)
+        run: vcpkg install libzip:x64-windows
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Package portable build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/MyndCraft | Out-Null
+          Copy-Item build/myndcraft.exe dist/MyndCraft/
+          Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin/*.dll" dist/MyndCraft/
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw dist/MyndCraft/myndcraft.exe
+      - name: Smoke-test the packaged exe (renders its own window to a PNG)
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process -FilePath dist/MyndCraft/myndcraft.exe -ArgumentList "--screenshot","smoke.png" -PassThru -Wait
+          if ($p.ExitCode -ne 0 -or -not (Test-Path smoke.png)) { throw "packaged app failed to start (exit $($p.ExitCode))" }
+          Copy-Item smoke.png dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MyndCraft-windows-x64-portable
+          path: dist/MyndCraft
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-smoke-screenshot
+          path: dist/smoke.png
+
+  macos:
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - run: brew install qt libzip ninja pkg-config
-      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
       - run: cmake --build build
       - run: QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+      - name: Bundle
+        run: |
+          "$(brew --prefix qt)/bin/macdeployqt" build/myndcraft.app
+          ditto -c -k --keepParent build/myndcraft.app MyndCraft-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MyndCraft-macos
+          path: MyndCraft-macos.zip

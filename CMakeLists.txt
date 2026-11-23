@@ -8,11 +8,22 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Test)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBZIP REQUIRED IMPORTED_TARGET libzip)
+# libzip: pkg-config first (Linux/Homebrew; Debian's CMake package config is broken),
+# then the CMake package (vcpkg on Windows).
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+  pkg_check_modules(LIBZIP QUIET IMPORTED_TARGET libzip)
+endif()
+if(TARGET PkgConfig::LIBZIP)
+  set(MYND_ZIP_TARGET PkgConfig::LIBZIP)
+else()
+  find_package(libzip CONFIG REQUIRED)
+  set(MYND_ZIP_TARGET libzip::zip)
+endif()
 
 if(MSVC)
-  add_compile_options(/W4)
+  add_compile_options(/W3 /permissive- /utf-8 /Zc:__cplusplus)
+  add_compile_definitions(_USE_MATH_DEFINES NOMINMAX)
 else()
   add_compile_options(-Wall -Wextra -Wno-unused-parameter)
 endif()
@@ -31,7 +42,7 @@ add_library(myndcore STATIC
   src/Graphics/Compositor.cpp
 )
 target_include_directories(myndcore PUBLIC src)
-target_link_libraries(myndcore PUBLIC Qt6::Core Qt6::Gui PkgConfig::LIBZIP)
+target_link_libraries(myndcore PUBLIC Qt6::Core Qt6::Gui ${MYND_ZIP_TARGET})
 
 # ---- Application UI ----
 add_library(myndui STATIC
@@ -47,6 +58,11 @@ target_link_libraries(myndui PUBLIC myndcore Qt6::Widgets)
 
 add_executable(myndcraft src/main.cpp)
 target_link_libraries(myndcraft PRIVATE myndui)
+if(WIN32)
+  set_target_properties(myndcraft PROPERTIES WIN32_EXECUTABLE ON)  # GUI subsystem: no console window
+elseif(APPLE)
+  set_target_properties(myndcraft PROPERTIES MACOSX_BUNDLE ON)
+endif()
 
 # ---- Tests ----
 enable_testing()
