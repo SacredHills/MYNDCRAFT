@@ -1,0 +1,20 @@
+# NOTE: this workflow has not been run yet. The same Ubuntu steps were run by hand and pass.
+name: build
+on: [push, pull_request]
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build qt6-base-dev libzip-dev libgl1-mesa-dev libxkbcommon-dev
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      - run: cmake --build build
+      - run: QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+  macos:   # experimental, untested
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install qt libzip ninja pkg-config
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+      - run: cmake --build build
+      - run: QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure

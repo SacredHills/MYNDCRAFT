@@ -1,0 +1,635 @@
+#include "UI/MainWindow.h"
+
+#include <QApplication>
+#include <QCloseEvent>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QFormLayout>
+#include <QInputDialog>
+#include <QMenuBar>
+#include <QMessageBox>
+#include <QStatusBar>
+#include <QToolBar>
+
+#include "Core/Settings.h"
+#include "Graphics/Compositor.h"
+#include "UI/Icons.h"
+
+namespace mynd {
+
+namespace {
+const char* kFilter = "MyndCraft Project (*.studio)";
+}
+
+MainWindow::MainWindow() {
+    setObjectName("MainWindow");
+    resize(1500, 900);
+    m_session = new EditorSession(this);
+    m_canvas = new CanvasView(m_session, this);
+    setCentralWidget(m_canvas);
+    m_autosave = new Autosaver(this);
+    m_autosave->setEnabled(settings::autosaveEnabled());
+    m_autosave->setInterval(settings::autosaveIntervalSeconds());
+
+    buildActions();
+    buildToolbars();
+    buildDocks();
+    buildMenus();
+
+    m_zoomLabel = new QLabel; m_posLabel = new QLabel; m_layerLabel = new QLabel;
+    for (QLabel* l : {m_layerLabel, m_posLabel, m_zoomLabel}) { l->setMinimumWidth(110); statusBar()->addPermanentWidget(l); }
+    connect(m_canvas, &CanvasView::viewChanged, this, [this] {
+        m_zoomLabel->setText(tr("%1%  ∠%2°").arg(qRound(m_canvas->zoom() * 100)).arg(qRound(m_canvas->rotation())));
+    });
+    connect(m_canvas, &CanvasView::cursorMoved, this, [this](const QPointF& p) {
+        m_posLabel->setText(QString("%1, %2").arg(qRound(p.x())).arg(qRound(p.y())));
+    });
+    connect(m_session, &EditorSession::message, this, [this](const QString& m) { statusBar()->showMessage(m, 5000); });
+    connect(m_session, &EditorSession::activeLayerChanged, this, [this] {
+        Layer* l = m_session->activeLayer();
+        m_layerLabel->setText(l ? l->props.name : QString());
+        updateActionStates();
+    });
+    connect(m_session, &EditorSession::selectionChanged, this, [this] { updateActionStates(); });
+    connect(m_session, &EditorSession::toolChanged, this, [this](ToolId t) {
+        if (auto* a = m_toolActions.value(t)) a->setChecked(true);
+        statusBar()->showMessage(toolName(t), 2000);
+    });
+
+    const QByteArray geo = settings::windowGeometry();
+    if (!geo.isEmpty()) restoreGeometry(geo);
+    const QString ws = settings::lastWorkspace();
+    if (!m_workspaces->apply(ws)) m_workspaces->apply("Drawing");
+
+    CompositionSettings cs;
+    cs.gridSize = settings::defaultGridSize();
+    newDocument(cs);
+    updateTitle();
+}
+
+MainWindow::~MainWindow() {
+    m_autosave->detach(false);
+}
+
+// ------------------------------------------------------------------ documents
+void MainWindow::adoptDocument(std::unique_ptr<Document> d) {
+    m_autosave->detach(true);
+    m_session->setDocument(nullptr);
+    m_canvas->setDocument(nullptr);
+    m_doc = std::move(d);
+    Document* doc = m_doc.get();
+    m_session->setDocument(doc);
+    m_canvas->setDocument(doc);
+    connect(doc, &Document::modifiedChanged, this, [this](bool) { updateTitle(); });
+    m_autosave->attach(doc);
+    bindUndo();
+    updateTitle();
+    updateActionStates();
+    emit m_canvas->viewChanged();
+}
+
+void MainWindow::newDocument(const CompositionSettings& s, bool withLayer) {
+    auto d = std::make_unique<Document>(s);
+    if (withLayer) {
+        auto l = std::make_shared<Layer>(LayerType::Raster, tr("Layer 1"));
+        l->raster = d->newRasterImage();
+        d->rootPtr()->children.push_back(l);
+        Document::fixParents(d->root());
+    }
+    adoptDocument(std::move(d));
+    m_doc->undoStack()->clear();
+    m_doc->markSaved();
+}
+
+bool MainWindow::openFile(const QString& path, QString* error) {
+    LoadResult r = ProjectIO::load(path);
+    if (!r.doc) { if (error) *error = r.error; return false; }
+    if (!r.warnings.isEmpty()) {
+        statusBar()->showMessage(tr("Opened with %1 warning(s): %2").arg(r.warnings.size()).arg(r.warnings.first()), 10000);
+        if (error) *error = r.warnings.join("\n");
+    }
+    adoptDocument(std::move(r.doc));
+    settings::addRecentFile(path);
+    updateRecentMenu();
+    return true;
+}
+
+bool MainWindow::saveFile(const QString& path, QString* error) {
+    if (!m_doc) return false;
+    QString err;
+    if (!ProjectIO::save(*m_doc, path, &err)) { if (error) *error = err; return false; }
+    settings::addRecentFile(path);
+    updateRecentMenu();
+    // Saving makes the autosave redundant.
+    m_autosave->detach(true);
+    m_autosave->attach(m_doc.get());
+    updateTitle();
+    return true;
+}
+
+bool MainWindow::exportImage(const QString& path, QString* error) {
+    if (!m_doc) return false;
+    QImage img = Compositor::render(*m_doc);
+    const QString ext = QFileInfo(path).suffix().toLower();
+    if (ext == "jpg" || ext == "jpeg" || ext == "bmp") {
+        QImage flat(img.size(), QImage::Format_RGB32);
+        flat.fill(Qt::white);
+        QPainter p(&flat); p.drawImage(0, 0, img); p.end();
+        img = flat;
+    }
+    if (!img.save(path)) { if (error) *error = tr("Could not write %1 (unsupported format or path).").arg(path); return false; }
+    return true;
+}
+
+bool MainWindow::maybeSave() {
+    if (!m_doc || !m_doc->isModified()) return true;
+    const auto r = QMessageBox::warning(this, tr("Unsaved changes"),
+                                        tr("Save changes to \"%1\" before closing?").arg(m_doc->filePath().isEmpty() ? tr("Untitled") : QFileInfo(m_doc->filePath()).fileName()),
+                                        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+    if (r == QMessageBox::Cancel) return false;
+    if (r == QMessageBox::Save) return actSave();
+    return true;
+}
+
+void MainWindow::closeEvent(QCloseEvent* e) {
+    if (!maybeSave()) { e->ignore(); return; }
+    settings::setWindowGeometry(saveGeometry());
+    m_autosave->detach(true);  // clean exit: nothing to recover
+    e->accept();
+}
+
+void MainWindow::offerRecovery() {
+    const auto entries = Autosaver::findRecoverable();
+    for (const RecoveryEntry& e : entries) {
+        const auto r = QMessageBox::question(this, tr("Recover unsaved work"),
+            tr("MyndCraft found an autosaved project from %1%2.\nRecover it?")
+                .arg(e.when.toString(Qt::TextDate), e.originalPath.isEmpty() ? QString() : tr(" (originally %1)").arg(e.originalPath)));
+        if (r == QMessageBox::Yes) {
+            LoadResult lr = ProjectIO::load(e.autosavePath);
+            if (lr.doc) {
+                lr.doc->setFilePath(e.originalPath);
+                adoptDocument(std::move(lr.doc));
+                m_doc->markDirty();
+                Autosaver::discard(e);
+                return;
+            }
+            QMessageBox::warning(this, tr("Recovery failed"), lr.error);
+        }
+        Autosaver::discard(e);
+    }
+}
+
+// ------------------------------------------------------------------ actions
+void MainWindow::buildActions() {
+    auto mk = [this](const QString& text, const QKeySequence& ks = {}) {
+        auto* a = new QAction(text, this);
+        if (!ks.isEmpty()) a->setShortcut(ks);
+        return a;
+    };
+    aNew = mk(tr("&New…"), QKeySequence::New);       connect(aNew, &QAction::triggered, this, &MainWindow::actNew);
+    aOpen = mk(tr("&Open…"), QKeySequence::Open);    connect(aOpen, &QAction::triggered, this, &MainWindow::actOpen);
+    aSave = mk(tr("&Save"), QKeySequence::Save);     connect(aSave, &QAction::triggered, this, [this] { actSave(); });
+    aSaveAs = mk(tr("Save &As…"), QKeySequence::SaveAs); connect(aSaveAs, &QAction::triggered, this, [this] { actSaveAs(); });
+    aExport = mk(tr("&Export Image…"), QKeySequence("Ctrl+E")); connect(aExport, &QAction::triggered, this, &MainWindow::actExport);
+    aPrefs = mk(tr("&Preferences…"), QKeySequence::Preferences); connect(aPrefs, &QAction::triggered, this, &MainWindow::actPreferences);
+    aQuit = mk(tr("&Quit"), QKeySequence::Quit); connect(aQuit, &QAction::triggered, this, &QWidget::close);
+
+    aUndo = mk(tr("&Undo"), QKeySequence::Undo);
+    aRedo = mk(tr("&Redo"), QKeySequence::Redo);
+    aUndo->setEnabled(false); aRedo->setEnabled(false);
+    connect(aUndo, &QAction::triggered, this, [this] { if (m_doc) m_doc->undoStack()->undo(); });
+    connect(aRedo, &QAction::triggered, this, [this] { if (m_doc) m_doc->undoStack()->redo(); });
+
+    aSelAll = mk(tr("Select &All Shapes"), QKeySequence::SelectAll);
+    connect(aSelAll, &QAction::triggered, this, [this] {
+        Layer* l = m_session->activeLayer();
+        if (!l || l->type != LayerType::Vector) return;
+        QSet<QUuid> s; for (const auto& sh : l->shapes) s.insert(sh.id);
+        m_session->setSelectedShapes(s, false);
+    });
+    aDeselect = mk(tr("&Deselect"), QKeySequence("Ctrl+D"));
+    connect(aDeselect, &QAction::triggered, m_session, &EditorSession::clearSelection);
+    aDeleteSel = mk(tr("Delete Selected Shapes"));
+    connect(aDeleteSel, &QAction::triggered, this, [this] {
+        mutateShapes(tr("Delete Shapes"), [](ShapeList& s, const QSet<QUuid>& sel) {
+            s.erase(std::remove_if(s.begin(), s.end(), [&](const VectorShape& x) { return sel.contains(x.id); }), s.end());
+        });
+        m_session->clearSelection();
+    });
+
+    aZoomIn = mk(tr("Zoom &In"), QKeySequence("Ctrl+="));   connect(aZoomIn, &QAction::triggered, this, [this] { m_canvas->setZoom(m_canvas->zoom() * 1.25); });
+    aZoomOut = mk(tr("Zoom &Out"), QKeySequence("Ctrl+-")); connect(aZoomOut, &QAction::triggered, this, [this] { m_canvas->setZoom(m_canvas->zoom() / 1.25); });
+    aFit = mk(tr("&Fit to Screen"), QKeySequence("Ctrl+0")); connect(aFit, &QAction::triggered, m_canvas, &CanvasView::fitToView);
+    aActual = mk(tr("&Actual Pixels (100%)"), QKeySequence("Ctrl+1")); connect(aActual, &QAction::triggered, m_canvas, &CanvasView::actualPixels);
+    aRotL = mk(tr("Rotate Canvas &Left 15°"), QKeySequence("Ctrl+Alt+Left")); connect(aRotL, &QAction::triggered, this, [this] { m_canvas->rotateBy(-15); });
+    aRotR = mk(tr("Rotate Canvas &Right 15°"), QKeySequence("Ctrl+Alt+Right")); connect(aRotR, &QAction::triggered, this, [this] { m_canvas->rotateBy(15); });
+    aRotReset = mk(tr("Reset Canvas Rotation"), QKeySequence("Ctrl+Alt+Up")); connect(aRotReset, &QAction::triggered, m_canvas, &CanvasView::resetRotation);
+    auto toggle = [&](const QString& text, const QKeySequence& ks, bool* flag) {
+        auto* a = mk(text, ks); a->setCheckable(true); a->setChecked(*flag);
+        connect(a, &QAction::toggled, this, [this, flag](bool on) { *flag = on; emit m_session->viewTogglesChanged(); });
+        return a;
+    };
+    aGrid = toggle(tr("Show &Grid"), QKeySequence("Ctrl+'"), &m_session->gridVisible);
+    aRulers = toggle(tr("Show &Rulers"), QKeySequence("Ctrl+R"), &m_session->rulersVisible);
+    aGuides = toggle(tr("Show G&uides"), QKeySequence("Ctrl+Shift+;"), &m_session->guidesVisible);
+    aSnap = toggle(tr("&Snap to Grid / Guides"), QKeySequence("Ctrl+;"), &m_session->snapEnabled);
+    aClearGuides = mk(tr("Clear Guides"));
+    connect(aClearGuides, &QAction::triggered, this, [this] {
+        if (m_doc && !m_doc->comp().guides.isEmpty()) { m_doc->compMutable().guides.clear(); m_doc->markDirty(); m_canvas->update(); }
+    });
+
+    aGroupShapes = mk(tr("&Group"), QKeySequence("Ctrl+G"));
+    connect(aGroupShapes, &QAction::triggered, this, [this] {
+        mutateShapes(tr("Group Shapes"), [](ShapeList& s, const QSet<QUuid>& sel) {
+            if (sel.size() < 2) return;
+            const QUuid g = QUuid::createUuid();
+            for (auto& x : s) if (sel.contains(x.id)) x.groupId = g;
+        });
+    });
+    aUngroupShapes = mk(tr("&Ungroup"), QKeySequence("Ctrl+Shift+G"));
+    connect(aUngroupShapes, &QAction::triggered, this, [this] {
+        mutateShapes(tr("Ungroup Shapes"), [](ShapeList& s, const QSet<QUuid>& sel) {
+            for (auto& x : s) if (sel.contains(x.id)) x.groupId = QUuid();
+        });
+    });
+    auto arrange = [this](const QString& text, int mode) {  // 0 front, 1 forward, 2 backward, 3 back
+        mutateShapes(text, [mode](ShapeList& s, const QSet<QUuid>& sel) {
+            ShapeList out;
+            if (mode == 0 || mode == 3) {
+                ShapeList a, b;
+                for (const auto& x : s) (sel.contains(x.id) ? a : b).append(x);
+                out = mode == 0 ? b + a : a + b;
+            } else {
+                out = s;
+                if (mode == 1) { for (int i = out.size() - 2; i >= 0; --i) if (sel.contains(out[i].id) && !sel.contains(out[i + 1].id)) std::swap(out[i], out[i + 1]); }
+                else { for (int i = 1; i < out.size(); ++i) if (sel.contains(out[i].id) && !sel.contains(out[i - 1].id)) std::swap(out[i], out[i - 1]); }
+            }
+            s = out;
+        });
+    };
+    aFront = mk(tr("Bring to &Front"), QKeySequence("Ctrl+Shift+]")); connect(aFront, &QAction::triggered, this, [=] { arrange(tr("Bring to Front"), 0); });
+    aForward = mk(tr("Bring &Forward"), QKeySequence("Ctrl+]")); connect(aForward, &QAction::triggered, this, [=] { arrange(tr("Bring Forward"), 1); });
+    aBackward = mk(tr("Send &Backward"), QKeySequence("Ctrl+[")); connect(aBackward, &QAction::triggered, this, [=] { arrange(tr("Send Backward"), 2); });
+    aBack = mk(tr("Send to Bac&k"), QKeySequence("Ctrl+Shift+[")); connect(aBack, &QAction::triggered, this, [=] { arrange(tr("Send to Back"), 3); });
+
+    aNewRaster = mk(tr("New &Raster Layer"), QKeySequence("Ctrl+Shift+N"));
+    connect(aNewRaster, &QAction::triggered, this, [this] { m_session->addLayerAboveActive(LayerType::Raster, tr("Raster Layer")); });
+    aNewVector = mk(tr("New &Vector Layer"), QKeySequence("Ctrl+Alt+N"));
+    connect(aNewVector, &QAction::triggered, this, [this] { m_session->addLayerAboveActive(LayerType::Vector, tr("Vector Layer")); });
+    aNewGroup = mk(tr("New &Group"));
+    connect(aNewGroup, &QAction::triggered, this, [this] { m_session->addLayerAboveActive(LayerType::Group, tr("Group")); });
+    aDup = mk(tr("&Duplicate Layer"), QKeySequence("Ctrl+J"));
+    aDelLayer = mk(tr("D&elete Layer"));
+    aGroupLayer = mk(tr("Group Layer"), QKeySequence("Ctrl+Alt+G"));
+    aUngroupLayer = mk(tr("Ungroup Layer Group"));
+    aUp = mk(tr("Move Layer &Up"), QKeySequence("Ctrl+Alt+]"));
+    aDown = mk(tr("Move Layer &Down"), QKeySequence("Ctrl+Alt+["));
+    aToggleVis = mk(tr("Toggle &Visibility"));
+    aToggleLock = mk(tr("Toggle &Lock"));
+    // (LayerPanel exists after buildDocks; connect later in buildMenus)
+
+    // Tools
+    m_toolGroup = new QActionGroup(this);
+    struct T { ToolId id; const char* key; };
+    const T tools[] = {{ToolId::Select, "V"}, {ToolId::DirectSelect, "A"}, {ToolId::Brush, "B"}, {ToolId::Pencil, "N"},
+                       {ToolId::Eraser, "E"}, {ToolId::Pen, "P"}, {ToolId::Line, "L"}, {ToolId::Rectangle, "M"},
+                       {ToolId::Ellipse, "O"}, {ToolId::Polygon, "Y"}, {ToolId::Bucket, "K"}, {ToolId::Gradient, "G"},
+                       {ToolId::Eyedropper, "I"}, {ToolId::Hand, "H"}, {ToolId::Zoom, "Z"}};
+    for (const T& t : tools) {
+        auto* a = new QAction(icons::tool(t.id), toolName(t.id), this);
+        a->setCheckable(true);
+        a->setShortcut(QKeySequence(t.key));
+        a->setToolTip(QString("%1 (%2)").arg(toolName(t.id), t.key));
+        a->setActionGroup(m_toolGroup);
+        connect(a, &QAction::triggered, this, [this, id = t.id] { m_session->setTool(id); });
+        m_toolActions[t.id] = a;
+    }
+    m_toolActions[m_session->tool()]->setChecked(true);
+
+    auto* sw = new QAction(this); sw->setShortcut(QKeySequence("X"));
+    connect(sw, &QAction::triggered, m_session, &EditorSession::swapColors);
+    auto* bs1 = new QAction(this); bs1->setShortcut(QKeySequence("["));
+    connect(bs1, &QAction::triggered, this, [this] { adjustBrushSize(0.85); });
+    auto* bs2 = new QAction(this); bs2->setShortcut(QKeySequence("]"));
+    connect(bs2, &QAction::triggered, this, [this] { adjustBrushSize(1.0 / 0.85); });
+    addActions({sw, bs1, bs2});
+}
+
+void MainWindow::adjustBrushSize(double f) {
+    const ToolId t = m_session->tool();
+    if (t != ToolId::Brush && t != ToolId::Pencil && t != ToolId::Eraser) return;
+    BrushSettings& b = m_session->brushFor(t);
+    const double ns = std::clamp(b.size * f + (f > 1 ? 1 : -1), 1.0, 500.0);
+    b.size = ns;
+    m_session->notifyBrushChanged();
+    emit m_session->toolChanged(t);  // refresh the options panel
+}
+
+void MainWindow::mutateShapes(const QString& text, const std::function<void(ShapeList&, const QSet<QUuid>&)>& fn) {
+    Layer* l = m_session->activeLayer();
+    if (!m_doc || !l || l->type != LayerType::Vector || l->props.locked) return;
+    const QSet<QUuid> sel = m_session->selectedShapes();
+    if (sel.isEmpty()) return;
+    ShapeList after = l->shapes;
+    fn(after, sel);
+    m_doc->setShapes(l->id, after, text);
+}
+
+void MainWindow::buildToolbars() {
+    auto* tb = addToolBar(tr("Tools"));
+    tb->setObjectName("tools");
+    tb->setOrientation(Qt::Vertical);
+    tb->setIconSize({24, 24});
+    tb->setMovable(true);
+    removeToolBar(tb);
+    addToolBar(Qt::LeftToolBarArea, tb);
+    tb->show();
+    int i = 0;
+    for (auto it = m_toolActions.begin(); it != m_toolActions.end(); ++it, ++i) {}
+    const ToolId order[] = {ToolId::Select, ToolId::DirectSelect, ToolId::Hand, ToolId::Zoom, ToolId::Brush, ToolId::Pencil,
+                            ToolId::Eraser, ToolId::Bucket, ToolId::Gradient, ToolId::Eyedropper, ToolId::Pen, ToolId::Line,
+                            ToolId::Rectangle, ToolId::Ellipse, ToolId::Polygon};
+    for (ToolId id : order) {
+        tb->addAction(m_toolActions[id]);
+        if (id == ToolId::Zoom || id == ToolId::Eyedropper) tb->addSeparator();
+    }
+
+    auto* top = addToolBar(tr("Workspace"));
+    top->setObjectName("workspace-bar");
+    top->setMovable(false);
+    top->addWidget(new QLabel(tr(" Workspace: ")));
+    m_wsCombo = new QComboBox;
+    m_wsCombo->setMinimumWidth(160);
+    top->addWidget(m_wsCombo);
+}
+
+void MainWindow::buildDocks() {
+    auto mkDock = [this](const QString& key, const QString& title, QWidget* w) {
+        auto* d = new QDockWidget(title, this);
+        d->setObjectName("dock." + key);
+        d->setWidget(w);
+        d->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+        m_docks[key] = d;
+        return d;
+    };
+    m_layers = new LayerPanel(m_session);
+    mkDock("options", tr("Tool Options"), new ToolOptionsPanel(m_session));
+    mkDock("style", tr("Color & Style"), new StylePanel(m_session));
+    mkDock("layers", tr("Layers"), m_layers);
+    mkDock("history", tr("History"), new HistoryPanel(m_session));
+    m_workspaces = new WorkspaceManager(this, m_docks, this);
+    connect(m_workspaces, &WorkspaceManager::changed, this, &MainWindow::rebuildWorkspaceMenu);
+}
+
+void MainWindow::buildMenus() {
+    QMenu* file = menuBar()->addMenu(tr("&File"));
+    file->addActions({aNew, aOpen});
+    m_recentMenu = file->addMenu(tr("Open &Recent"));
+    file->addSeparator();
+    file->addActions({aSave, aSaveAs});
+    file->addSeparator();
+    file->addActions({aExport});
+    file->addSeparator();
+    file->addActions({aPrefs, aQuit});
+    updateRecentMenu();
+
+    QMenu* edit = menuBar()->addMenu(tr("&Edit"));
+    edit->addActions({aUndo, aRedo});
+    edit->addSeparator();
+    edit->addActions({aSelAll, aDeselect, aDeleteSel});
+
+    QMenu* view = menuBar()->addMenu(tr("&View"));
+    view->addActions({aZoomIn, aZoomOut, aFit, aActual});
+    view->addSeparator();
+    view->addActions({aRotL, aRotR, aRotReset});
+    view->addSeparator();
+    view->addActions({aGrid, aRulers, aGuides, aSnap, aClearGuides});
+
+    QMenu* obj = menuBar()->addMenu(tr("&Object"));
+    obj->addActions({aGroupShapes, aUngroupShapes});
+    obj->addSeparator();
+    obj->addActions({aFront, aForward, aBackward, aBack});
+
+    connect(aDup, &QAction::triggered, m_layers, &LayerPanel::duplicateActive);
+    connect(aDelLayer, &QAction::triggered, m_layers, &LayerPanel::deleteActive);
+    connect(aGroupLayer, &QAction::triggered, m_layers, &LayerPanel::groupActive);
+    connect(aUngroupLayer, &QAction::triggered, m_layers, &LayerPanel::ungroupActive);
+    connect(aUp, &QAction::triggered, this, [this] { m_layers->moveActive(+1); });
+    connect(aDown, &QAction::triggered, this, [this] { m_layers->moveActive(-1); });
+    connect(aToggleVis, &QAction::triggered, this, [this] {
+        if (Layer* l = m_session->activeLayer()) { LayerProps p = l->props; p.visible = !p.visible; m_doc->setLayerProps(l->id, p); }
+    });
+    connect(aToggleLock, &QAction::triggered, this, [this] {
+        if (Layer* l = m_session->activeLayer()) { LayerProps p = l->props; p.locked = !p.locked; m_doc->setLayerProps(l->id, p); }
+    });
+    QMenu* layer = menuBar()->addMenu(tr("&Layer"));
+    layer->addActions({aNewRaster, aNewVector, aNewGroup});
+    layer->addSeparator();
+    layer->addActions({aDup, aDelLayer});
+    layer->addSeparator();
+    layer->addActions({aGroupLayer, aUngroupLayer});
+    layer->addSeparator();
+    layer->addActions({aUp, aDown, aToggleVis, aToggleLock});
+
+    QMenu* win = menuBar()->addMenu(tr("&Window"));
+    m_workspaceMenu = win->addMenu(tr("&Workspace"));
+    auto* saveWs = win->addAction(tr("Save Current Layout as Workspace…"));
+    connect(saveWs, &QAction::triggered, this, [this] {
+        bool ok = false;
+        const QString n = QInputDialog::getText(this, tr("Save Workspace"), tr("Workspace name:"), QLineEdit::Normal, {}, &ok).trimmed();
+        if (ok && !n.isEmpty() && !WorkspaceManager::presetNames().contains(n)) m_workspaces->saveCurrentAs(n);
+    });
+    auto* delWs = win->addAction(tr("Delete Custom Workspace…"));
+    connect(delWs, &QAction::triggered, this, [this] {
+        const QStringList c = m_workspaces->customNames();
+        if (c.isEmpty()) { statusBar()->showMessage(tr("No custom workspaces saved."), 3000); return; }
+        bool ok = false;
+        const QString n = QInputDialog::getItem(this, tr("Delete Workspace"), tr("Workspace:"), c, 0, false, &ok);
+        if (ok) m_workspaces->deleteCustom(n);
+    });
+    auto* resetWs = win->addAction(tr("Reset Current Workspace"));
+    connect(resetWs, &QAction::triggered, this, [this] {
+        const QString c = m_workspaces->current();
+        m_workspaces->apply(WorkspaceManager::presetNames().contains(c) ? c : QString("Drawing"));
+    });
+    win->addSeparator();
+    for (auto* d : m_docks) win->addAction(d->toggleViewAction());
+    win->addAction(findChild<QToolBar*>("tools")->toggleViewAction());
+    rebuildWorkspaceMenu();
+
+    QMenu* help = menuBar()->addMenu(tr("&Help"));
+    auto* about = help->addAction(tr("&About MyndCraft"));
+    connect(about, &QAction::triggered, this, &MainWindow::actAbout);
+}
+
+void MainWindow::rebuildWorkspaceMenu() {
+    m_workspaceMenu->clear();
+    m_wsCombo->blockSignals(true);
+    m_wsCombo->clear();
+    auto* grp = new QActionGroup(m_workspaceMenu);
+    for (const QString& n : m_workspaces->allNames()) {
+        auto* a = m_workspaceMenu->addAction(n);
+        a->setCheckable(true);
+        a->setChecked(n == m_workspaces->current());
+        a->setActionGroup(grp);
+        connect(a, &QAction::triggered, this, [this, n] { m_workspaces->apply(n); });
+        m_wsCombo->addItem(n);
+        if (n == m_workspaces->current()) m_wsCombo->setCurrentIndex(m_wsCombo->count() - 1);
+    }
+    m_wsCombo->blockSignals(false);
+    disconnect(m_wsCombo, nullptr, this, nullptr);
+    connect(m_wsCombo, &QComboBox::activated, this, [this](int i) { m_workspaces->apply(m_wsCombo->itemText(i)); });
+}
+
+void MainWindow::bindUndo() {
+    for (auto& c : m_undoConns) disconnect(c);
+    m_undoConns.clear();
+    QUndoStack* st = m_doc->undoStack();
+    auto refresh = [this, st] {
+        aUndo->setEnabled(st->canUndo());
+        aRedo->setEnabled(st->canRedo());
+        aUndo->setText(st->canUndo() ? tr("&Undo %1").arg(st->undoText()) : tr("&Undo"));
+        aRedo->setText(st->canRedo() ? tr("&Redo %1").arg(st->redoText()) : tr("&Redo"));
+    };
+    m_undoConns << connect(st, &QUndoStack::indexChanged, this, refresh)
+                << connect(st, &QUndoStack::canUndoChanged, this, refresh)
+                << connect(st, &QUndoStack::canRedoChanged, this, refresh);
+    refresh();
+}
+
+void MainWindow::updateActionStates() {
+    Layer* l = m_session->activeLayer();
+    const bool vec = l && l->type == LayerType::Vector;
+    const bool sel = vec && !m_session->selectedShapes().isEmpty();
+    for (QAction* a : {aGroupShapes, aUngroupShapes, aFront, aForward, aBackward, aBack, aDeleteSel}) a->setEnabled(sel);
+    aSelAll->setEnabled(vec);
+    const bool has = l != nullptr;
+    for (QAction* a : {aDup, aDelLayer, aGroupLayer, aUp, aDown, aToggleVis, aToggleLock}) a->setEnabled(has);
+    aUngroupLayer->setEnabled(l && l->isGroup());
+}
+
+void MainWindow::updateTitle() {
+    const QString name = m_doc && !m_doc->filePath().isEmpty() ? QFileInfo(m_doc->filePath()).fileName() : tr("Untitled");
+    setWindowTitle(QString("%1[*] — MyndCraft").arg(name));
+    setWindowModified(m_doc && m_doc->isModified());
+}
+
+void MainWindow::updateRecentMenu() {
+    m_recentMenu->clear();
+    const QStringList r = settings::recentFiles();
+    for (const QString& p : r) {
+        auto* a = m_recentMenu->addAction(QFileInfo(p).fileName());
+        a->setToolTip(p);
+        connect(a, &QAction::triggered, this, [this, p] {
+            if (!maybeSave()) return;
+            QString err;
+            if (!openFile(p, &err)) QMessageBox::warning(this, tr("Cannot open project"), err);
+        });
+    }
+    m_recentMenu->setEnabled(!r.isEmpty());
+}
+
+// ------------------------------------------------------------------ dialogs
+void MainWindow::actNew() {
+    if (!maybeSave()) return;
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("New Project"));
+    auto* form = new QFormLayout(&dlg);
+    auto* w = new QSpinBox; w->setRange(1, kMaxCanvasDim); w->setValue(1920);
+    auto* h = new QSpinBox; h->setRange(1, kMaxCanvasDim); h->setValue(1080);
+    auto* fps = new QComboBox;
+    struct F { const char* n; int num, den; };
+    for (F f : {F{"12", 12, 1}, F{"15", 15, 1}, F{"23.976", 24000, 1001}, F{"24", 24, 1}, F{"25", 25, 1}, F{"29.97", 30000, 1001}, F{"30", 30, 1}, F{"50", 50, 1}, F{"60", 60, 1}})
+        fps->addItem(QString("%1 fps").arg(f.n), QVariant::fromValue(QPoint(f.num, f.den)));
+    fps->setCurrentIndex(3);
+    auto* bg = new QComboBox; bg->addItems({tr("White"), tr("Black"), tr("Transparent")});
+    form->addRow(tr("Width (px)"), w);
+    form->addRow(tr("Height (px)"), h);
+    form->addRow(tr("Frame rate"), fps);
+    form->addRow(tr("Background"), bg);
+    auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    form->addRow(bb);
+    connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    if (dlg.exec() != QDialog::Accepted) return;
+    if (qint64(w->value()) * h->value() > 100'000'000) {
+        QMessageBox::warning(this, tr("Canvas too large"), tr("Canvases above 100 megapixels are not supported yet (memory safeguard)."));
+        return;
+    }
+    CompositionSettings cs;
+    cs.width = w->value(); cs.height = h->value();
+    const QPoint f = fps->currentData().toPoint();
+    cs.fps = {f.x(), f.y()};
+    cs.background = bg->currentIndex() == 0 ? QColor(Qt::white) : bg->currentIndex() == 1 ? QColor(Qt::black) : QColor(0, 0, 0, 0);
+    cs.gridSize = settings::defaultGridSize();
+    newDocument(cs);
+}
+
+void MainWindow::actOpen() {
+    if (!maybeSave()) return;
+    const QString p = QFileDialog::getOpenFileName(this, tr("Open Project"), {}, kFilter);
+    if (p.isEmpty()) return;
+    QString err;
+    if (!openFile(p, &err)) QMessageBox::warning(this, tr("Cannot open project"), err);
+    else if (!err.isEmpty()) QMessageBox::information(this, tr("Opened with warnings"), err);
+}
+
+bool MainWindow::actSave() {
+    if (!m_doc) return false;
+    if (m_doc->filePath().isEmpty()) return actSaveAs();
+    QString err;
+    if (!saveFile(m_doc->filePath(), &err)) { QMessageBox::critical(this, tr("Save failed"), err); return false; }
+    statusBar()->showMessage(tr("Saved %1").arg(m_doc->filePath()), 3000);
+    return true;
+}
+
+bool MainWindow::actSaveAs() {
+    QString p = QFileDialog::getSaveFileName(this, tr("Save Project As"), m_doc ? m_doc->filePath() : QString(), kFilter);
+    if (p.isEmpty()) return false;
+    if (!p.endsWith(".studio", Qt::CaseInsensitive)) p += ".studio";
+    QString err;
+    if (!saveFile(p, &err)) { QMessageBox::critical(this, tr("Save failed"), err); return false; }
+    statusBar()->showMessage(tr("Saved %1").arg(p), 3000);
+    return true;
+}
+
+void MainWindow::actExport() {
+    const QString p = QFileDialog::getSaveFileName(this, tr("Export Image"), {}, tr("PNG (*.png);;JPEG (*.jpg *.jpeg);;BMP (*.bmp)"));
+    if (p.isEmpty()) return;
+    QString err;
+    if (!exportImage(p, &err)) QMessageBox::critical(this, tr("Export failed"), err);
+    else statusBar()->showMessage(tr("Exported %1").arg(p), 3000);
+}
+
+void MainWindow::actPreferences() {
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("Preferences"));
+    auto* form = new QFormLayout(&dlg);
+    auto* on = new QCheckBox(tr("Enable autosave")); on->setChecked(settings::autosaveEnabled());
+    auto* iv = new QSpinBox; iv->setRange(10, 3600); iv->setSuffix(" s"); iv->setValue(settings::autosaveIntervalSeconds());
+    auto* gs = new QDoubleSpinBox; gs->setRange(2, 1000); gs->setValue(settings::defaultGridSize()); gs->setSuffix(" px");
+    form->addRow(on);
+    form->addRow(tr("Autosave interval"), iv);
+    form->addRow(tr("Grid size (new projects)"), gs);
+    auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    form->addRow(bb);
+    connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    if (dlg.exec() != QDialog::Accepted) return;
+    settings::setAutosaveEnabled(on->isChecked());
+    settings::setAutosaveIntervalSeconds(iv->value());
+    settings::setDefaultGridSize(gs->value());
+    m_autosave->setEnabled(on->isChecked());
+    m_autosave->setInterval(iv->value());
+    if (on->isChecked() && m_doc) m_autosave->attach(m_doc.get());
+}
+
+void MainWindow::actAbout() {
+    QMessageBox::about(this, tr("About MyndCraft"),
+        tr("<b>MyndCraft %1</b><br>Phase 1: drawing, vector, layers, project files.<br>"
+           "Built with Qt %2.").arg(QApplication::applicationVersion(), qVersion()));
+}
+
+}  // namespace mynd
