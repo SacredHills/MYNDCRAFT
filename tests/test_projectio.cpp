@@ -189,6 +189,26 @@ private slots:
         Autosaver::discard(Autosaver::findRecoverable()[0]);
         QVERIFY(Autosaver::findRecoverable().isEmpty());
     }
+    void backgroundAutosaveWritesTheSnapshotAndDetachWaitsForIt() {
+        QDir(settings::autosaveDir()).removeRecursively();
+        auto d = sampleDoc();
+        Autosaver as; as.attach(d.get());
+        d->addLayer(LayerType::Raster, "Unsaved work");
+        const int layers = d->layerCount();
+        QVERIFY(as.saveInBackground());
+        QVERIFY(as.busy());
+        d->addLayer(LayerType::Raster, "Added while writing");        // the file holds the state at snapshot time
+        QVERIFY(!as.saveInBackground());                               // one write at a time
+        QTRY_VERIFY(!as.busy());
+        auto found = Autosaver::findRecoverable();
+        QCOMPARE(found.size(), 1);
+        LoadResult r = ProjectIO::load(found[0].autosavePath);
+        QVERIFY2(r.doc, qPrintable(r.error));
+        QCOMPARE(r.doc->layerCount(), layers);
+        QVERIFY(as.saveInBackground());
+        as.detach(true);                                               // must wait for the running write, then delete the file
+        QVERIFY(Autosaver::findRecoverable().isEmpty());
+    }
     void settingsPersist() {
         settings::setAutosaveIntervalSeconds(45);
         QCOMPARE(settings::autosaveIntervalSeconds(), 45);

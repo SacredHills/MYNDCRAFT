@@ -5,6 +5,8 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPointer>
+#include <QThread>
 
 #include "Core/ProjectIO.h"
 #include "Core/Settings.h"
@@ -13,7 +15,7 @@ namespace mynd {
 
 Autosaver::Autosaver(QObject* parent) : QObject(parent) {
     m_timer.setInterval(settings::autosaveIntervalSeconds() * 1000);
-    connect(&m_timer, &QTimer::timeout, this, [this] { saveNow(); });
+    connect(&m_timer, &QTimer::timeout, this, [this] { saveInBackground(); });
 }
 
 void Autosaver::attach(Document* doc) {
@@ -23,6 +25,7 @@ void Autosaver::attach(Document* doc) {
 
 void Autosaver::detach(bool removeFile) {
     m_timer.stop();
+    waitForWriter();          // a write still running would put the file back after we delete it
     if (m_doc && removeFile) {
         QFile::remove(currentAutosavePath());
         QFile::remove(currentAutosavePath() + ".json");
@@ -50,6 +53,25 @@ bool Autosaver::saveNow() {
     QJsonObject meta{{"original", m_doc->filePath()}, {"time", QDateTime::currentDateTime().toString(Qt::ISODate)}};
     QFile f(path + ".json");
     if (f.open(QIODevice::WriteOnly)) f.write(QJsonDocument(meta).toJson());
+    return true;
+}
+
+bool Autosaver::saveInBackground() {
+    if (!m_doc || !m_doc->isModified() || m_busy) return false;     // (a slow write simply skips a round)
+    const auto snap = ProjectIO::snapshot(*m_doc);
+    const QString path = currentAutosavePath();
+    const QString original = m_doc->filePath();
+    m_busy = true;
+    QThread* t = QThread::create([snap, path, original] {
+        QString err;
+        if (!ProjectIO::saveSnapshot(*snap, path, &err)) return;
+        QJsonObject meta{{"original", original}, {"time", QDateTime::currentDateTime().toString(Qt::ISODate)}};
+        QFile f(path + ".json");
+        if (f.open(QIODevice::WriteOnly)) f.write(QJsonDocument(meta).toJson());
+    });
+    m_thread = t;
+    connect(t, &QThread::finished, this, [this, t] { m_busy = false; if (m_thread == t) m_thread = nullptr; t->deleteLater(); });
+    t->start();
     return true;
 }
 

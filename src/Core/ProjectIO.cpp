@@ -75,6 +75,10 @@ void collectRaster(const Layer& g, QVector<const Layer*>& out) {
     }
 }
 
+// Everything a project file contains, captured on the UI thread (images are shared copy-on-write handles, so this is cheap) and
+// encoded / compressed / written later, possibly on another thread.
+struct SnapEntry { QString name; QByteArray data; QImage image; bool png = false; bool compress = false; };
+
 struct ZipWriter {
     zip_t* z = nullptr;
     QVector<QByteArray*> keep;  // zip_source_buffer needs buffers alive until zip_close
@@ -92,12 +96,9 @@ struct ZipWriter {
     }
 };
 
-bool writeZip(const Document& doc, const QString& path, QString* error) {
-    int zerr = 0;
-    QByteArray p = QFile::encodeName(path);
-    zip_t* z = zip_open(p.constData(), ZIP_CREATE | ZIP_TRUNCATE, &zerr);
-    if (!z) { if (error) *error = QString("Cannot create archive (libzip error %1)").arg(zerr); return false; }
-    ZipWriter w; w.z = z;
+bool buildEntries(const Document& doc, std::vector<SnapEntry>& entries, QString* error) {
+    Q_UNUSED(error);
+    struct { std::vector<SnapEntry>* v; bool add(const QString& n, const QByteArray& d, bool c) { v->push_back({n, d, {}, false, c}); return true; } bool addPng(const QString& n, const QImage& i) { v->push_back({n, {}, i, true, false}); return true; } } w{&entries};
 
     QJsonObject manifest;
     manifest["format"] = kProjectFormatName;
@@ -151,9 +152,7 @@ bool writeZip(const Document& doc, const QString& path, QString* error) {
             for (const auto& [mid, mesh] : l->scene3d->meshes) { ok = w.add(meshAssetName(l->id, mid), mesh->geometryBlob(), true); if (!ok) break; }
             for (const auto& [tid, img] : l->scene3d->textures) {
                 if (!ok) break;
-                QByteArray png; QBuffer buf(&png); buf.open(QIODevice::WriteOnly);
-                if (!img.save(&buf, "PNG")) { ok = false; break; }
-                ok = w.add(textureAssetName(l->id, tid), png, false);
+                ok = w.addPng(textureAssetName(l->id, tid), img);
             }
             continue;
         }
@@ -161,18 +160,32 @@ bool writeZip(const Document& doc, const QString& path, QString* error) {
             for (const auto& dm : l->anim.drawings) {   // only drawings the layer still lists; undo-orphans are dropped
                 auto it = l->drawingImages.find(dm.id);
                 if (it == l->drawingImages.end()) { ok = false; break; }
-                QByteArray png; QBuffer buf(&png); buf.open(QIODevice::WriteOnly);
-                if (!it->second.save(&buf, "PNG")) { ok = false; break; }
-                ok = w.add(drawingAssetName(l->id, dm.id), png, false);
+                ok = w.addPng(drawingAssetName(l->id, dm.id), it->second);
                 if (!ok) break;
             }
             continue;
         }
-        QByteArray png;
-        QBuffer buf(&png);
-        buf.open(QIODevice::WriteOnly);
-        if (!l->raster.save(&buf, "PNG")) { ok = false; break; }
-        ok = w.add(rasterAssetName(l->id), png, false);
+        ok = w.addPng(rasterAssetName(l->id), l->raster);
+    }
+    return ok;
+}
+
+bool writeEntries(const std::vector<SnapEntry>& entries, const QString& path, QString* error) {
+    int zerr = 0;
+    QByteArray p = QFile::encodeName(path);
+    zip_t* z = zip_open(p.constData(), ZIP_CREATE | ZIP_TRUNCATE, &zerr);
+    if (!z) { if (error) *error = QString("Cannot create archive (libzip error %1)").arg(zerr); return false; }
+    ZipWriter w; w.z = z;
+    bool ok = true;
+    for (const SnapEntry& e : entries) {
+        if (e.png) {
+            QByteArray png; QBuffer buf(&png); buf.open(QIODevice::WriteOnly);
+            if (!e.image.save(&buf, "PNG")) { ok = false; break; }
+            ok = w.add(e.name, png, false);
+        } else {
+            ok = w.add(e.name, e.data, e.compress);
+        }
+        if (!ok) break;
     }
     if (!ok) {
         zip_discard(z);
@@ -187,7 +200,31 @@ bool writeZip(const Document& doc, const QString& path, QString* error) {
     return true;
 }
 
+bool writeZip(const Document& doc, const QString& path, QString* error) {
+    std::vector<SnapEntry> entries;
+    if (!buildEntries(doc, entries, error)) { if (error && error->isEmpty()) *error = "Failed to add data to project archive"; return false; }
+    return writeEntries(entries, path, error);
+}
+
 }  // namespace
+
+struct ProjectSnapshot { std::vector<SnapEntry> entries; bool ok = false; };
+
+std::shared_ptr<ProjectSnapshot> ProjectIO::snapshot(const Document& doc) {
+    auto s = std::make_shared<ProjectSnapshot>();
+    s->ok = buildEntries(doc, s->entries, nullptr);
+    return s;
+}
+
+bool ProjectIO::saveSnapshot(const ProjectSnapshot& snap, const QString& path, QString* error) {
+    if (!snap.ok) { if (error) *error = "Failed to capture the project"; return false; }
+    const QString tmp = path + ".tmp";
+    QFile::remove(tmp);
+    if (!writeEntries(snap.entries, tmp, error)) { QFile::remove(tmp); return false; }
+    QFile::remove(path);
+    if (!QFile::rename(tmp, path)) { if (error) *error = "Cannot move finished file into place: " + path; QFile::remove(tmp); return false; }
+    return true;
+}
 
 bool ProjectIO::saveCopy(const Document& doc, const QString& path, QString* error) {
     const QString tmp = path + ".tmp";
