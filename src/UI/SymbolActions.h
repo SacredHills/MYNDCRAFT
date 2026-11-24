@@ -13,6 +13,7 @@ class SymbolActions : public QObject {
     Q_OBJECT
 public:
     SymbolActions(EditorSession* s, QWidget* dialogParent);
+    QAction *exportSymbolAction, *importSymbolsAction;
     QAction *convert, *newSymbol, *insertInstance, *editSymbol, *exitSymbol, *deleteSymbol, *renameSymbol;
     void fillMenu(QMenu* menu);
 
@@ -27,6 +28,8 @@ public:
     bool editTarget();
     bool leave();
     bool removeTarget(QString* why = nullptr);
+    bool exportTarget(const QString& path, QString* error);     // the symbol (and the ones it uses) as a .studio asset
+    QVector<QUuid> importFrom(const QString& path, QString* error);
     void refresh();
 
 private:

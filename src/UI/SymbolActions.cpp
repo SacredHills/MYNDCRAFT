@@ -1,5 +1,8 @@
 #include "UI/SymbolActions.h"
 
+#include "Core/ProjectIO.h"
+
+#include <QFileDialog>
 #include <QInputDialog>
 #include <QMessageBox>
 
@@ -71,6 +74,25 @@ SymbolActions::SymbolActions(EditorSession* s, QWidget* dialogParent) : QObject(
         QString why;
         if (!removeTarget(&why) && !why.isEmpty()) emit m_s->message(why);
     });
+    exportSymbolAction = mk(tr("Export Symbol as Asset…"));
+    connect(exportSymbolAction, &QAction::triggered, this, [this] {
+        const SymbolDef* d = m_s->doc() ? m_s->doc()->findSymbol(targetSymbol()) : nullptr;
+        if (!d) return;
+        const QString path = QFileDialog::getSaveFileName(m_parent, tr("Export Symbol"), d->name + ".studio", tr("MyndCraft projects (*.studio)"));
+        if (path.isEmpty()) return;
+        QString err;
+        if (!exportTarget(path, &err)) QMessageBox::warning(m_parent, tr("Export Symbol"), err);
+        else emit m_s->message(tr("Exported symbol to %1").arg(path));
+    });
+    importSymbolsAction = mk(tr("Import Symbols from Project…"));
+    connect(importSymbolsAction, &QAction::triggered, this, [this] {
+        const QString path = QFileDialog::getOpenFileName(m_parent, tr("Import Symbols"), QString(), tr("MyndCraft projects (*.studio)"));
+        if (path.isEmpty()) return;
+        QString err;
+        const QVector<QUuid> ids = importFrom(path, &err);
+        if (ids.isEmpty()) QMessageBox::information(m_parent, tr("Import Symbols"), err.isEmpty() ? tr("That project has no symbols.") : err);
+        else emit m_s->message(tr("Imported %1 symbol(s).").arg(ids.size()));
+    });
     connect(m_s, &EditorSession::activeLayerChanged, this, &SymbolActions::refresh);
     connect(m_s, &EditorSession::documentChanged, this, [this] {
         if (Document* d = m_s->doc()) {
@@ -88,6 +110,8 @@ void SymbolActions::fillMenu(QMenu* m) {
     m->addActions({insertInstance, editSymbol, exitSymbol});
     m->addSeparator();
     m->addActions({renameSymbol, deleteSymbol});
+    m->addSeparator();
+    m->addActions({exportSymbolAction, importSymbolsAction});
 }
 
 void SymbolActions::setLibrarySelection(const QUuid& id) { m_sel = id; refresh(); }
@@ -145,6 +169,20 @@ bool SymbolActions::removeTarget(QString* why) {
     return ok;
 }
 
+bool SymbolActions::exportTarget(const QString& path, QString* error) {
+    if (!m_s->doc()) return false;
+    auto asset = m_s->doc()->symbolAsset(targetSymbol());
+    if (!asset) { if (error) *error = tr("No symbol selected."); return false; }
+    return ProjectIO::saveCopy(*asset, path, error);
+}
+
+QVector<QUuid> SymbolActions::importFrom(const QString& path, QString* error) {
+    if (!m_s->doc()) return {};
+    LoadResult r = ProjectIO::load(path);
+    if (!r.doc) { if (error) *error = r.error; return {}; }
+    return m_s->doc()->importSymbols(*r.doc);
+}
+
 void SymbolActions::refresh() {
     const Document* d = m_s->doc();
     const Layer* l = m_s->activeLayer();
@@ -155,6 +193,8 @@ void SymbolActions::refresh() {
     editSymbol->setEnabled(doc && !t.isNull());
     exitSymbol->setEnabled(doc && d->editingSymbol());
     renameSymbol->setEnabled(doc && !t.isNull());
+    exportSymbolAction->setEnabled(doc && !t.isNull());
+    importSymbolsAction->setEnabled(doc);
     deleteSymbol->setEnabled(doc && !t.isNull());
     insertInstance->setEnabled(doc && d->findSymbol(m_sel) && d->canInstantiate(m_sel));
 }

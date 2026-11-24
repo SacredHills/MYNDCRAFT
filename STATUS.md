@@ -192,11 +192,25 @@ Limitations (honest list):
   so undo always runs in the right context (side effect: entering a symbol marks the project modified).
 - **Saved** in format version 4 (`symbols` in composition.json), also while a symbol is open (the main scene is written).
 - Limitations: no "symbol editing in place" (the rest of the scene is hidden while inside); Movie Clips do not offer
-  independent play/stop; no button-style symbols; no library import between projects; instance cannot be swapped for another
+  independent play/stop; no button-style symbols; instance cannot be swapped for another
   symbol yet; deleting a used symbol is refused rather than removing its instances.
 
-## Next tasks (Phase 5 — remaining: tweens)
-Motion/classic/shape tweens, symbols and nested symbols, reusable animation assets, independent symbol timelines.
+## Phase 5 — Tweens and assets (implemented, headless-tested; feel not yet confirmed on Windows)
+- **Motion / Classic tweens** (Animation menu → Create Tween): presets that write ordinary transform/opacity keyframes
+  between two frames (ease -100..100, rotate none/CW/CCW + turns). They are not a separate tween object: edit the result
+  in the timeline, graph editor or motion path; "Remove Tween" deletes the keys in the span. Motion and Classic currently
+  produce the same keys.
+- **Shape tweens** (`shape.morph` property): vector layer morphs between its start shapes and an end shape (toggle
+  "Edit End Shape"). Shapes pair by index; paths with different point counts are padded by splitting the longest
+  segments; unpaired extra shapes pop in/out at the halfway point; gradients switch at halfway; no shape hints.
+- **Reusable assets:** Symbol → "Export Symbol as Asset…" writes the symbol plus the symbols it uses to a .studio file;
+  "Import Symbols from Project…" merges all symbols of any .studio into the library with new ids and unique names
+  (undoable). Artwork is re-centred if the source canvas size differs; it is not scaled.
+- Independent symbol timelines: Movie Clips loop on their own, Graphics follow the parent (see above).
+- No visual tween span in the timeline yet.
+
+## Next tasks
+Visual tween spans in the timeline, swapping an instance's symbol, per-instance Movie Clip play/stop.
 Also: re-evaluate renderer choice (Skia vs. QPainter) and add a frame cache before the GPU/3D work.
 
 ## Build / CI status

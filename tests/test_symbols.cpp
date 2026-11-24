@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QPainter>
+#include <QTemporaryDir>
 
 #include "TestEnv.h"
 #include "Core/ProjectIO.h"
@@ -144,6 +145,38 @@ private slots:
         QCOMPARE(d->root()->children.size(), size_t(1));
         while (d->undoStack()->canRedo()) d->undoStack()->redo();
         QCOMPARE(px(*d, 0, 20, 20), QColor(Qt::red));
+    }
+
+    void assetsExportWithTheirDependenciesAndImportAsIndependentCopies() {
+        auto d = make();
+        const QUuid a = d->convertToSymbol(square(*d, "A", Qt::red), "Box", SymbolKind::Graphic);
+        const QUuid b = d->createSymbol("Outer", SymbolKind::Graphic, 30);
+        d->enterSymbol(b); d->addSymbolInstance(a); d->exitSymbol();
+        d->createSymbol("Unrelated", SymbolKind::Graphic, 30);
+        auto asset = d->symbolAsset(b);
+        QVERIFY(asset);
+        QCOMPARE(asset->symbols().size(), 2);                             // Outer + Box, not Unrelated
+        QTemporaryDir dir;
+        const QString path = dir.filePath("asset.studio");
+        QString err;
+        QVERIFY2(ProjectIO::saveCopy(*asset, path, &err), qPrintable(err));
+        LoadResult r = ProjectIO::load(path);
+        QVERIFY2(r.doc, qPrintable(r.error));
+
+        auto e = make();                                                  // a different project
+        const QVector<QUuid> ids = e->importSymbols(*r.doc);
+        QCOMPARE(ids.size(), 2);
+        QCOMPARE(e->symbols().size(), 2);
+        for (const QUuid& id : ids) QVERIFY(id != a && id != b);          // fresh ids
+        const QUuid outer = e->symbols()[0].name == "Outer" ? e->symbols()[0].id : e->symbols()[1].id;
+        QVERIFY(!e->addSymbolInstance(outer).isNull());
+        QCOMPARE(px(*e, 0, 20, 20), QColor(Qt::red));                     // nested artwork came along
+        e->importSymbols(*r.doc);                                         // twice = independent copies, unique names
+        QCOMPARE(e->symbols().size(), 4);
+        QSet<QString> names; for (const auto& sd : e->symbols()) names.insert(sd.name);
+        QCOMPARE(names.size(), 4);
+        e->undoStack()->undo();
+        QCOMPARE(e->symbols().size(), 2);
     }
 
     void symbolsSurviveSaveAndLoadEvenWhileASymbolIsOpen() {

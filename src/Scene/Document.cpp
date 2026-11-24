@@ -400,6 +400,89 @@ int Document::symbolUseCount(const QUuid& id) const {
     return n;
 }
 
+std::unique_ptr<Document> Document::symbolAsset(const QUuid& id) const {
+    const SymbolDef* top = findSymbol(id);
+    if (!top) return nullptr;
+    QVector<QUuid> need;
+    std::function<void(const QUuid&)> collect = [&](const QUuid& sid) {
+        if (need.contains(sid)) return;
+        const SymbolDef* d = findSymbol(sid);
+        if (!d || !d->root) return;
+        need.append(sid);
+        forEachLayer(d->root.get(), [&](Layer* l) { if (l->type == LayerType::Symbol) collect(l->symbolId); });
+    };
+    collect(id);
+    CompositionSettings cs = sceneComp();
+    cs.durationFrames = top->durationFrames; cs.workEnabled = false; cs.guides.clear();
+    auto doc = std::make_unique<Document>(cs);
+    QVector<SymbolDef> defs;
+    for (const QUuid& sid : need) {
+        SymbolDef d = *findSymbol(sid);
+        d.root = d.root->cloneExact();                 // the asset must not share layers with this project
+        defs.append(d);
+    }
+    doc->rawSetSymbols(defs);
+    auto inst = std::make_shared<Layer>(LayerType::Symbol, top->name);
+    inst->symbolId = id;
+    inst->parent = doc->root();
+    doc->root()->children.push_back(inst);
+    doc->markSaved();
+    return doc;
+}
+
+static void fitLayerToCanvas(Layer& l, const QSize& from, const QSize& to) {
+    if (from == to) return;
+    const QPoint off((to.width() - from.width()) / 2, (to.height() - from.height()) / 2);
+    auto recenter = [&](const QImage& img) {
+        QImage out(to, QImage::Format_ARGB32_Premultiplied);
+        out.fill(Qt::transparent);
+        QPainter p(&out); p.drawImage(off, img); p.end();
+        return out;
+    };
+    if (!l.raster.isNull()) l.raster = recenter(l.raster);
+    for (auto& [did, img] : l.drawingImages) img = recenter(img);
+    for (auto& s : l.shapes) s.translate(QPointF(off));
+    for (auto& s : l.morphShapes) s.translate(QPointF(off));
+    l.textContent.pos += QPointF(off);
+    for (auto& c : l.children) fitLayerToCanvas(*c, from, to);
+}
+
+static void renewIds(Layer& l) {
+    l.id = QUuid::createUuid();
+    for (auto& c : l.children) renewIds(*c);
+}
+static void remapInstances(Layer& l, const QHash<QUuid, QUuid>& map) {
+    if (l.type == LayerType::Symbol && map.contains(l.symbolId)) l.symbolId = map[l.symbolId];
+    for (auto& c : l.children) remapInstances(*c, map);
+}
+
+QVector<QUuid> Document::importSymbols(const Document& src) {
+    QVector<QUuid> ids;
+    if (src.symbols().isEmpty()) return ids;
+    QHash<QUuid, QUuid> map;
+    for (const SymbolDef& d : src.symbols()) map[d.id] = QUuid::createUuid();
+    QVector<SymbolDef> after = m_symbols;
+    for (const SymbolDef& d : src.symbols()) {
+        SymbolDef n = d;
+        n.id = map[d.id];
+        n.root = d.root->cloneExact();
+        renewIds(*n.root);
+        remapInstances(*n.root, map);
+        fixParents(n.root.get());
+        fitLayerToCanvas(*n.root, src.canvasSize(), canvasSize());
+        bool clash = true;
+        for (int k = 2; clash; ++k) {                 // keep names unique in the library
+            clash = false;
+            for (const auto& e : after) if (e.name == n.name) { clash = true; break; }
+            if (clash) n.name = QString("%1 %2").arg(d.name).arg(k);
+        }
+        after.append(n);
+        ids.append(n.id);
+    }
+    m_undo.push(new SymbolLibraryCommand(this, m_symbols, after, tr("Import Symbols")));
+    return ids;
+}
+
 void Document::rawSetSymbols(const QVector<SymbolDef>& s) {
     m_symbols = s;
     emit symbolsChanged();

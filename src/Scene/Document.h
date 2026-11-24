@@ -133,6 +133,10 @@ public:
     void setInstancePlayback(const QUuid& layerId, SymbolPlay play, int firstFrame);
     void enterSymbol(const QUuid& id);                   // undoable
     void exitSymbol();                                   // undoable
+    // Reusable assets: a symbol (with the symbols it uses) as a stand-alone document, and the reverse. An imported
+    // symbol gets new ids everywhere, so importing the same asset twice gives two independent copies.
+    std::unique_ptr<Document> symbolAsset(const QUuid& id) const;
+    QVector<QUuid> importSymbols(const Document& source);      // undoable; returns the new symbol ids
     void rawSetSymbols(const QVector<SymbolDef>& s);
     void rawEnterSymbol(const QUuid& id);
     void rawExitSymbol();
