@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QMenu>
+#include <QToolBar>
 #include <QPainter>
 
 #include "TestEnv.h"
@@ -64,6 +65,20 @@ private slots:
     }
     void cleanup() {
         doc->undoStack()->clear(); doc->markSaved(); w->close(); w.reset();
+    }
+
+    void windowCannotShrinkUntilPanelsOverlapAndEveryWorkspaceStaysUsable() {
+        w->resize(250, 300);
+        QApplication::processEvents();
+        QVERIFY(w->width() >= 900 && w->height() >= 600);
+        for (const QString& n : {QString("Drawing"), QString("Illustration"), QString("Animation"), QString("Drawing")}) {
+            QVERIFY(w->workspaces()->apply(n));
+            QApplication::processEvents();
+            QVERIFY2(w->canvas()->width() >= 250, qPrintable(n + " canvas=" + QString::number(w->canvas()->width()) + " win=" + QString::number(w->width())));              // canvas keeps real room
+            const QRect tools = w->findChild<QToolBar*>("tools")->geometry();
+            for (QDockWidget* d : w->findChildren<QDockWidget*>())
+                if (d->isVisible() && !d->isFloating()) QVERIFY2(!d->geometry().intersects(tools), qPrintable(n + " " + d->objectName()));
+        }
     }
 
     // ------------------------------------------------------------ session semantics

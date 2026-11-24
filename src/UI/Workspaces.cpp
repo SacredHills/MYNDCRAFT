@@ -15,7 +15,7 @@ WorkspaceManager::WorkspaceManager(QMainWindow* w, const QMap<QString, QDockWidg
 
 void WorkspaceManager::saveCurrent() {
     if (m_current.isEmpty() || !m_win->isVisible()) return;   // a window that was never shown has no real layout to keep
-    const QByteArray st = m_win->saveState(1);
+    const QByteArray st = m_win->saveState(2);
     if (presetNames().contains(m_current)) settings::savePresetLayout(m_current, st);
     else settings::saveWorkspaceState(m_current, st);
 }
@@ -27,7 +27,7 @@ void WorkspaceManager::resetCurrent() {
         emit changed();
     } else if (!m_current.isEmpty()) {
         const QByteArray st = settings::workspaceState(m_current);
-        if (!st.isEmpty()) m_win->restoreState(st, 1);
+        if (!st.isEmpty() && !m_win->restoreState(st, 2)) m_win->restoreState(st, 1);
     }
 }
 
@@ -39,10 +39,14 @@ bool WorkspaceManager::apply(const QString& name) {
     if (name != m_current) saveCurrent();                       // keep the arrangement of the one we are leaving
     if (presetNames().contains(name)) {
         const QByteArray mine = settings::presetLayout(name);
-        if (mine.isEmpty() || !m_win->restoreState(mine, 1)) applyPreset(name);
+        if (mine.isEmpty() || !m_win->restoreState(mine, 2)) applyPreset(name);   // (layouts saved before the Properties dock existed are version 1: dropped)
     } else if (customNames().contains(name)) {
         const QByteArray st = settings::workspaceState(name);
-        if (st.isEmpty() || !m_win->restoreState(st, 1)) return false;
+        if (st.isEmpty()) return false;
+        if (!m_win->restoreState(st, 2)) {
+            if (!m_win->restoreState(st, 1)) return false;
+            if (QDockWidget* p = m_docks.value("properties")) p->hide();   // an older layout does not know this panel
+        }
     } else {
         return false;
     }
@@ -109,7 +113,7 @@ void WorkspaceManager::applyPreset(const QString& name) {
 }
 
 void WorkspaceManager::saveCurrentAs(const QString& name) {
-    settings::saveWorkspaceState(name, m_win->saveState(1));
+    settings::saveWorkspaceState(name, m_win->saveState(2));
     m_current = name;
     settings::setLastWorkspace(name);
     emit changed();

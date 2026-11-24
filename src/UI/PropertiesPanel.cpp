@@ -3,6 +3,7 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QPainter>
+#include <QScrollArea>
 #include <QVBoxLayout>
 
 namespace mynd {
@@ -39,7 +40,17 @@ QIcon diamondIcon(bool filled, bool enabled, const QPalette&) {
 }  // namespace
 
 PropertiesPanel::PropertiesPanel(EditorSession* s, AnimationActions* a, QWidget* parent) : QWidget(parent), m_s(s), m_a(a) {
-    auto* lay = new QVBoxLayout(this);
+    // Everything lives in a scroll area so a narrow dock scrolls instead of overlapping its neighbours.
+    auto* outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    auto* scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    auto* content = new QWidget;
+    scroll->setWidget(content);
+    outer->addWidget(scroll);
+    setMinimumWidth(180);
+    auto* lay = new QVBoxLayout(content);
     lay->setContentsMargins(6, 6, 6, 6);
     m_layerName = new QLabel;
     m_layerName->setStyleSheet("font-weight: bold");
