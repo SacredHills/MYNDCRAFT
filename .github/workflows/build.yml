@@ -34,7 +34,19 @@ jobs:
       - name: Build
         run: cmake --build build
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        shell: pwsh
+        run: |
+          ctest --test-dir build --output-on-failure
+          if ($LASTEXITCODE -ne 0) {
+            # ctest shows nothing for a Qt test that fails on Windows, so rerun each test and print its log.
+            $env:QT_QPA_PLATFORM = "offscreen"
+            foreach ($t in Get-ChildItem build/test_*.exe) {
+              & $t.FullName -o "$($t.BaseName).log,txt" | Out-Null
+              Write-Host "== $($t.Name) exit $LASTEXITCODE"
+              if ($LASTEXITCODE -ne 0) { Get-Content "$($t.BaseName).log" -ErrorAction SilentlyContinue | Select-String -Pattern "FAIL|Loc:|Actual|Expected|Totals|QFATAL" | ForEach-Object { Write-Host $_.Line } }
+            }
+            exit 1
+          }
       - name: Package portable build
         shell: pwsh
         run: |

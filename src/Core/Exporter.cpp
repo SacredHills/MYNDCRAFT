@@ -225,7 +225,7 @@ bool writeGif(const Document& doc, const QString& path, const ExportOptions& opt
         }
         const Indexed q = quantize(img, 256, opt.transparentBackground);
         int bits = 1;
-        while ((1 << bits) < q.palette.size() / 3) ++bits;
+        while ((qsizetype(1) << bits) < q.palette.size() / 3) ++bits;
         QByteArray fr;
         fr.append("\x21\xF9\x04", 3);
         fr.append(char((q.transparentIndex >= 0 ? (2 << 2) | 1 : (1 << 2))));
