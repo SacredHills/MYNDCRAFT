@@ -13,7 +13,15 @@
 
 namespace mynd {
 
-enum class LayerType { Raster, Vector, Group, Text, Animation };
+enum class LayerType { Raster, Vector, Group, Text, Animation, Symbol };
+// Symbols: reusable artwork with its own timeline. A Graphic symbol's time follows the timeline it sits in (with
+// loop / play-once / single-frame control); a Movie Clip runs on its own and always loops from its first frame.
+enum class SymbolKind { Graphic, MovieClip };
+enum class SymbolPlay { Loop, PlayOnce, SingleFrame };
+QString symbolKindKey(SymbolKind k);
+bool symbolKindFromKey(const QString& s, SymbolKind& out);
+QString symbolPlayKey(SymbolPlay p);
+bool symbolPlayFromKey(const QString& s, SymbolPlay& out);
 enum class BlendMode { Normal, Multiply, Screen, Overlay, Darken, Lighten, Add, Difference };
 
 QString blendModeName(BlendMode m);
@@ -56,6 +64,10 @@ public:
     // Keyframe-animatable properties (transform, opacity). Sparse: absent = default value, no keys.
     PropertyTracks tracks;
     std::vector<LayerPtr> children;  // Group layers
+    // Symbol instances: which symbol is shown and how its timeline is mapped onto this one.
+    QUuid symbolId;
+    SymbolPlay symbolPlay = SymbolPlay::Loop;
+    int symbolFirstFrame = 0;
     Layer* parent = nullptr;         // maintained by Document
 
     LayerProps properties() const { return props; }
@@ -70,11 +82,29 @@ public:
     LayerXform xformAt(double frame) const { return evaluateTransform(tracks, frame); }
     // Bounds of what the layer draws at `frame`, in its own (untransformed) space: opaque pixels, shapes, text,
     // or the union of a group's children (each mapped through its own transform). Empty when there is nothing.
-    QRectF contentBounds(int frame, const QSize& canvas) const;
+    QRectF contentBounds(int frame, const QSize& canvas, const struct SymbolResolver* syms = nullptr) const;
     // Deep copy with fresh ids (for duplicate).
     LayerPtr cloneWithNewIds() const;
     // Deep copy keeping ids (for undo snapshots).
     LayerPtr cloneExact() const;
 };
+
+// A library symbol: a named layer tree (`root`, a group that owns the children) plus its own length.
+struct SymbolDef {
+    QUuid id;
+    QString name;
+    SymbolKind kind = SymbolKind::Graphic;
+    int durationFrames = 24;
+    LayerPtr root;
+    bool operator==(const SymbolDef& o) const {
+        return id == o.id && name == o.name && kind == o.kind && durationFrames == o.durationFrames && root == o.root;
+    }
+};
+struct SymbolResolver {
+    virtual ~SymbolResolver() = default;
+    virtual const SymbolDef* findSymbol(const QUuid& id) const = 0;
+};
+// Frame of the symbol's own timeline that an instance shows while its parent timeline is at `parentFrame`.
+int symbolLocalFrame(const Layer& instance, const SymbolDef& def, int parentFrame);
 
 }  // namespace mynd

@@ -144,4 +144,49 @@ bool TextStateCommand::mergeWith(const QUndoCommand* other) {
     return true;
 }
 
+// ---------------- Symbols ----------------
+SymbolLibraryCommand::SymbolLibraryCommand(Document* d, const QVector<SymbolDef>& b, const QVector<SymbolDef>& a, const QString& text)
+    : m_doc(d), m_before(b), m_after(a) { setText(text); }
+void SymbolLibraryCommand::redo() { m_doc->rawSetSymbols(m_after); }
+void SymbolLibraryCommand::undo() { m_doc->rawSetSymbols(m_before); }
+
+ConvertToSymbolCommand::ConvertToSymbolCommand(Document* d, const QUuid& layerId, const SymbolDef& def, LayerPtr instance)
+    : m_doc(d), m_layerId(layerId), m_def(def), m_instance(std::move(instance)) {
+    setText(QObject::tr("Convert to Symbol"));
+}
+void ConvertToSymbolCommand::redo() {
+    m_before = m_doc->symbols();
+    m_layer = m_doc->rawRemove(m_layerId, &m_parent, &m_index, false);
+    if (!m_layer) return;
+    m_def.root->children.clear();
+    m_def.root->children.push_back(m_layer);
+    m_layer->parent = m_def.root.get();
+    QVector<SymbolDef> after = m_before; after.append(m_def);
+    m_doc->rawSetSymbols(after);
+    m_doc->rawInsert(m_parent, m_index, m_instance);
+}
+void ConvertToSymbolCommand::undo() {
+    if (!m_layer) return;
+    m_doc->rawRemove(m_instance->id, nullptr, nullptr, false);
+    m_def.root->children.clear();
+    m_layer->parent = nullptr;
+    m_doc->rawSetSymbols(m_before);
+    m_doc->rawInsert(m_parent, m_index, m_layer);
+}
+
+SymbolContextCommand::SymbolContextCommand(Document* d, const QUuid& symbolId, bool enter)
+    : m_doc(d), m_symbol(symbolId), m_enter(enter) {
+    setText(enter ? QObject::tr("Edit Symbol") : QObject::tr("Exit Symbol"));
+}
+void SymbolContextCommand::redo() { if (m_enter) m_doc->rawEnterSymbol(m_symbol); else m_doc->rawExitSymbol(); }
+void SymbolContextCommand::undo() { if (m_enter) m_doc->rawExitSymbol(); else m_doc->rawEnterSymbol(m_symbol); }
+
+SymbolInstanceCommand::SymbolInstanceCommand(Document* d, const QUuid& layer, SymbolPlay bp, int bf, SymbolPlay ap, int af)
+    : m_doc(d), m_layer(layer), m_bp(bp), m_ap(ap), m_bf(bf), m_af(af) { setText(QObject::tr("Symbol Playback")); }
+void SymbolInstanceCommand::apply(SymbolPlay p, int f) {
+    if (Layer* l = m_doc->findLayer(m_layer)) { l->symbolPlay = p; l->symbolFirstFrame = f; m_doc->emitPropsChanged(m_layer); m_doc->emitContentChanged({}); }
+}
+void SymbolInstanceCommand::redo() { apply(m_ap, m_af); }
+void SymbolInstanceCommand::undo() { apply(m_bp, m_bf); }
+
 }  // namespace mynd

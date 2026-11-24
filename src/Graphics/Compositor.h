@@ -30,7 +30,7 @@ public:
         int frame = -1;          // -1 = the document's current frame
         OnionSkin onion;
     };
-    struct Ctx { int frame; const OnionSkin* onion; };
+    struct Ctx { int frame; const OnionSkin* onion; const SymbolResolver* syms = nullptr; int depth = 0; };
     static QImage render(const Document& doc, const QRect& region, const Options& opt);
     static QImage render(const Document& doc) { return render(doc, doc.canvasRect(), Options{}); }
 
@@ -41,6 +41,7 @@ public:
 private:
     static void drawGroup(QPainter& p, const Layer& group, const QRect& region, const QSize& canvas, const Ctx& ctx);
     static void drawLayer(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx);
+    static void drawSymbol(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx);
     static void drawAnimationLayer(QPainter& p, const Layer& l, const QRect& region, const Ctx& ctx, double opacity);
     static void drawLayerContent(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx,
                                  double opacity, BlendMode blend);

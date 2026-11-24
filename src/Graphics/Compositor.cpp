@@ -38,7 +38,7 @@ QImage Compositor::render(const Document& doc, const QRect& region, const Option
     p.setRenderHint(QPainter::Antialiasing);
     p.translate(-r.topLeft());
     p.setClipRect(r);
-    const Ctx ctx{opt.frame >= 0 ? opt.frame : doc.currentFrame(), &opt.onion};
+    const Ctx ctx{opt.frame >= 0 ? opt.frame : doc.currentFrame(), &opt.onion, &doc, 0};
     drawGroup(p, *doc.root(), r, doc.canvasSize(), ctx);
     return out;
 }
@@ -70,6 +70,16 @@ static QVector<QUuid> onionDrawings(const AnimationState& a, int frame, int step
         last = d;
     }
     return out;
+}
+
+void Compositor::drawSymbol(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx) {
+    const SymbolDef* d = ctx.syms ? ctx.syms->findSymbol(l.symbolId) : nullptr;
+    if (!d || !d->root || ctx.depth >= 8) return;       // missing symbol, or runaway nesting from a damaged file
+    Ctx inner = ctx;
+    inner.frame = symbolLocalFrame(l, *d, ctx.frame);
+    inner.onion = nullptr;                              // onion skin is a per-timeline editing aid
+    inner.depth = ctx.depth + 1;
+    drawGroup(p, *d->root, region, canvas, inner);
 }
 
 void Compositor::drawAnimationLayer(QPainter& p, const Layer& l, const QRect& region, const Ctx& ctx, double opacity) {
@@ -121,6 +131,7 @@ void Compositor::drawLayerContent(QPainter& p, const Layer& l, const QRect& regi
         // Fast path: no isolation needed.
         if (l.type == LayerType::Vector) drawShapes(p, l.shapes);
         else if (l.type == LayerType::Text) l.textContent.draw(p);
+        else if (l.type == LayerType::Symbol) drawSymbol(p, l, region, canvas, ctx);
         else drawGroup(p, l, region, canvas, ctx);
     } else {
         // Isolated: render to a transparent buffer sized to the region, then blend as a unit.
@@ -132,6 +143,7 @@ void Compositor::drawLayerContent(QPainter& p, const Layer& l, const QRect& regi
         bp.setClipRect(region);
         if (l.type == LayerType::Vector) drawShapes(bp, l.shapes);
         else if (l.type == LayerType::Text) l.textContent.draw(bp);
+        else if (l.type == LayerType::Symbol) drawSymbol(bp, l, region, canvas, ctx);
         else drawGroup(bp, l, region, canvas, ctx);
         bp.end();
         p.setOpacity(opacity);

@@ -123,4 +123,45 @@ private:
     Document* m_doc; QUuid m_layer; TextContent m_before, m_after; QString m_mergeKey;
 };
 
+// ---- Symbols ----
+class SymbolLibraryCommand : public QUndoCommand {
+public:
+    SymbolLibraryCommand(Document* d, const QVector<SymbolDef>& before, const QVector<SymbolDef>& after, const QString& text);
+    void undo() override;
+    void redo() override;
+private:
+    Document* m_doc; QVector<SymbolDef> m_before, m_after;
+};
+
+// Moves a layer into a brand-new symbol and puts an instance of it where the layer was.
+class ConvertToSymbolCommand : public QUndoCommand {
+public:
+    ConvertToSymbolCommand(Document* d, const QUuid& layerId, const SymbolDef& def, LayerPtr instance);
+    void undo() override;
+    void redo() override;
+private:
+    Document* m_doc; QUuid m_layerId; SymbolDef m_def; LayerPtr m_instance, m_layer;
+    QUuid m_parent; int m_index = -1; QVector<SymbolDef> m_before;
+};
+
+// Entering / leaving a symbol is part of the history so that undo always runs in the context its step was made in.
+class SymbolContextCommand : public QUndoCommand {
+public:
+    SymbolContextCommand(Document* d, const QUuid& symbolId, bool enter);
+    void undo() override;
+    void redo() override;
+private:
+    Document* m_doc; QUuid m_symbol; bool m_enter;
+};
+
+class SymbolInstanceCommand : public QUndoCommand {
+public:
+    SymbolInstanceCommand(Document* d, const QUuid& layer, SymbolPlay bp, int bf, SymbolPlay ap, int af);
+    void undo() override;
+    void redo() override;
+private:
+    void apply(SymbolPlay p, int f);
+    Document* m_doc; QUuid m_layer; SymbolPlay m_bp, m_ap; int m_bf, m_af;
+};
+
 }  // namespace mynd

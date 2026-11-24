@@ -5,6 +5,9 @@
 #include <QUuid>
 
 #include "Core/FrameRate.h"
+#include <QStringList>
+#include <QVector>
+
 #include "Scene/Layer.h"
 
 namespace mynd {
@@ -35,7 +38,7 @@ constexpr int kMaxCanvasDim = 16384;
 
 // The persistent project model: one composition with a layer tree. All edits that should be
 // undoable go through the edit* methods, which push commands onto `undoStack()`.
-class Document : public QObject {
+class Document : public QObject, public SymbolResolver {
     Q_OBJECT
 public:
     explicit Document(const CompositionSettings& s = {}, QObject* parent = nullptr);
@@ -104,6 +107,33 @@ public:
     void editTracks(const QUuid& layerId, const PropertyTracks& after, const QString& text, const QString& mergeKey = {});
     void emitTracksChanged(const QUuid& layerId);
 
+    // ---- Symbols (reusable artwork with its own timeline) ----
+    const QVector<SymbolDef>& symbols() const { return m_symbols; }
+    const SymbolDef* findSymbol(const QUuid& id) const override;
+    // While editing a symbol, root()/comp().durationFrames/the current frame all refer to the symbol; sceneRoot() and
+    // sceneComp() always describe the main scene (used when saving).
+    bool editingSymbol() const { return !m_ctx.isEmpty(); }
+    QUuid editingSymbolId() const { return m_ctx.isEmpty() ? QUuid() : m_ctx.last().symbolId; }
+    QStringList breadcrumb() const;                      // "Scene", then the names of the symbols being edited
+    Layer* sceneRoot() const { return m_ctx.isEmpty() ? m_root.get() : m_ctx.first().savedRoot.get(); }
+    CompositionSettings sceneComp() const;
+    bool symbolUses(const QUuid& outer, const QUuid& inner) const;   // does `outer` (transitively) contain an instance of `inner`?
+    bool canInstantiate(const QUuid& symbolId) const;    // false if an instance here would make a symbol contain itself
+    int symbolUseCount(const QUuid& id) const;           // instances in the scene and in every symbol
+    QUuid createSymbol(const QString& name, SymbolKind kind, int durationFrames);
+    // Moves a layer (or group) into a new symbol and puts an instance in its place. Returns the symbol id.
+    QUuid convertToSymbol(const QUuid& layerId, const QString& name, SymbolKind kind);
+    QUuid addSymbolInstance(const QUuid& symbolId, const QUuid& parentId = {}, int index = -1);   // returns the layer id, or null
+    bool deleteSymbol(const QUuid& id, QString* why = nullptr);       // refused while instances exist
+    void renameSymbol(const QUuid& id, const QString& name);
+    void setSymbolKind(const QUuid& id, SymbolKind kind);
+    void setInstancePlayback(const QUuid& layerId, SymbolPlay play, int firstFrame);
+    void enterSymbol(const QUuid& id);                   // undoable
+    void exitSymbol();                                   // undoable
+    void rawSetSymbols(const QVector<SymbolDef>& s);
+    void rawEnterSymbol(const QUuid& id);
+    void rawExitSymbol();
+
     QUuid addTextLayer(const TextContent& content, const QString& name, QUuid parentId = {}, int index = -1);
     // Replaces the content of a text layer. Edits with the same non-empty mergeKey collapse into one undo step.
     void setTextContent(const QUuid& layerId, const TextContent& after, const QString& text,
@@ -133,6 +163,8 @@ signals:
     void animationChanged(const QUuid& layerId);
     void tracksChanged(const QUuid& layerId);
     void timingChanged();
+    void symbolsChanged();
+    void contextChanged();                // entered or left a symbol
 
 private:
     QUuid m_docId = QUuid::createUuid();
@@ -142,6 +174,14 @@ private:
     QString m_filePath;
     bool m_extraDirty = false;
     int m_frame = 0;
+    QVector<SymbolDef> m_symbols;
+    struct EditCtx {
+        QUuid symbolId;
+        LayerPtr savedRoot;
+        int savedDuration = 0, savedWorkIn = 0, savedWorkOut = 0, savedFrame = 0;
+        bool savedWorkEnabled = false;
+    };
+    QVector<EditCtx> m_ctx;
 };
 
 }  // namespace mynd

@@ -42,6 +42,7 @@ QString layerTypeKey(LayerType t) {
     case LayerType::Group: return "group";
     case LayerType::Text: return "text";
     case LayerType::Animation: return "animation";
+    case LayerType::Symbol: return "symbol";
     }
     return "raster";
 }
@@ -51,8 +52,32 @@ bool layerTypeFromKey(const QString& k, LayerType& out) {
     else if (k == "group") out = LayerType::Group;
     else if (k == "text") out = LayerType::Text;
     else if (k == "animation") out = LayerType::Animation;
+    else if (k == "symbol") out = LayerType::Symbol;
     else return false;
     return true;
+}
+
+QString symbolKindKey(SymbolKind k) { return k == SymbolKind::MovieClip ? "movieclip" : "graphic"; }
+bool symbolKindFromKey(const QString& s, SymbolKind& out) {
+    if (s == "graphic") out = SymbolKind::Graphic; else if (s == "movieclip") out = SymbolKind::MovieClip; else return false;
+    return true;
+}
+QString symbolPlayKey(SymbolPlay p) { return p == SymbolPlay::PlayOnce ? "once" : p == SymbolPlay::SingleFrame ? "single" : "loop"; }
+bool symbolPlayFromKey(const QString& s, SymbolPlay& out) {
+    if (s == "loop") out = SymbolPlay::Loop; else if (s == "once") out = SymbolPlay::PlayOnce; else if (s == "single") out = SymbolPlay::SingleFrame; else return false;
+    return true;
+}
+
+int symbolLocalFrame(const Layer& inst, const SymbolDef& def, int parentFrame) {
+    const int n = std::max(1, def.durationFrames);
+    if (def.kind == SymbolKind::MovieClip) return ((parentFrame % n) + n) % n;     // free-running loop
+    const int first = std::clamp(inst.symbolFirstFrame, 0, n - 1);
+    switch (inst.symbolPlay) {
+    case SymbolPlay::SingleFrame: return first;
+    case SymbolPlay::PlayOnce: return std::min(first + std::max(0, parentFrame), n - 1);
+    case SymbolPlay::Loop: break;
+    }
+    return ((first + parentFrame) % n + n) % n;
 }
 
 Layer::Layer(LayerType t, const QString& name) : id(QUuid::createUuid()), type(t) { props.name = name; }
@@ -82,7 +107,19 @@ static QRect alphaBounds(const QImage& img) {
     return x1 < 0 ? QRect() : QRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
 }
 
-QRectF Layer::contentBounds(int frame, const QSize& canvas) const {
+static QRectF childrenBounds(const std::vector<LayerPtr>& kids, int frame, const QSize& canvas, const SymbolResolver* syms) {
+    QRectF r;
+    const QPointF c(canvas.width() / 2.0, canvas.height() / 2.0);
+    for (const auto& ch : kids) {
+        if (!ch->props.visible) continue;
+        const QRectF b = ch->contentBounds(frame, canvas, syms);
+        if (b.isNull()) continue;
+        r = r.united(ch->xformAt(frame).matrix(c).mapRect(b));
+    }
+    return r;
+}
+
+QRectF Layer::contentBounds(int frame, const QSize& canvas, const SymbolResolver* syms) const {
     switch (type) {
     case LayerType::Raster:
     case LayerType::Animation: {
@@ -95,15 +132,15 @@ QRectF Layer::contentBounds(int frame, const QSize& canvas) const {
         return r;
     }
     case LayerType::Text: return textContent.bounds();
-    case LayerType::Group: {
-        QRectF r;
-        const QPointF c(canvas.width() / 2.0, canvas.height() / 2.0);
-        for (const auto& ch : children) {
-            if (!ch->props.visible) continue;
-            const QRectF b = ch->contentBounds(frame, canvas);
-            if (b.isNull()) continue;
-            r = r.united(ch->xformAt(frame).matrix(c).mapRect(b));
-        }
+    case LayerType::Group: return childrenBounds(children, frame, canvas, syms);
+    case LayerType::Symbol: {
+        const SymbolDef* d = syms ? syms->findSymbol(symbolId) : nullptr;
+        if (!d || !d->root) return {};
+        static thread_local int depth = 0;           // symbols may not contain themselves, but a damaged file might
+        if (depth > 8) return {};
+        ++depth;
+        const QRectF r = childrenBounds(d->root->children, symbolLocalFrame(*this, *d, frame), canvas, syms);
+        --depth;
         return r;
     }
     }
@@ -119,6 +156,7 @@ LayerPtr Layer::cloneExact() const {
     c->textContent = textContent;
     c->anim = anim;
     c->tracks = tracks;
+    c->symbolId = symbolId; c->symbolPlay = symbolPlay; c->symbolFirstFrame = symbolFirstFrame;
     for (const auto& [did, img] : drawingImages) c->drawingImages[did] = img.copy();
     for (const auto& ch : children) {
         auto cc = ch->cloneExact();
@@ -136,6 +174,7 @@ LayerPtr Layer::cloneWithNewIds() const {
     c->textContent = textContent;
     c->anim = anim;
     c->tracks = tracks;
+    c->symbolId = symbolId; c->symbolPlay = symbolPlay; c->symbolFirstFrame = symbolFirstFrame;
     for (const auto& [did, img] : drawingImages) c->drawingImages[did] = img.copy();
     for (auto& s : c->shapes) s.id = QUuid::createUuid();  // group ids stay consistent within the layer
     QHash<QUuid, QUuid> gmap;

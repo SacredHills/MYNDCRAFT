@@ -37,6 +37,11 @@ QJsonObject layerToJson(const Layer& l) {
     if (l.type == LayerType::Text) o["text"] = l.textContent.toJson();
     if (l.type == LayerType::Animation) o["animation"] = l.anim.toJson();
     if (!l.tracks.isEmpty()) o["tracks"] = tracksToJson(l.tracks);
+    if (l.type == LayerType::Symbol) {
+        o["symbolId"] = l.symbolId.toString(QUuid::WithoutBraces);
+        o["play"] = symbolPlayKey(l.symbolPlay);
+        o["firstFrame"] = l.symbolFirstFrame;
+    }
     if (l.type == LayerType::Group) {
         QJsonArray ch;
         for (const auto& c : l.children) ch.append(layerToJson(*c));
@@ -83,7 +88,7 @@ bool writeZip(const Document& doc, const QString& path, QString* error) {
     manifest["docId"] = doc.docId().toString(QUuid::WithoutBraces);
     manifest["composition"] = "composition.json";
 
-    const CompositionSettings& c = doc.comp();
+    const CompositionSettings c = doc.sceneComp();     // always the main scene, even while a symbol is open
     QJsonObject comp;
     comp["width"] = c.width;
     comp["height"] = c.height;
@@ -100,13 +105,27 @@ bool writeZip(const Document& doc, const QString& path, QString* error) {
         guides.append(QJsonObject{{"horizontal", g.orientation == Qt::Horizontal}, {"pos", g.pos}});
     comp["guides"] = guides;
     QJsonArray root;
-    for (const auto& ch : doc.root()->children) root.append(layerToJson(*ch));
+    for (const auto& ch : doc.sceneRoot()->children) root.append(layerToJson(*ch));
     comp["layers"] = root;
+    QJsonArray syms;
+    for (const SymbolDef& d : doc.symbols()) {
+        QJsonObject so;
+        so["id"] = d.id.toString(QUuid::WithoutBraces);
+        so["name"] = d.name;
+        so["kind"] = symbolKindKey(d.kind);
+        so["durationFrames"] = d.durationFrames;
+        QJsonArray lay;
+        if (d.root) for (const auto& ch : d.root->children) lay.append(layerToJson(*ch));
+        so["layers"] = lay;
+        syms.append(so);
+    }
+    if (!syms.isEmpty()) comp["symbols"] = syms;
 
     bool ok = w.add("manifest.json", QJsonDocument(manifest).toJson(), true) &&
               w.add("composition.json", QJsonDocument(comp).toJson(QJsonDocument::Compact), true);
     QVector<const Layer*> rasters;
-    collectRaster(*doc.root(), rasters);
+    collectRaster(*doc.sceneRoot(), rasters);
+    for (const SymbolDef& d : doc.symbols()) if (d.root) collectRaster(*d.root, rasters);
     for (const Layer* l : rasters) {
         if (!ok) break;
         if (l->type == LayerType::Animation) {
@@ -174,6 +193,7 @@ bool ProjectIO::save(Document& doc, const QString& path, QString* error, bool ke
 }
 
 bool ProjectIO::migrate(QJsonObject&, int fromVersion, QString* error) {
+    // v3 -> v4 added the symbol library and symbol-instance layers, also optional.
     // v2 -> v3 added per-layer property tracks (transform/opacity keyframes), also optional.
     // v1 -> v2 added animation layers, drawings and timeline settings. Every new field is optional with
     // a default, so a v1 document needs no transformation. Each future breaking change adds a step here.
@@ -269,6 +289,13 @@ LayerPtr layerFromJson(const QJsonObject& o, zip_t* z, const Document& doc, QStr
             }
             l->drawingImages[dm.id] = img;
         }
+    } else if (t == LayerType::Symbol) {
+        l->symbolId = QUuid(o["symbolId"].toString());
+        if (!symbolPlayFromKey(o["play"].toString("loop"), l->symbolPlay)) {
+            warnings << QString("Layer '%1': unknown symbol playback mode, using Loop").arg(l->props.name);
+            l->symbolPlay = SymbolPlay::Loop;
+        }
+        l->symbolFirstFrame = std::max(0, o["firstFrame"].toInt(0));
     } else {
         for (const auto& v : o["children"].toArray()) {
             LayerPtr c = layerFromJson(v.toObject(), z, doc, warnings, err, depth + 1);
@@ -346,6 +373,26 @@ LoadResult ProjectIO::load(const QString& path) {
         root->children.push_back(l);
     }
     doc->setRoot(root);
+    QVector<SymbolDef> symbols;
+    for (const auto& sv : comp["symbols"].toArray()) {
+        const QJsonObject so = sv.toObject();
+        SymbolDef d;
+        d.id = QUuid(so["id"].toString());
+        if (d.id.isNull()) { r.error = "Symbol without valid id"; return r; }
+        d.name = so["name"].toString("Symbol");
+        if (!symbolKindFromKey(so["kind"].toString("graphic"), d.kind)) { r.warnings << QString("Symbol '%1': unknown type, using Graphic").arg(d.name); d.kind = SymbolKind::Graphic; }
+        d.durationFrames = qBound(1, so["durationFrames"].toInt(24), kMaxDurationFrames);
+        d.root = std::make_shared<Layer>(LayerType::Group, "Symbol");
+        for (const auto& v : so["layers"].toArray()) {
+            QString lerr;
+            LayerPtr l = layerFromJson(v.toObject(), z, *doc, r.warnings, &lerr, 0);
+            if (!l) { r.error = "Corrupt layer data in symbol '" + d.name + "': " + lerr; return r; }
+            l->parent = d.root.get();
+            d.root->children.push_back(l);
+        }
+        symbols.append(d);
+    }
+    doc->rawSetSymbols(symbols);
     doc->setFilePath(path);
     const QStringList problems = validate(*doc);
     if (!problems.isEmpty()) { r.error = "Project failed validation: " + problems.join("; "); return r; }
@@ -357,7 +404,15 @@ LoadResult ProjectIO::load(const QString& path) {
 QStringList ProjectIO::validate(const Document& doc) {
     QStringList problems;
     QSet<QUuid> seen;
-    Document::forEachLayer(doc.root(), [&](Layer* l) {
+    QSet<QUuid> symbolIds;
+    for (const SymbolDef& d : doc.symbols()) {
+        if (symbolIds.contains(d.id)) problems << "duplicate symbol id " + d.id.toString();
+        symbolIds.insert(d.id);
+    }
+    auto checkLayers = [&](const Layer* root) {
+    Document::forEachLayer(root, [&](Layer* l) {
+        if (l->type == LayerType::Symbol && !symbolIds.contains(l->symbolId))
+            problems << "instance '" + l->props.name + "' refers to a missing symbol";
         if (seen.contains(l->id)) problems << "duplicate layer id " + l->id.toString();
         seen.insert(l->id);
         if (l->type == LayerType::Raster && l->raster.size() != doc.canvasSize())
@@ -370,6 +425,14 @@ QStringList ProjectIO::validate(const Document& doc) {
             shapeIds.insert(s.id);
         }
     });
+    };
+    checkLayers(doc.sceneRoot());
+    for (const SymbolDef& d : doc.symbols()) {
+        if (d.root) checkLayers(d.root.get());
+        for (const SymbolDef& e : doc.symbols())
+            if (d.id != e.id && doc.symbolUses(d.id, e.id) && doc.symbolUses(e.id, d.id)) problems << "symbols '" + d.name + "' and '" + e.name + "' contain each other";
+        if (doc.symbolUses(d.id, d.id)) problems << "symbol '" + d.name + "' contains itself";
+    }
     return problems;
 }
 

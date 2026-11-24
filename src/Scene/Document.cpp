@@ -1,6 +1,8 @@
 #include "Scene/Document.h"
 
 #include <QPainter>
+#include <QSet>
+#include <functional>
 
 #include "Core/UndoCommands.h"
 
@@ -19,6 +21,7 @@ Document::Document(const CompositionSettings& s, QObject* parent) : QObject(pare
 Document::~Document() = default;
 
 void Document::setRoot(LayerPtr r) {
+    m_ctx.clear();
     m_root = std::move(r);
     fixParents(m_root.get());
     m_undo.clear();
@@ -244,6 +247,7 @@ static TimingSettings timingOf(const CompositionSettings& c) {
 void Document::applyTiming(const TimingSettings& t) {
     m_comp.fps = t.fps; m_comp.durationFrames = t.durationFrames;
     m_comp.workEnabled = t.workEnabled; m_comp.workIn = t.workIn; m_comp.workOut = t.workOut;
+    if (!m_ctx.isEmpty()) for (auto& d : m_symbols) if (d.id == m_ctx.last().symbolId) d.durationFrames = m_comp.durationFrames;   // inside a symbol the timeline length is the symbol's
     if (m_frame >= m_comp.durationFrames) { m_frame = m_comp.durationFrames - 1; emit frameChanged(m_frame); }
     emit timingChanged();
     emitContentChanged({});
@@ -318,6 +322,202 @@ void Document::commitRasterPatch(const QUuid& layerId, const QRect& rect, const 
     if (l->type == LayerType::Animation) { drawing = l->anim.drawingAt(m_frame); src = l->imageAt(m_frame); }
     if (!src) return;
     m_undo.push(new RasterPatchCommand(this, layerId, drawing, r, b, src->copy(r), text));
+}
+
+}  // namespace mynd
+
+namespace mynd {
+
+// ---------------- Symbols ----------------
+const SymbolDef* Document::findSymbol(const QUuid& id) const {
+    for (const auto& d : m_symbols) if (d.id == id) return &d;
+    return nullptr;
+}
+
+QStringList Document::breadcrumb() const {
+    QStringList b{tr("Scene")};
+    for (const auto& c : m_ctx) if (const SymbolDef* d = findSymbol(c.symbolId)) b << d->name;
+    return b;
+}
+
+CompositionSettings Document::sceneComp() const {
+    CompositionSettings c = m_comp;
+    if (!m_ctx.isEmpty()) {
+        const EditCtx& e = m_ctx.first();
+        c.durationFrames = e.savedDuration; c.workEnabled = e.savedWorkEnabled; c.workIn = e.savedWorkIn; c.workOut = e.savedWorkOut;
+    }
+    return c;
+}
+
+static bool containsInstanceOf(const Layer& g, const QUuid& inner) {
+    for (const auto& c : g.children) {
+        if (c->type == LayerType::Symbol && c->symbolId == inner) return true;
+        if (containsInstanceOf(*c, inner)) return true;
+    }
+    return false;
+}
+
+bool Document::symbolUses(const QUuid& outer, const QUuid& inner) const {
+    QSet<QUuid> seen;
+    std::function<bool(const QUuid&)> walk = [&](const QUuid& id) {
+        if (seen.contains(id)) return false;
+        seen.insert(id);
+        const SymbolDef* d = findSymbol(id);
+        if (!d || !d->root) return false;
+        if (containsInstanceOf(*d->root, inner)) return true;
+        bool found = false;
+        forEachLayer(d->root.get(), [&](Layer* l) {
+            if (!found && l->type == LayerType::Symbol && walk(l->symbolId)) found = true;
+        });
+        return found;
+    };
+    return walk(outer);
+}
+
+bool Document::canInstantiate(const QUuid& symbolId) const {
+    if (!findSymbol(symbolId)) return false;
+    for (const auto& c : m_ctx) {                       // every symbol we are inside would contain it
+        if (c.symbolId == symbolId || symbolUses(symbolId, c.symbolId)) return false;
+    }
+    return true;
+}
+
+int Document::symbolUseCount(const QUuid& id) const {
+    int n = 0;
+    auto count = [&](const Layer* root) {
+        if (!root) return;
+        forEachLayer(root, [&](Layer* l) { if (l->type == LayerType::Symbol && l->symbolId == id) ++n; });
+    };
+    count(sceneRoot());
+    for (const auto& d : m_symbols) count(d.root.get());
+    return n;
+}
+
+void Document::rawSetSymbols(const QVector<SymbolDef>& s) {
+    m_symbols = s;
+    emit symbolsChanged();
+    emitContentChanged({});
+}
+
+void Document::rawEnterSymbol(const QUuid& id) {
+    const SymbolDef* d = findSymbol(id);
+    if (!d || !d->root) return;
+    EditCtx c;
+    c.symbolId = id; c.savedRoot = m_root; c.savedDuration = m_comp.durationFrames;
+    c.savedWorkEnabled = m_comp.workEnabled; c.savedWorkIn = m_comp.workIn; c.savedWorkOut = m_comp.workOut; c.savedFrame = m_frame;
+    m_ctx.append(c);
+    m_root = d->root;
+    fixParents(m_root.get());
+    m_comp.durationFrames = std::max(1, d->durationFrames);
+    m_comp.workEnabled = false; m_comp.workIn = 0; m_comp.workOut = m_comp.durationFrames - 1;
+    m_frame = 0;
+    emit frameChanged(m_frame);
+    emit timingChanged();
+    emit contextChanged();
+    emitTreeChanged();
+    emitContentChanged({});
+}
+
+void Document::rawExitSymbol() {
+    if (m_ctx.isEmpty()) return;
+    const EditCtx c = m_ctx.takeLast();
+    for (auto& d : m_symbols) if (d.id == c.symbolId) d.durationFrames = m_comp.durationFrames;   // the timeline length belongs to the symbol
+    m_root = c.savedRoot;
+    m_comp.durationFrames = c.savedDuration;
+    m_comp.workEnabled = c.savedWorkEnabled; m_comp.workIn = c.savedWorkIn; m_comp.workOut = c.savedWorkOut;
+    m_frame = std::min(c.savedFrame, m_comp.durationFrames - 1);
+    emit frameChanged(m_frame);
+    emit timingChanged();
+    emit symbolsChanged();
+    emit contextChanged();
+    emitTreeChanged();
+    emitContentChanged({});
+}
+
+QUuid Document::createSymbol(const QString& name, SymbolKind kind, int durationFrames) {
+    SymbolDef d;
+    d.id = QUuid::createUuid(); d.name = name; d.kind = kind; d.durationFrames = qBound(1, durationFrames, kMaxDurationFrames);
+    d.root = std::make_shared<Layer>(LayerType::Group, "Symbol");
+    QVector<SymbolDef> after = m_symbols; after.append(d);
+    m_undo.push(new SymbolLibraryCommand(this, m_symbols, after, tr("New Symbol")));
+    return d.id;
+}
+
+QUuid Document::convertToSymbol(const QUuid& layerId, const QString& name, SymbolKind kind) {
+    Layer* l = findLayer(layerId);
+    if (!l || !l->parent) return {};
+    // A symbol cannot be made out of a layer that already holds an instance of a symbol we are inside of.
+    for (const auto& c : m_ctx) {
+        bool bad = false;
+        auto check = [&](Layer* x) { if (x->type == LayerType::Symbol && (x->symbolId == c.symbolId || symbolUses(x->symbolId, c.symbolId))) bad = true; };
+        check(l);
+        forEachLayer(l, check);
+        if (bad) return {};
+    }
+    SymbolDef d;
+    d.id = QUuid::createUuid(); d.name = name; d.kind = kind; d.durationFrames = std::max(1, m_comp.durationFrames);
+    d.root = std::make_shared<Layer>(LayerType::Group, "Symbol");
+    auto inst = std::make_shared<Layer>(LayerType::Symbol, l->props.name);
+    inst->symbolId = d.id;
+    m_undo.push(new ConvertToSymbolCommand(this, layerId, d, inst));
+    return d.id;
+}
+
+QUuid Document::addSymbolInstance(const QUuid& symbolId, const QUuid& parentId, int index) {
+    const SymbolDef* d = findSymbol(symbolId);
+    if (!d || !canInstantiate(symbolId)) return {};
+    auto inst = std::make_shared<Layer>(LayerType::Symbol, d->name);
+    inst->symbolId = symbolId;
+    const QUuid id = inst->id;
+    auto* cmd = new AddLayerCommand(this, parentId, index, inst);
+    cmd->setText(tr("Add Symbol Instance"));
+    m_undo.push(cmd);
+    return id;
+}
+
+bool Document::deleteSymbol(const QUuid& id, QString* why) {
+    if (!findSymbol(id)) return false;
+    for (const auto& c : m_ctx) if (c.symbolId == id) { if (why) *why = tr("Exit the symbol before deleting it."); return false; }
+    if (symbolUseCount(id) > 0) { if (why) *why = tr("The symbol still has instances; delete them first."); return false; }
+    QVector<SymbolDef> after;
+    for (const auto& d : m_symbols) if (d.id != id) after.append(d);
+    m_undo.push(new SymbolLibraryCommand(this, m_symbols, after, tr("Delete Symbol")));
+    return true;
+}
+
+void Document::renameSymbol(const QUuid& id, const QString& name) {
+    if (name.trimmed().isEmpty()) return;
+    QVector<SymbolDef> after = m_symbols;
+    for (auto& d : after) if (d.id == id) d.name = name.trimmed();
+    if (after == m_symbols) return;
+    m_undo.push(new SymbolLibraryCommand(this, m_symbols, after, tr("Rename Symbol")));
+}
+
+void Document::setSymbolKind(const QUuid& id, SymbolKind kind) {
+    QVector<SymbolDef> after = m_symbols;
+    for (auto& d : after) if (d.id == id) d.kind = kind;
+    if (after == m_symbols) return;
+    m_undo.push(new SymbolLibraryCommand(this, m_symbols, after, tr("Change Symbol Type")));
+}
+
+void Document::setInstancePlayback(const QUuid& layerId, SymbolPlay play, int firstFrame) {
+    Layer* l = findLayer(layerId);
+    if (!l || l->type != LayerType::Symbol) return;
+    firstFrame = std::max(0, firstFrame);
+    if (l->symbolPlay == play && l->symbolFirstFrame == firstFrame) return;
+    m_undo.push(new SymbolInstanceCommand(this, layerId, l->symbolPlay, l->symbolFirstFrame, play, firstFrame));
+}
+
+void Document::enterSymbol(const QUuid& id) {
+    if (!findSymbol(id)) return;
+    for (const auto& c : m_ctx) if (c.symbolId == id) return;
+    auto* cmd = new SymbolContextCommand(this, id, true);
+    m_undo.push(cmd);
+}
+
+void Document::exitSymbol() {
+    if (m_ctx.isEmpty()) return;
+    m_undo.push(new SymbolContextCommand(this, m_ctx.last().symbolId, false));
 }
 
 }  // namespace mynd
