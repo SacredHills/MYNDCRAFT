@@ -80,11 +80,11 @@ AnimationActions::AnimationActions(EditorSession* s, QWidget* dialogParent) : QO
         if (!m_s->editActiveAnimation(tr("Extend Exposure"), [&](AnimationState& s) { return s.extendExposure(f, 1); }))
             emit m_s->message(tr("There is no exposure at this frame to extend."));
     });
-    holdDrawing = mk("holdDrawing", tr("Hold Drawing Until Next Drawing / End"));
+    holdDrawing = mk("holdDrawing", tr("Extend Here"));
     connect(holdDrawing, &QAction::triggered, this, [=, this] {
         const int f = frame();
         const int total = m_s->doc() ? m_s->doc()->durationFrames() : 0;
-        const bool ok = m_s->editActiveAnimation(tr("Hold Drawing"), [&](AnimationState& s) {
+        const bool ok = m_s->editActiveAnimation(tr("Extend Here"), [&](AnimationState& s) {
             int start = -1;
             QUuid dr;
             if (const Exposure* e = s.at(f); e && !e->drawing.isNull()) { start = e->start; dr = e->drawing; }

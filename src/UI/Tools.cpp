@@ -943,7 +943,7 @@ public:
     void press(const PointerEvent& e) override {
         if (e.button != Qt::LeftButton) return;
         const Geo g = geo();
-        if (!g.ok) { emit m_s->message(QObject::tr("This layer is blank on this frame, so there is nothing to grab. For a drawing layer, use Animation > Hold Drawing (or Ctrl+= / drag the exposure's edge) to show the drawing on more frames.")); return; }
+        if (!g.ok) { emit m_s->message(QObject::tr("This layer is blank on this frame, so there is nothing to grab. For a drawing layer, use Animation > Extend Here (or Ctrl+= / drag the exposure's edge) to show the drawing on more frames.")); return; }
         if (g.layer->props.locked) { emit m_s->message(QObject::tr("The active layer is locked.")); return; }
         m_h = hit(g, e.doc);
         if (m_h == None) return;
