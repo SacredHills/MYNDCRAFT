@@ -21,7 +21,7 @@ namespace mynd {
 
 namespace {
 
-constexpr qint64 kMaxBuffer = 1LL << 30;
+constexpr qint64 kMaxBuffer = 4LL << 30;
 
 struct Ctx {
     QJsonObject root;

@@ -115,6 +115,19 @@ class TestImport3D : public QObject {
     Q_OBJECT
     static const Node3D* find(const Scene3D& s, const QString& name) { for (const auto& n : s.nodes) if (n.name == name) return &n; return nullptr; }
 private slots:
+    void modelFilesOverOneGigabyteAreNotRejectedBySize() {
+        QVERIFY(maxModelFileBytes() >= (qint64(3) << 30));
+        QTemporaryDir dir; QVERIFY(dir.isValid());
+        const QString path = dir.filePath("big.glb");
+        QFile f(path); QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("glTF\2\0\0\0", 8);
+        if (!f.resize((qint64(1) << 30) + (64 << 20))) QSKIP("cannot create a sparse file here");
+        f.close();
+        const ImportResult r = importModelFile(path);
+        QVERIFY(!r.error.isEmpty());                                   // zeros are not a model...
+        QVERIFY(!r.error.contains("larger than"));                     // ...but it is no longer refused for its size
+    }
+
     void objWithMaterialsQuadsAndNegativeIndices() {
         const QByteArray mtl = "newmtl Red\nKd 1 0 0\nNs 50\n";
         QTemporaryDir dir; QFile f(dir.filePath("a.mtl")); QVERIFY(f.open(QIODevice::WriteOnly)); f.write(mtl); f.close();

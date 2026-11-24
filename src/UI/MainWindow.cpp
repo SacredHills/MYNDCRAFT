@@ -145,6 +145,7 @@ bool MainWindow::openFile(const QString& path, QString* error) {
 
 bool MainWindow::importImage(const QString& path, QString* error) {
     if (!m_doc) { if (error) *error = tr("No document is open."); return false; }
+    QImageReader::setAllocationLimit(2048);   // MB; Qt's default (256) rejects large but valid images
     QImageReader rd(path);
     rd.setAutoTransform(true);
     if (rd.size().isValid() && (rd.size().width() > 16384 || rd.size().height() > 16384)) {

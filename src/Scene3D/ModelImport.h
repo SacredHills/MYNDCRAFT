@@ -18,6 +18,7 @@ struct ImportResult {
 };
 
 // `fps` converts animation times (seconds) to composition frames.
+qint64 maxModelFileBytes();                                                                       // largest model file accepted (4 GB)
 ImportResult importModelFile(const QString& path, double fps = 24.0);                      // picks the importer from the extension
 ImportResult importObjData(const QByteArray& data, const QString& baseDir, const QString& name);
 ImportResult importGltfData(const QByteArray& data, const QString& baseDir, const QString& name, double fps = 24.0);   // .gltf JSON or binary .glb

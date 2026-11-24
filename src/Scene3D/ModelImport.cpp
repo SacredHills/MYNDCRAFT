@@ -12,11 +12,13 @@ QString modelFileFilter() {
     return QObject::tr("3D models (*.glb *.gltf *.obj *.fbx);;glTF / GLB (*.glb *.gltf);;Wavefront OBJ (*.obj);;Autodesk FBX (*.fbx)");
 }
 
+qint64 maxModelFileBytes() { return qint64(4) << 30; }   // glTF/FBX use 32-bit chunk sizes; the whole file is held in memory while it is read
+
 ImportResult importModelFile(const QString& path, double fps) {
     ImportResult r;
     QFileInfo fi(path);
     if (!fi.exists() || !fi.isFile()) { r.error = QObject::tr("File not found: %1").arg(path); return r; }
-    if (fi.size() > (1LL << 30)) { r.error = QObject::tr("The file is larger than 1 GB, which this importer does not accept."); return r; }
+    if (fi.size() > maxModelFileBytes()) { r.error = QObject::tr("The file is larger than 4 GB, which this importer does not accept."); return r; }
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) { r.error = QObject::tr("Cannot read %1: %2").arg(path, f.errorString()); return r; }
     const QByteArray data = f.readAll();
