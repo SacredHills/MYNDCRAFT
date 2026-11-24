@@ -15,6 +15,9 @@
 namespace mynd {
 
 namespace {
+
+// The scene as it looks at the current frame (animated properties overlaid): what the viewport shows, picks and attaches gizmos to.
+std::shared_ptr<const Scene3D> shownScene(const Layer& l, const Document* d) { return l.sceneAt(d ? d->currentFrame() : 0); }
 const QVector3D kAxis[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
 const QColor kAxisColor[3] = {QColor(235, 70, 70), QColor(90, 200, 90), QColor(70, 120, 240)};
 
@@ -66,8 +69,10 @@ public:
     // ---- gizmo geometry ----
     bool selectedWorld(QMatrix4x4* w) const {
         const Layer* l = m_v->m_s->active3DLayer();
-        if (!l || !l->scene3d->node(m_v->m_s->selectedNode())) return false;
-        *w = l->scene3d->worldMatrix(m_v->m_s->selectedNode());
+        if (!l) return false;
+        const auto sc = shownScene(*l, m_v->m_s->doc());
+        if (!sc->node(m_v->m_s->selectedNode())) return false;
+        *w = sc->worldMatrix(m_v->m_s->selectedNode());
         return true;
     }
     double gizmoLength(const RenderCamera& cam, const QVector3D& o) const {
@@ -129,7 +134,8 @@ public:
                        tr("Select a 3D scene layer, or create one from the 3D menu (New 3D Scene Layer / Import 3D Model…)."));
             return;
         }
-        const Scene3D& sc = *l->scene3d;
+        const auto shown = shownScene(*l, m_v->m_s->doc());
+        const Scene3D& sc = *shown;
         const QRect vr = viewRect();
         const RenderCamera cam = camera(sc);
         p.setClipRect(vr);
@@ -274,7 +280,8 @@ public:
             return;
         }
         if (e->button() != Qt::LeftButton) return;
-        const Scene3D& sc = *l->scene3d;
+        const auto shown = shownScene(*l, m_v->m_s->doc());
+        const Scene3D& sc = *shown;
         const RenderCamera cam = camera(sc);
         const QRect vr = viewRect();
         QMatrix4x4 world;
@@ -336,7 +343,8 @@ public:
     }
 
     void dragGizmo(Layer& l, const QPointF& pos, Qt::KeyboardModifiers mods) {
-        const Scene3D& sc = *l.scene3d;
+        const auto shown = shownScene(l, m_v->m_s->doc());
+        const Scene3D& sc = *shown;
         const QUuid id = m_v->m_s->selectedNode();
         if (!sc.node(id)) return;
         const RenderCamera cam = camera(sc);
@@ -385,7 +393,7 @@ public:
             break;
         }
         }
-        m_v->m_s->doc()->editScene3D(l.id, fn, tr("Transform Node"), m_key);
+        m_v->m_s->doc()->editScene3D(l.id, fn, tr("Transform Node"), m_key, m_v->m_s->autoKey());
     }
 
     void mouseReleaseEvent(QMouseEvent*) override { m_drag = Drag::None; m_dragHandle = 0; update(); }
@@ -447,8 +455,8 @@ Viewport3D::Viewport3D(EditorSession* s, Scene3DActions* a, QWidget* parent) : Q
         repaint();
     });
     connect(m_s, &EditorSession::nodeSelectionChanged, this, repaint);
-    connect(m_s, &EditorSession::documentChanged, this, [this, repaint] { if (m_s->doc()) connect(m_s->doc(), &Document::contentChanged, this, [this] { m_canvas->update(); }); repaint(); });
-    if (m_s->doc()) connect(m_s->doc(), &Document::contentChanged, this, repaint);
+    connect(m_s, &EditorSession::documentChanged, this, [this, repaint] { if (m_s->doc()) { connect(m_s->doc(), &Document::contentChanged, this, [this] { m_canvas->update(); }); connect(m_s->doc(), &Document::frameChanged, this, [this] { m_canvas->update(); }); } repaint(); });
+    if (m_s->doc()) { connect(m_s->doc(), &Document::contentChanged, this, repaint); connect(m_s->doc(), &Document::frameChanged, this, repaint); }
 }
 
 QWidget* Viewport3D::canvas() const { return m_canvas; }
@@ -476,7 +484,8 @@ void Viewport3D::frame(bool selectionOnly) {
     OrbitCamera& oc = orbit();
     QVector3D mn, mx;
     bool ok = false;
-    const Scene3D& sc = *l->scene3d;
+    const auto shown = shownScene(*l, m_s->doc());
+    const Scene3D& sc = *shown;
     if (selectionOnly) {
         const QUuid id = m_s->selectedNode();
         if (sc.node(id)) {
@@ -510,7 +519,7 @@ RenderCamera Viewport3D::currentCamera(QSize* size) const {
     const QRect vr = m_canvas->viewRect();
     if (size) *size = vr.size();
     if (!l) return RenderCamera();
-    return m_canvas->camera(*l->scene3d);
+    return m_canvas->camera(*shownScene(*l, m_s->doc()));
 }
 
 bool Viewport3D::handlePosition(Handle h, QPointF* out) const {

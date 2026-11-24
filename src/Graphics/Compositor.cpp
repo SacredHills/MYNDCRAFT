@@ -121,6 +121,7 @@ void Compositor::drawAnimationLayer(QPainter& p, const Layer& l, const QRect& re
 
 void Compositor::drawScene3D(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx) {
     if (!l.scene3d || canvas.isEmpty()) return;
+    const std::shared_ptr<const Scene3D> scene = l.sceneAt(ctx.frame);
     int ss = ctx.ss3d;
     if (ss <= 0) ss = (qint64(canvas.width()) * canvas.height() <= 1200000) ? 2 : 1;
     // The software renderer draws the whole canvas, so keep the last few results: repaints of other layers, partial redraws and
@@ -131,14 +132,14 @@ void Compositor::drawScene3D(QPainter& p, const Layer& l, const QRect& region, c
     QImage img;
     {
         std::lock_guard<std::mutex> lock(mu);
-        for (const Entry& e : cache) if (e.rev == l.scene3d->revision && e.size == canvas && e.ss == ss) { img = e.img; break; }
+        for (const Entry& e : cache) if (e.rev == scene->revision && e.size == canvas && e.ss == ss) { img = e.img; break; }
     }
     if (img.isNull()) {
         RenderOptions ro;
         ro.supersample = ss;
-        img = renderScene(*l.scene3d, sceneCamera(*l.scene3d, double(canvas.width()) / canvas.height()), canvas, ro);
+        img = renderScene(*scene, sceneCamera(*scene, double(canvas.width()) / canvas.height()), canvas, ro);
         std::lock_guard<std::mutex> lock(mu);
-        cache.insert(cache.begin(), Entry{l.scene3d->revision, canvas, ss, img});
+        cache.insert(cache.begin(), Entry{scene->revision, canvas, ss, img});
         if (cache.size() > 4) cache.pop_back();
     }
     p.drawImage(region.topLeft(), img, region);

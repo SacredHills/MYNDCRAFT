@@ -7,7 +7,10 @@
 #include "TestEnv.h"
 #include "Core/ProjectIO.h"
 #include "Core/Settings.h"
+#include "UI/GraphEditor.h"
 #include "UI/MainWindow.h"
+#include "UI/TimelinePanel.h"
+#include "Scene3D/Anim3D.h"
 #include "UI/Workspaces.h"
 
 using namespace mynd;
@@ -138,6 +141,62 @@ private slots:
         // a second drag is a separate step
         dragCanvas(hx, hx + dir * 20); dragCanvas(handle(Viewport3D::Handle::X), handle(Viewport3D::Handle::X) + dir * 20);
         QCOMPARE(doc->undoStack()->count(), steps + 2);
+    }
+
+    void theInspectorStopwatchAndAutoKeyAnimateTheSelectedObjectAndShowUpInTheGraphEditor() {
+        const QUuid cube = buildScene();
+        Scene3DPanel* p = w->scene3dPanel();
+        const QString id = nodePropId(cube, "pos");
+        doc->setCurrentFrame(0);
+        QVERIFY(p->stopwatch("pos") && !p->stopwatch("pos")->isChecked());
+        p->stopwatch("pos")->click();                                                // key at frame 0
+        QVERIFY(p->stopwatch("pos")->isChecked());
+        QVERIFY(s->active3DLayer()->tracks.contains(id));
+        // typing a position at frame 12 keys it instead of moving the object everywhere
+        doc->setCurrentFrame(12);
+        p->posField(0)->setValue(3.0);
+        QCOMPARE(s->active3DLayer()->tracks[id].keys.size(), 2);
+        QCOMPARE(scene()->node(cube)->position.x(), 0.0f);
+        doc->setCurrentFrame(6);
+        QVERIFY(std::abs(p->posField(0)->value() - 1.5) < 1e-6);                    // the inspector shows the value at this frame
+        // dragging the gizmo at a key-less frame of an animated property adds a key (auto-key does it for other properties)
+        vp->setMode(Viewport3D::Mode::Move);
+        const QPointF o = handle(Viewport3D::Handle::Center), hx = handle(Viewport3D::Handle::X);
+        QPointF dir = hx - o; dir /= std::hypot(dir.x(), dir.y());
+        dragCanvas(hx, hx + dir * 30);
+        QCOMPARE(s->active3DLayer()->tracks[id].keys.size(), 3);
+        QVERIFY(s->active3DLayer()->tracks[id].indexOfKey(6) >= 0);
+        QCOMPARE(scene()->node(cube)->position.x(), 0.0f);                          // static value never changed
+        // rotating (not animated, auto-key off) edits the static rotation; with auto-key on it keys it
+        vp->setMode(Viewport3D::Mode::Rotate);
+        QPointF r = handle(Viewport3D::Handle::Y);
+        dragCanvas(r, r + QPointF(40, 15));
+        QVERIFY(!s->active3DLayer()->tracks.contains(nodePropId(cube, "rot")));
+        QVERIFY(scene()->node(cube)->rotation != QVector3D());
+        s->setAutoKey(true);
+        r = handle(Viewport3D::Handle::Y);
+        dragCanvas(r, r + QPointF(40, 15));
+        QVERIFY(s->active3DLayer()->tracks.contains(nodePropId(cube, "rot")));
+        s->setAutoKey(false);
+        // the graph editor lists the animated 3D properties by name
+        auto* g = w->findChild<GraphEditorPanel*>();
+        QVERIFY(g);
+        QApplication::processEvents();
+        bool found = false;
+        for (int i = 0; i < g->propertyBox()->count(); ++i) if (g->propertyBox()->itemData(i).toString() == id) { found = true; QVERIFY(g->propertyBox()->itemText(i).contains("Position")); }
+        QVERIFY(found);
+        // and the timeline shows a row for it once the layer is expanded
+        auto* tl = w->findChild<TimelineView*>();
+        QVERIFY(tl);
+        tl->setCellWidth(20);
+        QCOMPARE(tl->rowOfProperty(s->activeLayerId(), id), -1);
+        QTest::mouseClick(tl->viewport(), Qt::LeftButton, {}, tl->twirlPoint(tl->rowOfLayer(s->activeLayerId())));
+        QVERIFY(tl->isExpanded(s->activeLayerId()));
+        QVERIFY(tl->rowOfProperty(s->activeLayerId(), id) >= 0);
+        QVERIFY(tl->rowOfProperty(s->activeLayerId(), nodePropId(cube, "rot")) >= 0);
+        // everything undoes
+        while (doc->undoStack()->canUndo()) doc->undoStack()->undo();
+        QVERIFY(doc->root()->children.empty());
     }
 
     void rotateAndScaleGizmosWork() {

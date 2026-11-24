@@ -17,6 +17,8 @@
 #include <QScrollArea>
 #include <QSplitter>
 #include <QToolButton>
+
+#include "Scene3D/Anim3D.h"
 #include <QVBoxLayout>
 #include <functional>
 
@@ -112,7 +114,7 @@ Scene3DPanel::Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent)
                 });
             });
         }
-        f->addRow(label, h);
+        f->addRow(labelWithKeys(label, key, false), h);
     };
     m_gXform = new QGroupBox(tr("Transform"));
     auto* fx = new QFormLayout(m_gXform);
@@ -124,10 +126,10 @@ Scene3DPanel::Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent)
     m_gMat = new QGroupBox(tr("Material"));
     auto* fm = new QFormLayout(m_gMat);
     m_matCombo = new QComboBox; fm->addRow(tr("Slot"), m_matCombo);
-    m_baseColor = new QPushButton; fm->addRow(tr("Base colour"), m_baseColor);
-    m_emissive = new QPushButton; fm->addRow(tr("Emissive"), m_emissive);
-    m_rough = spin(0, 1, 0.05, 2, this); fm->addRow(tr("Roughness"), m_rough);
-    m_metal = spin(0, 1, 0.05, 2, this); fm->addRow(tr("Metallic"), m_metal);
+    m_baseColor = new QPushButton; fm->addRow(labelWithKeys(tr("Base colour"), "base", true), m_baseColor);
+    m_emissive = new QPushButton; fm->addRow(labelWithKeys(tr("Emissive"), "emis", true), m_emissive);
+    m_rough = spin(0, 1, 0.05, 2, this); fm->addRow(labelWithKeys(tr("Roughness"), "rough", true), m_rough);
+    m_metal = spin(0, 1, 0.05, 2, this); fm->addRow(labelWithKeys(tr("Metallic"), "metal", true), m_metal);
     m_double = new QCheckBox(tr("Double sided")); fm->addRow(QString(), m_double);
     auto* th = new QHBoxLayout;
     m_texture = new QPushButton(tr("Texture…")); m_clearTexture = new QPushButton(tr("Remove"));
@@ -138,15 +140,15 @@ Scene3DPanel::Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent)
     m_gLight = new QGroupBox(tr("Light"));
     auto* fl = new QFormLayout(m_gLight);
     m_lightType = new QComboBox; m_lightType->addItems({tr("Directional"), tr("Point"), tr("Spot")}); fl->addRow(tr("Type"), m_lightType);
-    m_lightColor = new QPushButton; fl->addRow(tr("Colour"), m_lightColor);
-    m_intensity = spin(0, 100, 0.1, 2, this); fl->addRow(tr("Intensity"), m_intensity);
-    m_range = spin(0, 1e6, 1, 1, this); m_range->setSpecialValueText(tr("Unlimited")); fl->addRow(tr("Range"), m_range);
-    m_spot = spin(1, 179, 1, 0, this); fl->addRow(tr("Spot angle"), m_spot);
+    m_lightColor = new QPushButton; fl->addRow(labelWithKeys(tr("Colour"), "lcol", false), m_lightColor);
+    m_intensity = spin(0, 100, 0.1, 2, this); fl->addRow(labelWithKeys(tr("Intensity"), "lint", false), m_intensity);
+    m_range = spin(0, 1e6, 1, 1, this); m_range->setSpecialValueText(tr("Unlimited")); fl->addRow(labelWithKeys(tr("Range"), "lrange", false), m_range);
+    m_spot = spin(1, 179, 1, 0, this); fl->addRow(labelWithKeys(tr("Spot angle"), "lspot", false), m_spot);
     il->addWidget(m_gLight);
 
     m_gCam = new QGroupBox(tr("Camera"));
     auto* fc = new QFormLayout(m_gCam);
-    m_fov = spin(1, 170, 1, 1, this); fc->addRow(tr("Field of view"), m_fov);
+    m_fov = spin(1, 170, 1, 1, this); fc->addRow(labelWithKeys(tr("Field of view"), "fov", false), m_fov);
     m_near = spin(0.0001, 1e5, 0.01, 4, this); fc->addRow(tr("Near"), m_near);
     m_far = spin(0.001, 1e7, 10, 1, this); fc->addRow(tr("Far"), m_far);
     m_isSceneCam = new QCheckBox(tr("Scene camera (used for the composition)")); fc->addRow(QString(), m_isSceneCam);
@@ -186,8 +188,6 @@ Scene3DPanel::Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent)
     connect(m_s, &EditorSession::activeLayerChanged, this, [this] { rebuildTree(); refreshInspector(); });
     connect(m_s, &EditorSession::documentChanged, this, [this] { rebuildTree(); refreshInspector(); });
     connect(m_s, &EditorSession::nodeSelectionChanged, this, [this] { rebuildTree(); refreshInspector(); });
-    auto onScene = [this] { rebuildTree(); refreshInspector(); };
-    connect(m_s, &EditorSession::documentChanged, this, [this, onScene] { if (m_s->doc()) connect(m_s->doc(), &Document::scene3DChanged, this, onScene); });
 
     // material
     connect(m_matCombo, &QComboBox::currentIndexChanged, this, [this] { if (!m_updating) refreshInspector(); });
@@ -222,7 +222,14 @@ Scene3DPanel::Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent)
     connect(m_ambientInt, &QDoubleSpinBox::valueChanged, this, [this](double v) { if (!m_updating) editScene(tr("Ambient Level"), "s3d:ambint", [v](Scene3D& sc) { if (sc.ambientIntensity == v) return false; sc.ambientIntensity = v; return true; }); });
     connect(m_bgColor, &QPushButton::clicked, this, [this] { pickColor(m_bgColor, tr("Background (transparent keeps the 2D layers below visible)"), true, [this](const QColor& c) { editScene(tr("Scene Background"), "s3d:bg", [c](Scene3D& sc) { if (sc.background == c) return false; sc.background = c; return true; }); }); });
 
-    if (m_s->doc()) connect(m_s->doc(), &Document::scene3DChanged, this, [this] { rebuildTree(); refreshInspector(); });
+    auto hookDoc = [this] {
+        if (!m_s->doc()) return;
+        connect(m_s->doc(), &Document::scene3DChanged, this, [this] { rebuildTree(); refreshInspector(); });
+        connect(m_s->doc(), &Document::frameChanged, this, [this] { refreshInspector(); });
+        connect(m_s->doc(), &Document::tracksChanged, this, [this] { refreshInspector(); });
+    };
+    hookDoc();
+    connect(m_s, &EditorSession::documentChanged, this, hookDoc);
     rebuildTree();
     refreshInspector();
 }
@@ -258,13 +265,51 @@ void Scene3DPanel::dropOn(const QUuid& node, const QUuid& newParent) {
 void Scene3DPanel::editScene(const QString& text, const QString& key, const std::function<bool(Scene3D&)>& fn) {
     Layer* l = m_s->active3DLayer();
     if (!l || l->props.locked) return;
-    m_s->doc()->editScene3D(l->id, fn, text, key);
+    m_s->doc()->editScene3D(l->id, fn, text, key, m_s->autoKey());
 }
 
 void Scene3DPanel::edit(const QString& text, const QString& key, const std::function<bool(Scene3D&, Node3D&)>& fn) {
     const QUuid id = m_s->selectedNode();
     if (id.isNull()) return;
     editScene(text, key.isEmpty() ? key : key + ":" + id.toString(QUuid::WithoutBraces), [&](Scene3D& s) { Node3D* n = s.node(id); return n && fn(s, *n); });
+}
+
+QWidget* Scene3DPanel::labelWithKeys(const QString& text, const QString& what, bool material) {
+    auto* w = new QWidget;
+    auto* h = new QHBoxLayout(w);
+    h->setContentsMargins(0, 0, 0, 0);
+    h->setSpacing(2);
+    KeyRow r;
+    r.what = what; r.material = material;
+    r.watch = new QToolButton; r.watch->setText(QString::fromUtf8("⏱")); r.watch->setCheckable(true); r.watch->setAutoRaise(true);
+    r.watch->setToolTip(tr("Animate this property (stopwatch): adds a keyframe at the current frame. Click again to stop animating."));
+    r.key = new QToolButton; r.key->setText(QString::fromUtf8("◆")); r.key->setAutoRaise(true);
+    r.key->setToolTip(tr("Add a keyframe at the current frame, or remove the one that is there"));
+    h->addWidget(new QLabel(text));
+    h->addStretch(1);
+    h->addWidget(r.watch);
+    h->addWidget(r.key);
+    const int idx = m_keyRows.size();
+    m_keyRows.push_back(r);
+    connect(r.watch, &QToolButton::clicked, this, [this, idx] {
+        const Layer* l = m_s->active3DLayer();
+        const QString id = keyPropId(m_keyRows[idx]);
+        if (l && !id.isEmpty() && !l->props.locked) m_s->doc()->toggleScene3DAnimation(l->id, id);
+        refreshInspector();
+    });
+    connect(r.key, &QToolButton::clicked, this, [this, idx] {
+        const Layer* l = m_s->active3DLayer();
+        const QString id = keyPropId(m_keyRows[idx]);
+        if (l && !id.isEmpty() && !l->props.locked) m_s->doc()->toggleScene3DKey(l->id, id);
+        refreshInspector();
+    });
+    return w;
+}
+
+QString Scene3DPanel::keyPropId(const KeyRow& r) const {
+    if (r.material) { const QUuid m = currentMaterialId(); return m.isNull() ? QString() : materialPropId(m, r.what); }
+    const QUuid n = m_s->selectedNode();
+    return n.isNull() ? QString() : nodePropId(n, r.what);
 }
 
 QUuid Scene3DPanel::currentMaterialId() const { return QUuid(m_matCombo->currentData().toString()); }
@@ -302,7 +347,8 @@ void Scene3DPanel::rebuildTree() {
 
 void Scene3DPanel::refreshInspector() {
     const Layer* l = m_s->active3DLayer();
-    const Scene3D* sc = l ? l->scene3d.get() : nullptr;
+    const auto shown = l ? l->sceneAt(m_s->doc()->currentFrame()) : nullptr;     // what the user sees at this frame
+    const Scene3D* sc = shown.get();
     const Node3D* n = sc ? sc->node(m_s->selectedNode()) : nullptr;
     m_updating = true;
     auto setSpin = [](QDoubleSpinBox* b, double v) { if (!b->hasFocus() || !b->isVisible()) b->setValue(v); };
@@ -343,6 +389,14 @@ void Scene3DPanel::refreshInspector() {
             setSpin(m_fov, n->fov); setSpin(m_near, n->nearPlane); setSpin(m_far, n->farPlane);
             m_isSceneCam->setChecked(sc->activeCamera == n->id);
         }
+    }
+    for (const KeyRow& r : m_keyRows) {                      // stopwatch / key state of every animatable row
+        const QString id = l ? keyPropId(r) : QString();
+        const auto it = id.isEmpty() ? PropertyTracks::const_iterator() : l->tracks.constFind(id);
+        const bool animated = !id.isEmpty() && it != l->tracks.constEnd() && it->animated();
+        r.watch->setChecked(animated);
+        r.key->setEnabled(!id.isEmpty());
+        r.key->setText(animated && it->indexOfKey(m_s->doc()->currentFrame()) >= 0 ? QString::fromUtf8("◆") : QString::fromUtf8("◇"));
     }
     if (sc) {
         m_cameraCombo->clear();

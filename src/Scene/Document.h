@@ -109,7 +109,15 @@ public:
     void emitScene3DChanged(const QUuid& layerId);
     // 3D scenes: `fn` edits a copy of the layer's scene and returns whether it changed anything; the edit is one undo step
     // (steps with the same non-empty mergeKey on the same layer merge, for drags and spin boxes).
-    bool editScene3D(const QUuid& layerId, const std::function<bool(Scene3D&)>& fn, const QString& text, const QString& mergeKey = {});
+    // Undoable edit of a 3D scene layer. `fn` edits the scene as the user sees it at the current frame; when the layer has 3D
+    // keyframes (or autoKey is on) changes to animatable properties become keyframes at the current frame instead of changing the static
+    // values (see Anim3D.h); everything else is applied to the scene itself.
+    // Stopwatch of a 3D property (Anim3D.h id): starts animating it with a key at the current frame holding its current value, or stops
+    // animating and freezes the value shown at the current frame.
+    bool toggleScene3DAnimation(const QUuid& layerId, const QString& propId);
+    // Adds a key at the current frame holding the value shown there, or removes the key if there is one (starts animating if needed).
+    bool toggleScene3DKey(const QUuid& layerId, const QString& propId);
+    bool editScene3D(const QUuid& layerId, const std::function<bool(Scene3D&)>& fn, const QString& text, const QString& mergeKey = {}, bool autoKey = false);
     QUuid addScene3DLayer(const QString& name = {});
 
     // Shape tween state of a vector layer (end shapes + whether they are being edited). Undoable.

@@ -31,13 +31,14 @@ TimelineView::TimelineView(EditorSession* s, AnimationActions* a, QWidget* paren
     horizontalScrollBar()->setSingleStep(16);
     auto refresh = [this] { rebuildRows(); viewport()->update(); };
     connect(s, &EditorSession::documentChanged, this, [this, refresh] {
-        for (auto* c : {&m_c1, &m_c2, &m_c3, &m_c4, &m_c5, &m_c6}) disconnect(*c);
+        for (auto* c : {&m_c1, &m_c2, &m_c3, &m_c4, &m_c5, &m_c6, &m_c7}) disconnect(*c);
         if (Document* d = m_s->doc()) {
             m_c1 = connect(d, &Document::layerTreeChanged, this, refresh);
             m_c2 = connect(d, &Document::layerPropsChanged, this, [refresh] { refresh(); });
             m_c3 = connect(d, &Document::animationChanged, this, [refresh] { refresh(); });
             m_c4 = connect(d, &Document::timingChanged, this, refresh);
-            m_c6 = connect(d, &Document::tracksChanged, this, [this] { viewport()->update(); });
+            m_c6 = connect(d, &Document::tracksChanged, this, refresh);
+            m_c7 = connect(d, &Document::scene3DChanged, this, [refresh] { refresh(); });
             m_c5 = connect(d, &Document::frameChanged, this, [this](int f) { ensureFrameVisible(f); viewport()->update(); });
         }
         refresh();
@@ -63,7 +64,10 @@ void TimelineView::rebuildRows() {
             for (int i = int(g->children.size()) - 1; i >= 0; --i) {     // top of the stack first
                 Layer* c = g->children[i].get();
                 m_rows.append({c, depth, QString()});
-                if (m_expanded.contains(c->id)) for (const PropertyDef& pd : layerPropertyDefs()) m_rows.append({c, depth + 1, pd.id});
+                if (m_expanded.contains(c->id)) {
+                    for (const PropertyDef& pd : layerPropertyDefs()) m_rows.append({c, depth + 1, pd.id});
+                    for (const QString& id : c->animated3DProperties()) m_rows.append({c, depth + 1, id});
+                }
                 if (c->isGroup()) walk(c, depth + 1);
             }
         };
@@ -285,7 +289,7 @@ void TimelineView::paintEvent(QPaintEvent*) {
             const PropertyDef* pd = findPropertyDef(m_rows[r].prop);
             const bool animated = l->tracks.contains(m_rows[r].prop) && l->tracks[m_rows[r].prop].animated();
             p.setPen(animated ? QColor(255, 170, 60) : palette().color(QPalette::Text));
-            p.drawText(QRect(6 + m_rows[r].depth * 12 + 10, y, kNameW - 20, kRowH), Qt::AlignVCenter | Qt::AlignLeft, pd ? pd->label : m_rows[r].prop);
+            p.drawText(QRect(6 + m_rows[r].depth * 12 + 10, y, kNameW - 20, kRowH), Qt::AlignVCenter | Qt::AlignLeft, l->propertyLabel(m_rows[r].prop));
         } else {
             const QPoint tw = twirlPoint(r);                  // disclosure arrow
             const bool open = m_expanded.contains(l->id);

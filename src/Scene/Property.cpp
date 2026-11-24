@@ -51,8 +51,11 @@ const QVector<PropertyDef>& layerPropertyDefs() {
     return defs;
 }
 
+const PropertyDef* scene3DPropertyDef(const QString& id);     // Scene3D/Anim3D.cpp
+
 const PropertyDef* findPropertyDef(const QString& id) {
     for (const PropertyDef& d : layerPropertyDefs()) if (d.id == id) return &d;
+    if (id.startsWith(QLatin1String("3d:"))) return scene3DPropertyDef(id);
     return nullptr;
 }
 
@@ -241,7 +244,8 @@ void disableAnimation(PropertyTracks& t, const QString& id, int frame) {
 void pruneDefaults(PropertyTracks& t) {
     for (auto it = t.begin(); it != t.end();) {
         const PropertyDef* d = findPropertyDef(it.key());
-        if (!d || (it->keys.isEmpty() && it->base == d->def)) it = t.erase(it); else ++it;
+        const bool scene3d = it.key().startsWith(QLatin1String("3d:"));     // static 3D values live in the scene, not in tracks
+        if (!d || (it->keys.isEmpty() && (scene3d || it->base == d->def))) it = t.erase(it); else ++it;
     }
 }
 

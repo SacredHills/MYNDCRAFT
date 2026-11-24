@@ -112,19 +112,21 @@ bool TracksCommand::mergeWith(const QUndoCommand* other) {
 Scene3DCommand::Scene3DCommand(Document* d, const QUuid& layer, std::shared_ptr<const Scene3D> b, std::shared_ptr<const Scene3D> a,
                                const QString& text, const QString& mergeKey)
     : m_doc(d), m_layer(layer), m_before(std::move(b)), m_after(std::move(a)), m_key(mergeKey) { setText(text); }
-void Scene3DCommand::apply(const Scene3D& s) {
+void Scene3DCommand::apply(const Scene3D& s, const PropertyTracks* t) {
     Layer* l = m_doc->findLayer(m_layer);
     if (!l || !l->scene3d) return;
     *l->scene3d = s;
     l->scene3d->touch();
+    if (t) { l->tracks = *t; m_doc->emitTracksChanged(m_layer); }
     m_doc->emitScene3DChanged(m_layer);
 }
-void Scene3DCommand::redo() { apply(*m_after); }
-void Scene3DCommand::undo() { apply(*m_before); }
+void Scene3DCommand::redo() { apply(*m_after, m_hasTracks ? &m_ta : nullptr); }
+void Scene3DCommand::undo() { apply(*m_before, m_hasTracks ? &m_tb : nullptr); }
 bool Scene3DCommand::mergeWith(const QUndoCommand* other) {
     auto* o = dynamic_cast<const Scene3DCommand*>(other);
     if (!o || m_key.isEmpty() || o->m_key != m_key || o->m_layer != m_layer) return false;
     m_after = o->m_after;
+    if (o->m_hasTracks) { if (!m_hasTracks) { m_tb = o->m_tb; m_hasTracks = true; } m_ta = o->m_ta; }
     return true;
 }
 TimingCommand::TimingCommand(Document* d, const TimingSettings& b, const TimingSettings& a, const QString& text)

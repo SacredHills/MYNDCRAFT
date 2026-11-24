@@ -75,6 +75,12 @@ public:
     int symbolFirstFrame = 0;
     // Scene3D layers: a 3D scene rendered through its active camera into the composition (never null for that type).
     std::shared_ptr<mynd::Scene3D> scene3d;
+    // The 3D scene as it looks at `frame` (animated properties overlaid); the stored scene itself when nothing is animated.
+    std::shared_ptr<const mynd::Scene3D> sceneAt(double frame) const;
+    // Animated 3D properties of this layer's scene (ids understood by findPropertyDef), in scene order; empty for other layers.
+    QVector<QString> animated3DProperties() const;
+    // Display name of any property id of this layer ("Position", "Cube › Position").
+    QString propertyLabel(const QString& id) const;
     Layer* parent = nullptr;         // maintained by Document
 
     LayerProps properties() const { return props; }

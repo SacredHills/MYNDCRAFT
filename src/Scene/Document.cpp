@@ -1,4 +1,5 @@
 #include "Scene/Document.h"
+#include "Scene3D/Anim3D.h"
 
 #include <QPainter>
 #include <QSet>
@@ -110,14 +111,109 @@ void Document::editTracks(const QUuid& layerId, const PropertyTracks& after, con
     m_undo.push(new TracksCommand(this, layerId, l->tracks, clean, text, mergeKey));
 }
 void Document::emitScene3DChanged(const QUuid& id) { emit scene3DChanged(id); emitContentChanged({}); }
-bool Document::editScene3D(const QUuid& layerId, const std::function<bool(Scene3D&)>& fn, const QString& text, const QString& mergeKey) {
+bool Document::editScene3D(const QUuid& layerId, const std::function<bool(Scene3D&)>& fn, const QString& text, const QString& mergeKey, bool autoKey) {
     Layer* l = findLayer(layerId);
     if (!l || l->type != LayerType::Scene3D || !l->scene3d) return false;
-    auto after = std::make_shared<Scene3D>(*l->scene3d);
-    if (!fn(*after)) return false;
-    m_undo.push(new Scene3DCommand(this, layerId, std::make_shared<Scene3D>(*l->scene3d), after, text, mergeKey));
+    const Scene3D& base = *l->scene3d;
+    const bool animated = hasSceneAnimation(base, l->tracks);
+    if (!animated && !autoKey) {
+        auto after = std::make_shared<Scene3D>(base);
+        if (!fn(*after)) return false;
+        m_undo.push(new Scene3DCommand(this, layerId, std::make_shared<Scene3D>(base), after, text, mergeKey));
+        return true;
+    }
+    // The user edits what they see: the scene evaluated at the current frame.
+    const int frame = currentFrame();
+    const Scene3D seen = evaluateScene(base, l->tracks, frame);
+    Scene3D edited = seen;
+    if (!fn(edited)) return false;
+    auto after = std::make_shared<Scene3D>(edited);
+    PropertyTracks tracks = l->tracks;
+    // Structural edits (nodes/materials added or removed) cannot be expressed as keys: apply them to the static scene.
+    bool structural = seen.nodes.size() != edited.nodes.size() || seen.materials.size() != edited.materials.size();
+    for (size_t i = 0; !structural && i < seen.nodes.size(); ++i) structural = seen.nodes[i].id != edited.nodes[i].id;
+    for (size_t i = 0; !structural && i < seen.materials.size(); ++i) structural = seen.materials[i].id != edited.materials[i].id;
+    if (structural) {
+        after = std::make_shared<Scene3D>(base);
+        if (!fn(*after)) return false;
+        m_undo.push(new Scene3DCommand(this, layerId, std::make_shared<Scene3D>(base), after, text, mergeKey));
+        return true;
+    }
+    for (const QString& id : animatableProps(edited)) {
+        PropValue was, now, stat;
+        if (!readSceneProp(seen, id, &was) || !readSceneProp(edited, id, &now) || !readSceneProp(base, id, &stat)) continue;
+        const bool hasKeys = tracks.contains(id) && tracks[id].animated();
+        if (now != was) {
+            if (hasKeys || autoKey) {
+                const PropertyDef* d = scene3DPropertyDef(id);
+                PropertyTrack& tr = tracks[id];                  // creates when missing
+                if (!hasKeys) tr.base = stat;
+                tr.setKey(*d, frame, now);
+                writeSceneProp(*after, id, stat);                 // the scene keeps its static value
+            }
+            // otherwise the edited value stays in `after` and becomes the new static value
+        } else if (hasKeys) {
+            writeSceneProp(*after, id, stat);                     // an animated value that was not edited: back to the static one
+        }
+    }
+    after->touch();
+    if (after->sameAs(base) && tracks == l->tracks) return false;
+    auto* cmd = new Scene3DCommand(this, layerId, std::make_shared<Scene3D>(base), after, text, mergeKey);
+    cmd->setTracks(l->tracks, tracks);
+    m_undo.push(cmd);
     return true;
 }
+bool Document::toggleScene3DAnimation(const QUuid& layerId, const QString& propId) {
+    Layer* l = findLayer(layerId);
+    if (!l || l->type != LayerType::Scene3D || !l->scene3d) return false;
+    const PropertyDef* d = scene3DPropertyDef(propId);
+    PropValue stat;
+    if (!d || !readSceneProp(*l->scene3d, propId, &stat)) return false;
+    const int frame = currentFrame();
+    auto after = std::make_shared<Scene3D>(*l->scene3d);
+    PropertyTracks tracks = l->tracks;
+    QString text;
+    if (tracks.contains(propId) && tracks[propId].animated()) {
+        writeSceneProp(*after, propId, tracks[propId].valueAt(*d, frame));
+        tracks.remove(propId);
+        text = tr("Stop Animating %1").arg(l->propertyLabel(propId));
+    } else {
+        PropertyTrack trk;
+        trk.base = stat;
+        trk.setKey(*d, frame, stat);
+        tracks.insert(propId, trk);
+        text = tr("Animate %1").arg(l->propertyLabel(propId));
+    }
+    after->touch();
+    auto* cmd = new Scene3DCommand(this, layerId, std::make_shared<Scene3D>(*l->scene3d), after, text, {});
+    cmd->setTracks(l->tracks, tracks);
+    m_undo.push(cmd);
+    return true;
+}
+
+bool Document::toggleScene3DKey(const QUuid& layerId, const QString& propId) {
+    Layer* l = findLayer(layerId);
+    if (!l || l->type != LayerType::Scene3D || !l->scene3d) return false;
+    const PropertyDef* d = scene3DPropertyDef(propId);
+    PropValue stat;
+    if (!d || !readSceneProp(*l->scene3d, propId, &stat)) return false;
+    const int frame = currentFrame();
+    auto it = l->tracks.constFind(propId);
+    const bool animated = it != l->tracks.constEnd() && it->animated();
+    if (!animated) return toggleScene3DAnimation(layerId, propId);
+    PropertyTracks tracks = l->tracks;
+    PropertyTrack& trk = tracks[propId];
+    if (trk.indexOfKey(frame) >= 0) {
+        if (trk.keys.size() == 1) return toggleScene3DAnimation(layerId, propId);
+        trk.removeKey(frame);
+        m_undo.push(new TracksCommand(this, layerId, l->tracks, tracks, tr("Remove Keyframe"), {}));
+    } else {
+        trk.setKey(*d, frame, l->tracks[propId].valueAt(*d, frame));
+        m_undo.push(new TracksCommand(this, layerId, l->tracks, tracks, tr("Add Keyframe"), {}));
+    }
+    return true;
+}
+
 QUuid Document::addScene3DLayer(const QString& name) {
     auto l = std::make_shared<Layer>(LayerType::Scene3D, name.isEmpty() ? tr("3D Scene") : name);
     const QUuid id = l->id;

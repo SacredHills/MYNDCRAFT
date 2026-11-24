@@ -128,6 +128,8 @@ struct Scene3D {
     static bool fromJson(const QJsonObject& o, Scene3D& out, QString* err);
     // Validity checks used on load: unknown parents, cycles, missing mesh/material references (reported, not fatal).
     QStringList validate() const;
+    // Same content (ignoring the render revision); images compare by identity.
+    bool sameAs(const Scene3D& o) const;
 };
 
 // Euler (degrees, same convention as Node3D) <-> matrix helpers.

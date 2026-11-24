@@ -47,6 +47,7 @@ add_library(myndcore STATIC
   src/Drawing/FloodFill.cpp
   src/Graphics/Compositor.cpp
   src/Scene3D/Scene3D.cpp
+  src/Scene3D/Anim3D.cpp
   src/Scene3D/Render3D.cpp
   src/Scene3D/ModelImport.cpp
   src/Scene3D/ImportObj.cpp
@@ -104,6 +105,7 @@ myndcraft_test(test_property)
 myndcraft_test(test_symbols)
 myndcraft_test(test_scene3d)
 myndcraft_test(test_import3d)
+myndcraft_test(test_anim3d)
 myndcraft_test(test_export)
 myndcraft_test(test_document)
 myndcraft_test(test_projectio)

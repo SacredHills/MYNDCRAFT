@@ -11,6 +11,8 @@
 #include <QSet>
 #include <zip.h>
 
+#include "Scene3D/Anim3D.h"
+
 namespace mynd {
 
 namespace {
@@ -48,7 +50,11 @@ QJsonObject layerToJson(const Layer& l) {
     if (l.type == LayerType::Text) o["text"] = l.textContent.toJson();
     if (l.type == LayerType::Scene3D && l.scene3d) o["scene3d"] = l.scene3d->toJson();
     if (l.type == LayerType::Animation) o["animation"] = l.anim.toJson();
-    if (!l.tracks.isEmpty()) o["tracks"] = tracksToJson(l.tracks);
+    {
+        // Keyframes of deleted 3D nodes/materials are dropped rather than saved as orphans.
+        const PropertyTracks tr = l.scene3d ? pruneSceneTracks(*l.scene3d, l.tracks) : l.tracks;
+        if (!tr.isEmpty()) o["tracks"] = tracksToJson(tr);
+    }
     if (l.type == LayerType::Symbol) {
         o["symbolId"] = l.symbolId.toString(QUuid::WithoutBraces);
         o["play"] = symbolPlayKey(l.symbolPlay);
@@ -340,6 +346,11 @@ LayerPtr layerFromJson(const QJsonObject& o, zip_t* z, const Document& doc, QStr
         for (const QString& w : l->scene3d->validate()) {
             if (w.contains("ancestor") || w.contains("duplicate")) { *err = "3D scene '" + l->props.name + "': " + w; return nullptr; }
             warnings << QString("3D scene '%1': %2").arg(l->props.name, w);
+        }
+        const PropertyTracks kept = pruneSceneTracks(*l->scene3d, l->tracks);
+        if (kept.size() != l->tracks.size()) {
+            warnings << QString("3D scene '%1': animation of %2 missing node(s)/material(s) was dropped").arg(l->props.name).arg(l->tracks.size() - kept.size());
+            l->tracks = kept;
         }
     } else if (t == LayerType::Symbol) {
         l->symbolId = QUuid(o["symbolId"].toString());

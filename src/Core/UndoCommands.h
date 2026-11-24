@@ -89,9 +89,12 @@ public:
     void redo() override;
     int id() const override { return m_key.isEmpty() ? -1 : 0x7F3B; }
     bool mergeWith(const QUndoCommand* other) override;
+    // Also swaps the layer's property tracks (edits that create or change 3D keyframes).
+    void setTracks(const PropertyTracks& before, const PropertyTracks& after) { m_tb = before; m_ta = after; m_hasTracks = true; }
 private:
-    void apply(const Scene3D& s);
+    void apply(const Scene3D& s, const PropertyTracks* t);
     Document* m_doc; QUuid m_layer; std::shared_ptr<const Scene3D> m_before, m_after; QString m_key;
+    PropertyTracks m_tb, m_ta; bool m_hasTracks = false;
 };
 
 // Frame rate, duration and work area of the composition.

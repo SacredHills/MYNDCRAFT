@@ -11,6 +11,7 @@ class QCheckBox;
 class QDoubleSpinBox;
 class QGroupBox;
 class QPushButton;
+class QToolButton;
 
 namespace mynd {
 
@@ -18,12 +19,15 @@ namespace mynd {
 class Scene3DPanel : public QWidget {
     Q_OBJECT
 public:
+    struct KeyRow { QToolButton *watch = nullptr, *key = nullptr; QString what; bool material = false; };
     Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent = nullptr);
     // Test access.
     QTreeWidget* tree() const { return m_tree; }
     QDoubleSpinBox* posField(int axis) const { return m_pos[axis]; }
     QDoubleSpinBox* roughnessField() const { return m_rough; }
     QDoubleSpinBox* intensityField() const { return m_intensity; }
+    QToolButton* stopwatch(const QString& what) const { for (const KeyRow& r : m_keyRows) if (r.what == what) return r.watch; return nullptr; }
+    QToolButton* keyButton(const QString& what) const { for (const KeyRow& r : m_keyRows) if (r.what == what) return r.key; return nullptr; }
     QGroupBox *transformGroup() const { return m_gXform; }
     QGroupBox *materialGroup() const { return m_gMat; }
     QGroupBox *lightGroup() const { return m_gLight; }
@@ -32,6 +36,8 @@ public:
     bool setBaseTexture(const QImage& img);                       // what "Texture…" does after the file is read
 
 private:
+    QWidget* labelWithKeys(const QString& text, const QString& what, bool material);
+    QString keyPropId(const KeyRow& r) const;      // empty when nothing is selected
     void rebuildTree();
     void refreshInspector();
     void edit(const QString& text, const QString& mergeKey, const std::function<bool(Scene3D&, Node3D&)>& fn);
@@ -59,6 +65,7 @@ private:
     QPushButton *m_ambientColor, *m_bgColor;
     QDoubleSpinBox* m_ambientInt;
     QComboBox* m_cameraCombo;
+    QVector<KeyRow> m_keyRows;
     QColor m_baseC, m_emisC, m_lightC, m_ambC, m_bgC;
 };
 

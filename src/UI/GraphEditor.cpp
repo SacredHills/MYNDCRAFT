@@ -479,6 +479,7 @@ void GraphEditorPanel::rebuildProps() {
             auto it = l->tracks.constFind(d.id);
             if (it != l->tracks.constEnd() && it->animated()) m_props->addItem(d.label, d.id);
         }
+        for (const QString& id : l->animated3DProperties()) m_props->addItem(l->propertyLabel(id), id);
     }
     int ix = m_props->findData(keep);
     if (ix < 0 && m_props->count() > 0) ix = 0;

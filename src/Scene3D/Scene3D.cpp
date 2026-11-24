@@ -242,6 +242,15 @@ bool Scene3D::isAncestor(const QUuid& anc, const QUuid& of) const {
     }
     return false;
 }
+bool Scene3D::sameAs(const Scene3D& o) const {
+    if (nodes.size() != o.nodes.size() || materials.size() != o.materials.size() || meshes != o.meshes || textures.size() != o.textures.size()) return false;
+    if (activeCamera != o.activeCamera || ambient != o.ambient || ambientIntensity != o.ambientIntensity || background != o.background) return false;
+    for (size_t i = 0; i < nodes.size(); ++i) if (!(nodes[i] == o.nodes[i])) return false;
+    for (size_t i = 0; i < materials.size(); ++i) if (!(materials[i] == o.materials[i])) return false;
+    for (const auto& [k, img] : textures) { auto it = o.textures.find(k); if (it == o.textures.end() || it->second.cacheKey() != img.cacheKey()) return false; }
+    return true;
+}
+
 QString Scene3D::uniqueName(const QString& base) const {
     auto used = [&](const QString& s) { for (const auto& n : nodes) if (n.name == s) return true; return false; };
     if (!used(base)) return base;

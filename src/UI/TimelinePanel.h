@@ -61,7 +61,7 @@ private:
     EditorSession* m_s;
     AnimationActions* m_a;
     QVector<Row> m_rows;
-    QMetaObject::Connection m_c1, m_c2, m_c3, m_c4, m_c5, m_c6;
+    QMetaObject::Connection m_c1, m_c2, m_c3, m_c4, m_c5, m_c6, m_c7;
     int m_cellW = 16;
     enum Drag { None, Scrub, Resize, SelectRange, KeyMove, Marquee } m_drag = None;
     QSet<QUuid> m_expanded;

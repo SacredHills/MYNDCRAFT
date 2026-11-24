@@ -1,4 +1,5 @@
 #include "Scene/Layer.h"
+#include "Scene3D/Anim3D.h"
 
 #include <algorithm>
 
@@ -200,6 +201,17 @@ LayerPtr Layer::cloneWithNewIds() const {
         for (auto& n : c->scene3d->nodes) { const QUuid nid = QUuid::createUuid(); nodeMap[n.id] = nid; n.id = nid; }
         for (auto& n : c->scene3d->nodes) if (nodeMap.count(n.parent)) n.parent = nodeMap[n.parent];
         if (nodeMap.count(c->scene3d->activeCamera)) c->scene3d->activeCamera = nodeMap[c->scene3d->activeCamera];
+        // 3D keyframe tracks follow their nodes (materials keep their ids: they are per-scene).
+        PropertyTracks remapped;
+        for (auto it = tracks.begin(); it != tracks.end(); ++it) {
+            mynd::PropTarget pt;
+            if (mynd::parseScene3DPropId(it.key(), &pt) && !pt.material) {
+                auto m = nodeMap.find(pt.target);
+                if (m == nodeMap.end()) continue;
+                remapped.insert(mynd::nodePropId(m->second, pt.what), it.value());
+            } else remapped.insert(it.key(), it.value());
+        }
+        c->tracks = remapped;
     }
     for (const auto& [did, img] : drawingImages) c->drawingImages[did] = img.copy();
     for (auto& s : c->shapes) s.id = QUuid::createUuid();  // group ids stay consistent within the layer
@@ -217,4 +229,20 @@ LayerPtr Layer::cloneWithNewIds() const {
     return c;
 }
 
+}  // namespace mynd
+
+namespace mynd {
+QVector<QString> Layer::animated3DProperties() const {
+    return scene3d ? animatedSceneProps(*scene3d, tracks) : QVector<QString>();
+}
+QString Layer::propertyLabel(const QString& id) const {
+    if (isScene3DPropId(id)) return scene3d ? describeSceneProp(*scene3d, id) : id;
+    const PropertyDef* d = findPropertyDef(id);
+    return d ? d->label : id;
+}
+std::shared_ptr<const Scene3D> Layer::sceneAt(double frame) const {
+    if (!scene3d) return nullptr;
+    if (!hasSceneAnimation(*scene3d, tracks)) return scene3d;
+    return std::make_shared<const Scene3D>(evaluateScene(*scene3d, tracks, frame));
+}
 }  // namespace mynd
