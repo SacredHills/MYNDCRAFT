@@ -517,6 +517,61 @@ QMap<QUuid, QMap<QString, QVector<int>>> groupKeys(const QVector<KeyRef>& sel) {
 }
 }  // namespace
 
+static const char* const kTweenProps[] = {"transform.position", "transform.scale", "transform.rotation", "opacity"};
+
+bool EditorSession::createTween(const QUuid& layer, int a, int b, const TweenOptions& o) {
+    Layer* l = editableTracksLayer(this, layer);
+    if (!l || !m_doc || a < 0 || b <= a || b >= m_doc->durationFrames()) return false;
+    PropertyTracks t = l->tracks;
+    for (const char* id : kTweenProps) {
+        const PropertyDef* d = findPropertyDef(id);
+        const PropValue va = valueOf(t, *d, a), vb = valueOf(t, *d, b);
+        PropertyTrack& tr = t[id];
+        if (!tr.animated()) tr.base = va;
+        tr.setKey(*d, a, va);
+        PropValue end = vb;
+        if (o.rotateDir != 0 && QString(id) == "transform.rotation") end.c[0] += o.rotateDir * 360.0 * std::max(0, o.spins);
+        tr.setKey(*d, b, end);
+        const int ia = tr.indexOfKey(a), ib = tr.indexOfKey(b);
+        Keyframe& ka = tr.keys[ia];
+        Keyframe& kb = tr.keys[ib];
+        ka.out = Interp::Linear; ka.outHandle = {}; kb.in = Interp::Linear; kb.inHandle = {};
+        if (o.kind == TweenOptions::Motion) {
+            if (o.easyEase) { tr.applyEase(a, EasePreset::EaseInOut, false, true); tr.applyEase(b, EasePreset::EaseInOut, true, false); }
+        } else if (o.ease > 0) {          // ease out: arrives slowly
+            const double inf = 1.0 / 3.0 + 0.6 * std::min(o.ease, 100) / 100.0;
+            kb.in = Interp::Bezier; kb.inHandle = Handle{inf, 0};
+        } else if (o.ease < 0) {          // ease in: leaves slowly
+            const double inf = 1.0 / 3.0 + 0.6 * std::min(-o.ease, 100) / 100.0;
+            ka.out = Interp::Bezier; ka.outHandle = Handle{inf, 0};
+        }
+    }
+    pruneDefaults(t);
+    m_doc->editTracks(layer, t, o.kind == TweenOptions::Motion ? tr("Create Motion Tween") : tr("Create Classic Tween"));
+    return true;
+}
+
+bool EditorSession::removeTween(const QUuid& layer, int a, int b) {
+    Layer* l = editableTracksLayer(this, layer);
+    if (!l || !m_doc) return false;
+    PropertyTracks t = l->tracks;
+    bool any = false;
+    for (const char* id : kTweenProps) {
+        auto it = t.find(id);
+        if (it == t.end()) continue;
+        const PropertyDef* d = findPropertyDef(id);
+        if (it->keys.isEmpty()) continue;
+        const PropValue keep = it->valueAt(*d, a);
+        for (int i = it->keys.size() - 1; i >= 0; --i)
+            if (it->keys[i].frame >= a && it->keys[i].frame <= b) { it->keys.remove(i); any = true; }
+        if (it->keys.isEmpty()) it->base = keep;           // nothing left to animate: freeze at the span's start value
+    }
+    if (!any) return false;
+    pruneDefaults(t);
+    m_doc->editTracks(layer, t, tr("Remove Tween"));
+    return true;
+}
+
 bool EditorSession::deleteSelectedKeys() {
     if (!m_doc || m_keySel.isEmpty()) return false;
     const auto groups = groupKeys(m_keySel);

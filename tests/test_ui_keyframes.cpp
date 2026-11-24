@@ -587,6 +587,39 @@ private slots:
         QCOMPARE(QColor(L()->raster.pixelColor(130, 130)), QColor(Qt::red));
     }
 
+    // ------------------------------------------------------------ Tweens
+    void motionAndClassicTweensMakeKeysAtBothEndsAndMoveBetweenThem() {
+        s->setActiveLayer(layerId);
+        EditorSession::TweenOptions o;
+        QVERIFY(s->createTween(layerId, 0, 20, o));                              // motion tween, Easy Ease
+        for (const char* id : {"transform.position", "transform.scale", "transform.rotation", "opacity"})
+            QCOMPARE(L()->tracks[id].keys.size(), 2);
+        QCOMPARE(L()->tracks["transform.position"].keys[0].out, Interp::Bezier);
+        // define the motion at the end frame with Auto-Key
+        s->setAutoKey(true);
+        doc->setCurrentFrame(20);
+        s->setProperties(layerId, {{"transform.position", PropValue::of(200, 0)}});
+        s->setAutoKey(false);
+        const PropertyDef& pd = *findPropertyDef("transform.position");
+        QVERIFY(qAbs(L()->tracks["transform.position"].valueAt(pd, 10).c[0] - 100) < 1e-6);   // symmetric ease: halfway at halfway
+        QVERIFY(L()->tracks["transform.position"].valueAt(pd, 3).c[0] < 15);                   // eased: slow start (linear would be 30)
+        // classic tween with ease out and one clockwise spin
+        s->setActiveLayer(layerId);
+        EditorSession::TweenOptions c;
+        c.kind = EditorSession::TweenOptions::Classic; c.ease = 80; c.rotateDir = 1; c.spins = 2;
+        QVERIFY(s->createTween(layerId, 20, 29, c));
+        const PropertyDef& rd = *findPropertyDef("transform.rotation");
+        QCOMPARE(L()->tracks["transform.rotation"].valueAt(rd, 29).c[0], 720.0);
+        QVERIFY(L()->tracks["transform.rotation"].valueAt(rd, 22).c[0] > 720.0 * 2.0 / 9.0);   // ease out: ahead of linear early on
+        QVERIFY(!s->createTween(layerId, 5, 5, c));                                          // empty span refused
+        QVERIFY(!s->createTween(layerId, 0, 99, c));                                         // beyond the composition
+        doc->undoStack()->undo();
+        QCOMPARE(L()->tracks["transform.rotation"].keys.size(), 2);
+        // remove the first tween: keys in its span are deleted
+        QVERIFY(s->removeTween(layerId, 0, 20));
+        QVERIFY(!L()->tracks.contains("transform.rotation") || L()->tracks["transform.rotation"].keys.isEmpty());
+    }
+
     // ------------------------------------------------------------ Symbols
     void symbolsConvertEditAndPlayThroughTheUi() {
         s->setActiveLayer(layerId);

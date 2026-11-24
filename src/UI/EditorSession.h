@@ -153,6 +153,18 @@ public:
     void setKeySelection(const QVector<KeyRef>& keys);
     void clearKeySelection() { setKeySelection({}); }
     bool isKeySelected(const QUuid& layer, const QString& prop, int frame) const;
+    // Animate-style tweens: keyframes on Position, Scale, Rotation and Opacity at both ends of a span, taking the
+    // layer's values at those frames; the layer then moves between them. Edit the end values (Auto-Key on) to
+    // define the motion. One undo step.
+    struct TweenOptions {
+        enum Kind { Motion, Classic } kind = Motion;
+        bool easyEase = true;      // Motion: ease in and out at both ends
+        int ease = 0;              // Classic: -100 (ease in, slow start) .. +100 (ease out, slow end)
+        int rotateDir = 0;         // 0 = none, +1 clockwise, -1 counter-clockwise
+        int spins = 1;             // full turns when rotateDir != 0
+    };
+    bool createTween(const QUuid& layer, int startFrame, int endFrame, const TweenOptions& o);
+    bool removeTween(const QUuid& layer, int startFrame, int endFrame);   // removes the keys of those four properties in the span
     bool deleteSelectedKeys();
     bool moveSelectedKeys(int deltaFrames);
     bool easeSelectedKeys(EasePreset preset, bool incoming = true, bool outgoing = true);

@@ -1,6 +1,8 @@
 #include "UI/AnimationActions.h"
 
+#include <QComboBox>
 #include <QDialog>
+#include <QLabel>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QSpinBox>
@@ -73,6 +75,59 @@ AnimationActions::AnimationActions(EditorSession* s, QWidget* dialogParent) : QO
     ease(keyEaseOut, "keyEaseOut", tr("Ease Out"), EasePreset::EaseOut, QKeySequence("Ctrl+Shift+F9"));
     ease(keyEaseBoth, "keyEaseBoth", tr("Easy Ease (In and Out)"), EasePreset::EaseInOut, QKeySequence("F9"));
     connect(m_s, &EditorSession::frameSelectionChanged, this, &AnimationActions::refresh);
+
+    createTweenAction = mk("createTween", tr("Create Tween…"));
+    connect(createTweenAction, &QAction::triggered, this, [this] {
+        const Layer* l = m_s->activeLayer();
+        Document* d = m_s->doc();
+        if (!l || !d) return;
+        int a = d->currentFrame(), b = std::min(d->durationFrames() - 1, a + 24);
+        if (m_s->hasFrameSelection()) { int x, y; m_s->selectedFrameRange(&x, &y); if (y > x) { a = x; b = y; } }
+        QDialog dlg(m_parent);
+        dlg.setWindowTitle(tr("Create Tween"));
+        auto* f = new QFormLayout(&dlg);
+        auto* kind = new QComboBox; kind->addItem(tr("Motion Tween (Easy Ease)")); kind->addItem(tr("Classic Tween (ease slider)"));
+        auto* from = new QSpinBox; from->setRange(1, d->durationFrames()); from->setValue(a + 1);
+        auto* to = new QSpinBox; to->setRange(1, d->durationFrames()); to->setValue(b + 1);
+        auto* ease = new QSpinBox; ease->setRange(-100, 100); ease->setValue(0);
+        ease->setToolTip(tr("Classic tween: -100 starts slowly (ease in), +100 ends slowly (ease out)"));
+        auto* rot = new QComboBox; rot->addItems({tr("None"), tr("Clockwise"), tr("Counter-clockwise")});
+        auto* spins = new QSpinBox; spins->setRange(0, 50); spins->setValue(1);
+        f->addRow(tr("Type"), kind); f->addRow(tr("From frame"), from); f->addRow(tr("To frame"), to);
+        f->addRow(tr("Ease (classic)"), ease); f->addRow(tr("Rotate"), rot); f->addRow(tr("Full turns"), spins);
+        auto* hint = new QLabel(tr("Adds keyframes for Position, Scale, Rotation and Opacity at both ends.\nTurn on Auto-Key and change the layer at the end frame to define the motion."));
+        hint->setWordWrap(true);
+        f->addRow(hint);
+        auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        f->addRow(bb);
+        connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        if (dlg.exec() != QDialog::Accepted) return;
+        EditorSession::TweenOptions o;
+        o.kind = kind->currentIndex() == 0 ? EditorSession::TweenOptions::Motion : EditorSession::TweenOptions::Classic;
+        o.ease = ease->value();
+        o.rotateDir = rot->currentIndex() == 0 ? 0 : rot->currentIndex() == 1 ? 1 : -1;
+        o.spins = spins->value();
+        if (!m_s->createTween(l->id, from->value() - 1, to->value() - 1, o)) emit m_s->message(tr("Choose a start frame before the end frame, inside the composition."));
+    });
+    removeTweenAction = mk("removeTween", tr("Remove Tween at Current Frame"));
+    connect(removeTweenAction, &QAction::triggered, this, [this] {
+        const Layer* l = m_s->activeLayer();
+        if (!l || !m_s->doc()) return;
+        // the span around the playhead: from the nearest transform key at/before it to the nearest one after it
+        const int cur = m_s->doc()->currentFrame();
+        int lo = -1, hi = -1;
+        for (const char* id : {"transform.position", "transform.scale", "transform.rotation", "opacity"}) {
+            auto it = l->tracks.constFind(id);
+            if (it == l->tracks.constEnd()) continue;
+            for (const Keyframe& k : it->keys) {
+                if (k.frame <= cur) lo = std::max(lo, k.frame);
+                else if (hi < 0 || k.frame < hi) hi = k.frame;
+            }
+        }
+        if (lo < 0 || hi < 0) { emit m_s->message(tr("No tween keyframes around this frame.")); return; }
+        if (!m_s->removeTween(l->id, lo, hi)) emit m_s->message(tr("No tween keyframes around this frame."));
+    });
 
     extend = mk("extend", tr("Extend Exposure by 1 Frame"), QKeySequence("Ctrl+="));
     connect(extend, &QAction::triggered, this, [=, this] {
@@ -280,6 +335,8 @@ void AnimationActions::fillMenu(QMenu* m) {
     QMenu* interp = m->addMenu(tr("Keyframe Interpolation"));
     interp->addActions({keyLinear, keyHold, keyEaseIn, keyEaseOut, keyEaseBoth});
     m->addAction(deleteKeys);
+    m->addSeparator();
+    m->addActions({createTweenAction, removeTweenAction});
 }
 
 void AnimationActions::fillKeyframeMenu(QMenu* m) {

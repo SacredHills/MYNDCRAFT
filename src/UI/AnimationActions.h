@@ -27,6 +27,7 @@ public:
     QAction *workIn, *workOut, *workClear;
     // Property keyframes
     QAction *autoKey, *prevKey, *nextKey, *deleteKeys;
+    QAction *createTweenAction, *removeTweenAction;
     QAction *keyLinear, *keyHold, *keyEaseIn, *keyEaseOut, *keyEaseBoth;
 
     // Adds every animation command (grouped, with separators) to `menu`.
