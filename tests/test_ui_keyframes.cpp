@@ -353,7 +353,7 @@ private slots:
         doc->undoStack()->undo();
         // scale from the bottom-right corner handle about the anchor
         drag({160, 160}, {120, 170});
-        QVERIFY(qAbs(L()->tracks["transform.scale"].base.c[0] - 200.0) < 1.0);
+        QVERIFY(qAbs(L()->tracks["transform.scale"].base.c[0] - 200.0) < 8.0);   // pointer positions are whole pixels; 40px lever arm
         QVERIFY(qAbs(L()->tracks["transform.scale"].base.c[1] - 200.0) < 8.0);   // y lever arm is only 10px, so half a pixel is 5 %
         doc->undoStack()->undo();
         // moving the anchor leaves the picture exactly where it was
