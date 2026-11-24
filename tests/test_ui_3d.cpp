@@ -509,31 +509,34 @@ private slots:
         QCOMPARE(doc->undoStack()->index(), before);
     }
 
-    void theCanvasCanMoveToItsOwnWindowAndBack() {
-        QVERIFY(!w->canvasDetached());
+    void anExtraCanvasWindowIsAnotherViewAndTheMainCanvasStays() {
         const QUuid L = doc->addLayer(LayerType::Raster, "R");
         s->setActiveLayer(L);
-        w->setCanvasDetached(true);
+        QCOMPARE(w->canvasWindowCount(), 0);
+        CanvasView* extra = w->openCanvasWindow();
         QApplication::processEvents();
-        auto* dock = w->findChild<QDockWidget*>("dock.canvasWindow");
-        QVERIFY(dock && dock->isFloating() && dock->isVisible());
-        QCOMPARE(w->canvas()->parentWidget(), dock);
-        QVERIFY(w->canvas()->width() > 100 && w->canvas()->height() > 100);
-        // it still draws: paint with the brush through real mouse events
+        QCOMPARE(w->canvasWindowCount(), 1);
+        QVERIFY(extra != w->canvas() && extra->isVisible());
+        QVERIFY(extra->width() > 100 && extra->height() > 100);
+        for (const QString& n : WorkspaceManager::presetNames()) {      // the main canvas is in every workspace, the extra window stays
+            w->workspaces()->apply(n);
+            QApplication::processEvents();
+            QVERIFY2(w->canvas()->isVisible() && w->canvas()->width() > 200, qPrintable(n));
+            QVERIFY(extra->isVisible());
+        }
+        // paint through the extra window with real mouse events
         s->setForeground(Qt::black);
         s->setTool(ToolId::Brush);
-        const QPoint a = w->canvas()->docToView().map(QPointF(50, 50)).toPoint(), b = w->canvas()->docToView().map(QPointF(150, 50)).toPoint();
-        QTest::mousePress(w->canvas(), Qt::LeftButton, {}, a);
-        QTest::mouseMove(w->canvas(), (a + b) / 2);
-        QTest::mouseMove(w->canvas(), b);
-        QTest::mouseRelease(w->canvas(), Qt::LeftButton, {}, b);
+        const QPoint a = extra->docToView().map(QPointF(50, 50)).toPoint(), b = extra->docToView().map(QPointF(150, 50)).toPoint();
+        QTest::mousePress(extra, Qt::LeftButton, {}, a);
+        QTest::mouseMove(extra, (a + b) / 2);
+        QTest::mouseMove(extra, b);
+        QTest::mouseRelease(extra, Qt::LeftButton, {}, b);
         QVERIFY(doc->undoStack()->count() > 0);
-        w->workspaces()->apply("Drawing");                             // switching workspaces does not touch it
-        QVERIFY(w->canvasDetached() && dock->isVisible());
-        w->setCanvasDetached(false);
+        // closing it leaves everything else alone; a new document is shown in the remaining windows
+        extra->parentWidget()->close();
         QApplication::processEvents();
-        QVERIFY(!w->canvasDetached());
-        QCOMPARE(w->centralWidget(), static_cast<QWidget*>(w->canvas()));
+        QTRY_COMPARE(w->canvasWindowCount(), 0);
         QVERIFY(w->canvas()->isVisible());
     }
 

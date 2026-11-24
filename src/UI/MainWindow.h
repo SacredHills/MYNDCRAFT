@@ -31,8 +31,8 @@ public:
     Document* document() const { return m_doc.get(); }
     EditorSession* session() const { return m_session; }
     CanvasView* canvas() const { return m_canvas; }
-    bool canvasDetached() const { return m_canvasDock != nullptr; }
-    void setCanvasDetached(bool on);   // the canvas in its own movable window (drag it anywhere, even to another screen) or back in the middle
+    CanvasView* openCanvasWindow();    // another view of the document in its own movable window (any screen); the main canvas stays in every workspace
+    int canvasWindowCount() const { return int(m_extraCanvases.size()); }
     LayerPanel* layerPanel() const { return m_layers; }
     WorkspaceManager* workspaces() const { return m_workspaces; }
     AnimationActions* animation() const { return m_anim; }
@@ -85,7 +85,7 @@ private:
     std::unique_ptr<Document> m_doc;
     EditorSession* m_session;
     CanvasView* m_canvas;
-    QDockWidget* m_canvasDock = nullptr;
+    QList<CanvasView*> m_extraCanvases;
     QAction* aDetachCanvas = nullptr;
     LayerPanel* m_layers;
     WorkspaceManager* m_workspaces = nullptr;
