@@ -18,7 +18,8 @@ public:
     QStringList allNames() const { return presetNames() + customNames(); }
     QString current() const { return m_current; }
 
-    bool apply(const QString& name);        // preset or custom
+    bool apply(const QString& name);
+    void reapplyCurrent();   // re-restore the current layout (used once the window is really shown)        // preset or custom
     void saveCurrentAs(const QString& name);
     bool deleteCustom(const QString& name);
     void saveCurrent();                     // remember the panel arrangement of the workspace being left

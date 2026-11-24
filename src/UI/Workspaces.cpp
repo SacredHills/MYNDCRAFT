@@ -34,6 +34,13 @@ void WorkspaceManager::resetCurrent() {
 QStringList WorkspaceManager::presetNames() { return {"Drawing", "Illustration", "Animation"}; }
 QStringList WorkspaceManager::customNames() const { return settings::workspaceNames(); }
 
+void WorkspaceManager::reapplyCurrent() {
+    const QString n = m_current;
+    if (n.isEmpty()) return;
+    m_current.clear();          // do not save the (possibly broken) arrangement over the stored one
+    apply(n);
+}
+
 bool WorkspaceManager::apply(const QString& name) {
     if (!presetNames().contains(name) && !customNames().contains(name)) return false;
     if (name != m_current) saveCurrent();                       // keep the arrangement of the one we are leaving
