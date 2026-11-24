@@ -1,6 +1,9 @@
 #include "UI/GraphEditor.h"
 
+#include <QContextMenuEvent>
 #include <QHBoxLayout>
+#include <QKeyEvent>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -346,6 +349,52 @@ void GraphCanvas::mouseReleaseEvent(QMouseEvent* e) {
     update();
 }
 
+bool GraphCanvas::addKeyAt(int frame) {
+    Layer* l = m_s->activeLayer();
+    const PropertyDef* d = findPropertyDef(m_prop);
+    if (!l || !d || !m_s->doc() || frame < 0 || frame >= m_s->doc()->durationFrames()) return false;
+    if (l->props.locked) { emit m_s->message(tr("The layer is locked.")); return false; }
+    auto it = l->tracks.constFind(m_prop);
+    if (it == l->tracks.constEnd() || !it->animated() || it->indexOfKey(frame) >= 0) return false;
+    PropertyTracks nt = l->tracks;
+    PropertyTrack& t = nt[m_prop];
+    t.setKey(*d, frame, it->valueAt(*d, frame));
+    m_s->doc()->editTracks(l->id, nt, tr("Add Keyframe"));
+    m_s->setKeySelection({KeyRef{l->id, m_prop, frame}});
+    return true;
+}
+
+bool GraphCanvas::deleteSelected() { return m_s->deleteSelectedKeys(); }
+
+void GraphCanvas::mouseDoubleClickEvent(QMouseEvent* e) {
+    if (e->button() != Qt::LeftButton || e->position().y() < m_top || !track()) { QWidget::mouseDoubleClickEvent(e); return; }
+    if (hitTest(e->position()).key >= 0) return;                 // double-click on an existing key: nothing to add
+    addKeyAt(int(std::lround(frameAt(e->position().x()))));
+}
+
+void GraphCanvas::contextMenuEvent(QContextMenuEvent* e) {
+    const Layer* l = layer();
+    if (!l || !track()) return;
+    const QPointF pos = e->pos();
+    const Hit h = hitTest(pos);
+    QMenu m;
+    if (h.key >= 0) {
+        const KeyRef ref{l->id, m_prop, track()->keys[h.key].frame};
+        if (!m_s->isKeySelected(ref.layer, ref.prop, ref.frame)) m_s->setKeySelection({ref});
+        m.addAction(tr("Delete Keyframe"), this, [this] { deleteSelected(); });
+    } else {
+        const int fr = int(std::lround(frameAt(pos.x())));
+        QAction* a = m.addAction(tr("Add Keyframe Here"), this, [this, fr] { addKeyAt(fr); });
+        a->setEnabled(fr >= 0 && track()->indexOfKey(fr) < 0);
+    }
+    m.exec(e->globalPos());
+}
+
+void GraphCanvas::keyPressEvent(QKeyEvent* e) {
+    if ((e->key() == Qt::Key_Delete || e->key() == Qt::Key_Backspace) && !m_s->selectedKeys().isEmpty()) { deleteSelected(); e->accept(); return; }
+    QWidget::keyPressEvent(e);
+}
+
 void GraphCanvas::wheelEvent(QWheelEvent* e) {
     const double z = std::pow(1.0015, e->angleDelta().y());
     if (e->modifiers() & Qt::ShiftModifier) {
@@ -382,6 +431,11 @@ GraphEditorPanel::GraphEditorPanel(EditorSession* s, QWidget* parent) : QWidget(
     valueBtn->setChecked(true);
     connect(valueBtn, &QToolButton::clicked, this, [=] { valueBtn->setChecked(true); speedBtn->setChecked(false); });
     connect(speedBtn, &QToolButton::clicked, this, [=] { speedBtn->setChecked(true); valueBtn->setChecked(false); });
+    bar->addSpacing(8);
+    mkBtn(tr("Add Key"), tr("Add a keyframe at the playhead on this property (or double-click the graph)"), [this] {
+        if (m_s->doc()) m_canvas->addKeyAt(m_s->doc()->currentFrame());
+    });
+    mkBtn(tr("Delete Key"), tr("Delete the selected keyframes (Delete key, or right-click a key)"), [this] { m_canvas->deleteSelected(); });
     bar->addSpacing(8);
     mkBtn(tr("Fit"), tr("Fit the curve in the view"), [this] { m_canvas->fit(); });
     bar->addSpacing(8);

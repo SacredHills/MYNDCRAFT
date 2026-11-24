@@ -476,6 +476,38 @@ private slots:
         graph()->canvas()->fit();
         QApplication::processEvents();
     }
+    void graphEditorAddsKeysByDoubleClickAndDeletesThem() {
+        s->setAutoKey(true);
+        doc->setCurrentFrame(0);   s->setProperties(layerId, {{"transform.position", PropValue::of(0, 0)}});
+        doc->setCurrentFrame(20);  s->setProperties(layerId, {{"transform.position", PropValue::of(200, 0)}});
+        s->setAutoKey(false);
+        s->setActiveLayer(layerId);
+        showGraph();
+        GraphCanvas* g = graph()->canvas();
+        const PropertyDef& pd = *findPropertyDef("transform.position");
+        const double before = L()->tracks["transform.position"].valueAt(pd, 10).c[0];
+        const QPointF a = g->keyPoint(0, 0), b = g->keyPoint(20, 0);
+        const QPoint mid((a.x() + b.x()) / 2, int((a.y() + b.y()) / 2));
+        QTest::mouseDClick(g, Qt::LeftButton, {}, mid);
+        QCOMPARE(L()->tracks["transform.position"].keys.size(), 3);
+        QCOMPARE(L()->tracks["transform.position"].keys[1].frame, 10);
+        QVERIFY(qAbs(L()->tracks["transform.position"].valueAt(pd, 10).c[0] - before) < 1e-9);   // the curve keeps its shape
+        QVERIFY(s->isKeySelected(layerId, "transform.position", 10));
+        QTest::keyClick(g, Qt::Key_Delete);                                                      // delete it again
+        QCOMPARE(L()->tracks["transform.position"].keys.size(), 2);
+        doc->undoStack()->undo();
+        QCOMPARE(L()->tracks["transform.position"].keys.size(), 3);
+        doc->undoStack()->undo();
+        QCOMPARE(L()->tracks["transform.position"].keys.size(), 2);
+        // double-clicking an existing key adds nothing
+        QTest::mouseDClick(g, Qt::LeftButton, {}, g->keyPoint(20, 0).toPoint());
+        QCOMPARE(L()->tracks["transform.position"].keys.size(), 2);
+        // the Add Key button works at the playhead
+        doc->setCurrentFrame(5);
+        QVERIFY(g->addKeyAt(5));
+        QCOMPARE(L()->tracks["transform.position"].keys[1].frame, 5);
+    }
+
     void graphEditorDragsHandlesAndKeysAndPlaybackFollows() {
         s->setAutoKey(true);
         doc->setCurrentFrame(0);   s->setProperties(layerId, {{"transform.position", PropValue::of(0, 0)}});

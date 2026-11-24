@@ -24,6 +24,9 @@ public:
     // Widget position of a key (component `comp`) or of one of its handles; for tests.
     QPointF keyPoint(int frame, int comp) const;
     bool handlePoint(int frame, bool outgoing, QPointF* out) const;
+    // Adds a keyframe at `frame` holding the curve's current value (the curve does not change shape there).
+    bool addKeyAt(int frame);
+    bool deleteSelected();
     QSize sizeHint() const override { return {600, 200}; }
 
 protected:
@@ -32,6 +35,9 @@ protected:
     void mouseMoveEvent(QMouseEvent*) override;
     void mouseReleaseEvent(QMouseEvent*) override;
     void wheelEvent(QWheelEvent*) override;
+    void mouseDoubleClickEvent(QMouseEvent*) override;
+    void contextMenuEvent(QContextMenuEvent*) override;
+    void keyPressEvent(QKeyEvent*) override;
 
 private:
     struct Hit { int key = -1; int comp = 0; int handle = 0; };   // handle: 0 = the key itself, +1 out, -1 in
