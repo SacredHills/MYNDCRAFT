@@ -2,7 +2,10 @@
 #include <QShowEvent>
 #include "UI/MainWindow.h"
 #include "UI/GraphEditor.h"
+#include "UI/SymbolPanel.h"
 #include <QTabWidget>
+#include <QLabel>
+#include <QToolButton>
 
 #include <QApplication>
 #include <QCloseEvent>
@@ -430,6 +433,32 @@ void MainWindow::buildToolbars() {
     m_wsCombo = new QComboBox;
     m_wsCombo->setMinimumWidth(160);
     top->addWidget(m_wsCombo);
+    top->addSeparator();
+    m_crumb = new QLabel;
+    m_crumb->setObjectName("breadcrumb");
+    m_crumb->setContentsMargins(8, 0, 8, 0);
+    top->addWidget(m_crumb);
+    m_crumbExit = new QToolButton;
+    m_crumbExit->setText(tr("◂ Exit Symbol"));
+    m_crumbExit->setToolTip(tr("Leave the symbol and go back one level (Ctrl+Shift+Up)"));
+    connect(m_crumbExit, &QToolButton::clicked, this, [this] { if (m_symbolActions) m_symbolActions->leave(); });
+    top->addWidget(m_crumbExit);
+    connect(m_session, &EditorSession::documentChanged, this, [this] {
+        if (Document* d = m_session->doc()) connect(d, &Document::contextChanged, this, &MainWindow::updateBreadcrumb);
+        updateBreadcrumb();
+    });
+    updateBreadcrumb();
+}
+
+void MainWindow::updateBreadcrumb() {
+    const Document* d = m_session ? m_session->doc() : nullptr;
+    const bool inside = d && d->editingSymbol();
+    if (m_crumbExit) m_crumbExit->setVisible(inside);
+    if (m_crumb) {
+        m_crumb->setVisible(inside);
+        m_crumb->setText(inside ? tr("Editing symbol:  %1").arg(d->breadcrumb().join("  ›  ")) : QString());
+        m_crumb->setStyleSheet("color:#ffc83a; font-weight:bold;");
+    }
 }
 
 void MainWindow::buildDocks() {
@@ -447,6 +476,7 @@ void MainWindow::buildDocks() {
     mkDock("layers", tr("Layers"), m_layers);
     mkDock("history", tr("History"), new HistoryPanel(m_session));
     m_anim = new AnimationActions(m_session, this);
+    m_symbolActions = new SymbolActions(m_session, this);
     {
         // The graph editor lives in a tab next to the timeline (same dock: saved layouts stay valid).
         auto* tabs = new QTabWidget;
@@ -454,6 +484,7 @@ void MainWindow::buildDocks() {
         tabs->setObjectName("timelineTabs");
         tabs->addTab(new TimelinePanel(m_session, m_anim), tr("Timeline"));
         tabs->addTab(new GraphEditorPanel(m_session), tr("Graph Editor"));
+        tabs->addTab(new SymbolPanel(m_session, m_symbolActions), tr("Library"));
         mkDock("timeline", tr("Timeline"), tabs);
     }
     mkDock("exposure", tr("Exposure Sheet"), new ExposureSheetPanel(m_session, m_anim));
@@ -515,6 +546,7 @@ void MainWindow::buildMenus() {
 
     QMenu* anim = menuBar()->addMenu(tr("&Animation"));
     m_anim->fillMenu(anim);
+    m_symbolActions->fillMenu(menuBar()->addMenu(tr("&Symbol")));
 
     QMenu* win = menuBar()->addMenu(tr("&Window"));
     m_workspaceMenu = win->addMenu(tr("&Workspace"));

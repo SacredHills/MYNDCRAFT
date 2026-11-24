@@ -118,6 +118,9 @@ QIcon layerType(LayerType t) {
             p.drawRect(QRectF(3.5, 6.5, 17, 11));
             p.drawLine(9, 6.5, 9, 17.5); p.drawLine(15, 6.5, 15, 17.5);
             p.setBrush(c); p.drawRect(QRectF(10.5, 9.5, 3, 5));
+        } else if (t == LayerType::Symbol) {      // two stacked frames with a dot: a reusable component
+            p.drawRect(QRectF(3.5, 3.5, 12, 12)); p.drawRect(QRectF(8.5, 8.5, 12, 12));
+            p.setBrush(c); p.drawEllipse(QPointF(14.5, 14.5), 2.2, 2.2);
         } else {
             QPainterPath f; f.moveTo(3.5, 7); f.lineTo(9, 7); f.lineTo(11, 9); f.lineTo(20.5, 9);
             f.lineTo(20.5, 19.5); f.lineTo(3.5, 19.5); f.closeSubpath(); p.drawPath(f);

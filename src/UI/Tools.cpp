@@ -1004,7 +1004,7 @@ private:
         if (!l || !m_s->doc()) return g;
         const int f = m_s->doc()->currentFrame();
         const QSize cs = m_s->doc()->canvasSize();
-        g.box = l->contentBounds(f, cs);
+        g.box = l->contentBounds(f, cs, m_s->doc());
         if (g.box.isNull() || g.box.isEmpty()) return g;
         g.layer = l;
         g.xf = l->xformAt(f);
@@ -1084,6 +1084,12 @@ private:
         if (m_s->setProperties(m_layer, vals, m_key)) m_moved = true;
         m_c->update();
     }
+public:
+    bool insideLayer(const QPointF& docPt) const {
+        const Geo g = geo();
+        return g.ok && g.poly.containsPoint(docPt, Qt::OddEvenFill);
+    }
+private:
     H m_h = None;
     Geo m_g0;
     QPointF m_start;
@@ -1126,6 +1132,10 @@ public:
     }
     void doubleClick(const PointerEvent& e) override {
         const Layer* l = m_s->activeLayer();
+        if (l && l->type == LayerType::Symbol && m_layer.insideLayer(e.doc) && m_s->doc()) {   // dive into the symbol
+            m_s->doc()->enterSymbol(l->symbolId);
+            return;
+        }
         // Double-clicking a path with Select edits its points (same gesture as the old Direct Selection tool).
         Tool* t = (isShapeLayer(l) && l->type == LayerType::Vector) ? static_cast<Tool*>(&m_direct) : m_active;
         if (t) t->doubleClick(t == &m_layer ? e : local(e));

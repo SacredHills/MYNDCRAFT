@@ -1,5 +1,7 @@
 #include "UI/PropertiesPanel.h"
 
+#include <QFormLayout>
+
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QPainter>
@@ -117,6 +119,25 @@ PropertiesPanel::PropertiesPanel(EditorSession* s, AnimationActions* a, QWidget*
     hint->setWordWrap(true);
     hint->setStyleSheet("color: gray");
     lay->addWidget(hint);
+    // Symbol instance: which symbol, and how its own timeline maps onto this one.
+    m_instBox = new QGroupBox(tr("Symbol instance"));
+    auto* ib = new QFormLayout(m_instBox);
+    m_instName = new QLabel;
+    ib->addRow(tr("Symbol"), m_instName);
+    m_instMode = new QComboBox;
+    m_instMode->addItem(tr("Loop"), int(SymbolPlay::Loop));
+    m_instMode->addItem(tr("Play Once"), int(SymbolPlay::PlayOnce));
+    m_instMode->addItem(tr("Single Frame"), int(SymbolPlay::SingleFrame));
+    m_instMode->setToolTip(tr("How the symbol's own timeline follows this timeline (Graphic symbols only; a Movie Clip always loops)"));
+    ib->addRow(tr("Playback"), m_instMode);
+    m_instFirst = new QSpinBox;
+    m_instFirst->setRange(1, 100000);
+    m_instFirst->setToolTip(tr("The frame of the symbol's timeline shown when this layer starts (1 = its first frame)"));
+    ib->addRow(tr("First frame"), m_instFirst);
+    lay->addWidget(m_instBox);
+    m_instBox->setVisible(false);
+    connect(m_instMode, &QComboBox::activated, this, [this] { instanceEdited(); });
+    connect(m_instFirst, &QSpinBox::editingFinished, this, [this] { instanceEdited(); });
     lay->addStretch(1);
 
     auto sync = [this] { refresh(); };
@@ -138,9 +159,30 @@ QDoubleSpinBox* PropertiesPanel::field(const QString& prop, int component) const
     return component >= 0 && component < r.spins.size() ? r.spins[component] : nullptr;
 }
 
+void PropertiesPanel::instanceEdited() {
+    if (m_busy) return;
+    const Layer* l = m_s->activeLayer();
+    if (!l || l->type != LayerType::Symbol || l->props.locked || !m_s->doc()) return;
+    m_s->doc()->setInstancePlayback(l->id, SymbolPlay(m_instMode->currentData().toInt()), m_instFirst->value() - 1);
+}
+
 void PropertiesPanel::refresh() {
     m_busy = true;
     const Layer* l = m_s->activeLayer();
+    {   // symbol instance controls
+        const bool inst = l && l->type == LayerType::Symbol;
+        m_instBox->setVisible(inst);
+        if (inst) {
+            const SymbolDef* sd = m_s->doc() ? m_s->doc()->findSymbol(l->symbolId) : nullptr;
+            m_instName->setText(sd ? tr("%1 (%2)").arg(sd->name, sd->kind == SymbolKind::Graphic ? tr("Graphic") : tr("Movie Clip")) : tr("missing"));
+            const bool graphic = sd && sd->kind == SymbolKind::Graphic;
+            m_instMode->setEnabled(graphic && !l->props.locked);
+            m_instFirst->setEnabled(graphic && !l->props.locked);
+            if (sd) m_instFirst->setMaximum(std::max(1, sd->durationFrames));
+            m_instMode->setCurrentIndex(m_instMode->findData(int(l->symbolPlay)));
+            m_instFirst->setValue(l->symbolFirstFrame + 1);
+        }
+    }
     const bool on = l && !l->props.locked;
     m_layerName->setText(l ? l->props.name : tr("No layer selected"));
     {

@@ -178,7 +178,24 @@ Limitations (honest list):
   handle is shared across a Vec2's components (no separate dimensions); speed is not parameterised by arc length;
   no box-select or multi-key handle edits in the graph; speed graph cannot be edited.
 
-## Next tasks (Phase 5 — Animate-style tweening)
+## Phase 5 — Symbols (implemented, headless-tested; feel not yet confirmed on Windows)
+- **Library + instances:** a symbol is a named layer tree with its own length (Library tab next to Graph Editor, Symbol menu).
+  F8 / "Convert Layer to Symbol" moves the active layer (or group) into a new symbol and leaves an instance in its place.
+  Instances are normal layers (transform/opacity keyframes, Auto-Key, graph editor all work) sharing one definition.
+- **Graphic** symbols follow the timeline they sit in (Loop / Play Once / Single Frame, first frame); **Movie Clip** symbols
+  loop on their own from frame 0. Time is evaluated deterministically from the parent frame (no free-running clock), so
+  export and scrubbing agree.
+- **Nested symbols** work; cycles (a symbol containing itself, directly or through others) are refused at creation and
+  rejected/validated on load. Rendering has a depth guard.
+- **Symbol editing mode:** double-click an instance with Select, or Edit Symbol (Ctrl+Shift+Down); breadcrumb + Exit button
+  (Ctrl+Shift+Up). Inside, the canvas, layers, timeline and length are the symbol's. Entering/leaving is part of undo history
+  so undo always runs in the right context (side effect: entering a symbol marks the project modified).
+- **Saved** in format version 4 (`symbols` in composition.json), also while a symbol is open (the main scene is written).
+- Limitations: no "symbol editing in place" (the rest of the scene is hidden while inside); Movie Clips do not offer
+  independent play/stop; no button-style symbols; no library import between projects; instance cannot be swapped for another
+  symbol yet; deleting a used symbol is refused rather than removing its instances.
+
+## Next tasks (Phase 5 — remaining: tweens)
 Motion/classic/shape tweens, symbols and nested symbols, reusable animation assets, independent symbol timelines.
 Also: re-evaluate renderer choice (Skia vs. QPainter) and add a frame cache before the GPU/3D work.
 

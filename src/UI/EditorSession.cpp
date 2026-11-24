@@ -71,6 +71,12 @@ void EditorSession::setDocument(Document* d) {
             }
             if (keep.size() != m_keySel.size()) { m_keySel = keep; emit keySelectionChanged(); }
         });
+        connect(d, &Document::contextChanged, this, [this] {      // entered/left a symbol: nothing selected carries over
+            clearFrameSelection();
+            m_selected.clear();
+            if (!m_keySel.isEmpty()) { m_keySel.clear(); emit keySelectionChanged(); }
+            emit selectionChanged();
+        });
         // Activate the top-most non-group layer.
         Layer* pick = nullptr;
         Document::forEachLayer(d->root(), [&](Layer* l) { if (!l->isGroup()) pick = l; });

@@ -9,6 +9,7 @@
 #include "UI/MainWindow.h"
 #include "UI/GraphEditor.h"
 #include "UI/PropertiesPanel.h"
+#include "UI/SymbolPanel.h"
 #include "UI/TimelinePanel.h"
 #include "UI/Workspaces.h"
 
@@ -586,6 +587,50 @@ private slots:
         QCOMPARE(QColor(L()->raster.pixelColor(130, 130)), QColor(Qt::red));
     }
 
+    // ------------------------------------------------------------ Symbols
+    void symbolsConvertEditAndPlayThroughTheUi() {
+        s->setActiveLayer(layerId);
+        SymbolActions* sa = w->symbols();
+        const QUuid sym = sa->convertActive("Box", SymbolKind::Graphic);
+        QVERIFY(!sym.isNull());
+        QCOMPARE(doc->symbols().size(), 1);
+        const QUuid inst = s->activeLayerId();
+        QVERIFY(doc->findLayer(inst) && doc->findLayer(inst)->type == LayerType::Symbol);
+        QCOMPARE(px(0, 130, 130), QColor(Qt::red));                         // looks the same as before
+        // the library lists it
+        auto* lib = w->findChild<SymbolPanel*>();
+        QVERIFY(lib);
+        QCOMPARE(lib->list()->count(), 1);
+        QVERIFY(lib->list()->item(0)->text().contains("Box"));
+        // the Properties panel shows the instance controls and edits are undoable
+        QVERIFY(panel()->instanceBox()->isVisibleTo(panel()));
+        panel()->instanceMode()->setCurrentIndex(1);
+        emit panel()->instanceMode()->activated(1);
+        QCOMPARE(doc->findLayer(inst)->symbolPlay, SymbolPlay::PlayOnce);
+        doc->undoStack()->undo();
+        QCOMPARE(doc->findLayer(inst)->symbolPlay, SymbolPlay::Loop);
+        // double-clicking the instance with the Select tool dives in; the breadcrumb and the exit button appear
+        s->setTool(ToolId::Select);
+        QTest::mouseDClick(cv, Qt::LeftButton, {}, view(130, 130));
+        QVERIFY(doc->editingSymbol());
+        QVERIFY(w->findChild<QLabel*>("breadcrumb")->isVisibleTo(w.get()));
+        QVERIFY(w->findChild<QLabel*>("breadcrumb")->text().contains("Box"));
+        QCOMPARE(doc->root()->children.size(), size_t(1));                  // the symbol's own layer
+        QVERIFY(!panel()->instanceBox()->isVisibleTo(panel()));
+        QVERIFY(sa->exitSymbol->isEnabled());
+        sa->exitSymbol->trigger();
+        QVERIFY(!doc->editingSymbol());
+        QVERIFY(!w->findChild<QLabel*>("breadcrumb")->isVisibleTo(w.get()));
+        // inserting a second instance from the library
+        sa->setLibrarySelection(sym);
+        QVERIFY(!sa->insertTarget().isNull());
+        QCOMPARE(doc->symbolUseCount(sym), 2);
+        // saving while inside a symbol is covered in test_symbols; here: Edit Symbol works from the action too
+        QVERIFY(sa->editTarget());
+        QVERIFY(doc->editingSymbol());
+        QVERIFY(sa->leave());
+    }
+
     // Optional: MYND_SHOT=/path/out.png renders the Animation workspace with keyframes for visual review.
     void zzScreenshotForReview() {
         const QString out = qEnvironmentVariable("MYND_SHOT");
@@ -605,6 +650,11 @@ private slots:
         doc->setCurrentFrame(12);
         QApplication::processEvents();
         w->grab().save(out);
+        w->symbols()->convertActive("Box", SymbolKind::Graphic);
+        w->symbols()->editTarget();
+        QApplication::processEvents();
+        w->grab().save(out + ".symbol.png");
+        w->symbols()->leave();
         showGraph();
         s->setKeySelection({{layerId, "transform.position", 8}});
         graph()->canvas()->fit();

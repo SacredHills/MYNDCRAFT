@@ -62,6 +62,8 @@ add_library(myndui STATIC
   src/UI/OnionSkinPanel.cpp
   src/UI/PropertiesPanel.cpp
   src/UI/GraphEditor.cpp
+  src/UI/SymbolActions.cpp
+  src/UI/SymbolPanel.cpp
   src/UI/Workspaces.cpp
   src/UI/MainWindow.cpp
 )

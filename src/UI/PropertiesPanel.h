@@ -1,5 +1,8 @@
 #pragma once
 #include <QCheckBox>
+#include <QComboBox>
+#include <QGroupBox>
+#include <QSpinBox>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QLabel>
@@ -22,6 +25,9 @@ public:
     QDoubleSpinBox* field(const QString& prop, int component) const;
     QToolButton* stopwatch(const QString& prop) const { return m_rows.value(prop).watch; }
     QToolButton* keyButton(const QString& prop) const { return m_rows.value(prop).key; }
+    QComboBox* instanceMode() const { return m_instMode; }
+    QSpinBox* instanceFirstFrame() const { return m_instFirst; }
+    QGroupBox* instanceBox() const { return m_instBox; }
 
 private:
     struct Row {
@@ -37,6 +43,11 @@ private:
     QLabel* m_layerName;
     QCheckBox *m_auto, *m_link;
     QMap<QString, Row> m_rows;
+    QGroupBox* m_instBox = nullptr;
+    QLabel* m_instName = nullptr;
+    QComboBox* m_instMode = nullptr;
+    QSpinBox* m_instFirst = nullptr;
+    void instanceEdited();
     bool m_busy = false;
     QElapsedTimer m_lastEdit;
     int m_editCounter = 0;
