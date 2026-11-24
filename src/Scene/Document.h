@@ -100,6 +100,9 @@ public:
     QImage* editImage(Layer* l) { return l ? l->imageForEdit(m_frame) : nullptr; }
     void applyTiming(const struct TimingSettings& t);   // used by TimingCommand
     void emitAnimationChanged(const QUuid& layerId);
+    // Keyframes / static values of a layer's animatable properties. `mergeKey` merges consecutive edits (drags).
+    void editTracks(const QUuid& layerId, const PropertyTracks& after, const QString& text, const QString& mergeKey = {});
+    void emitTracksChanged(const QUuid& layerId);
 
     QUuid addTextLayer(const TextContent& content, const QString& name, QUuid parentId = {}, int index = -1);
     // Replaces the content of a text layer. Edits with the same non-empty mergeKey collapse into one undo step.
@@ -128,6 +131,7 @@ signals:
     void modifiedChanged(bool modified);
     void frameChanged(int frame);
     void animationChanged(const QUuid& layerId);
+    void tracksChanged(const QUuid& layerId);
     void timingChanged();
 
 private:

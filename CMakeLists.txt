@@ -34,9 +34,11 @@ add_library(myndcore STATIC
   src/Core/UndoCommands.cpp
   src/Core/ProjectIO.cpp
   src/Core/Autosave.cpp
+  src/Core/Exporter.cpp
   src/Scene/VectorShape.cpp
   src/Scene/TextContent.cpp
   src/Scene/Animation.cpp
+  src/Scene/Property.cpp
   src/Scene/Playback.cpp
   src/Scene/Layer.cpp
   src/Scene/Document.cpp
@@ -84,6 +86,8 @@ function(myndcraft_test name)
 endfunction()
 myndcraft_test(test_animation)
 myndcraft_test(test_playback)
+myndcraft_test(test_property)
+myndcraft_test(test_export)
 myndcraft_test(test_document)
 myndcraft_test(test_projectio)
 myndcraft_test(test_drawing)

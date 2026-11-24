@@ -97,6 +97,15 @@ LayerPtr Document::rawRemove(const QUuid& id, QUuid* parentId, int* index, bool 
 void Document::emitTreeChanged() { emit layerTreeChanged(); }
 void Document::emitContentChanged(const QRect& r) { emit contentChanged(r); }
 void Document::emitPropsChanged(const QUuid& id) { emit layerPropsChanged(id); }
+void Document::emitTracksChanged(const QUuid& id) { emit tracksChanged(id); emitContentChanged({}); }
+void Document::editTracks(const QUuid& layerId, const PropertyTracks& after, const QString& text, const QString& mergeKey) {
+    Layer* l = findLayer(layerId);
+    if (!l) return;
+    PropertyTracks clean = after;
+    pruneDefaults(clean);
+    if (l->tracks == clean) return;
+    m_undo.push(new TracksCommand(this, layerId, l->tracks, clean, text, mergeKey));
+}
 void Document::emitAnimationChanged(const QUuid& id) { emit animationChanged(id); emitContentChanged({}); }
 
 // ---------------- undoable edits ----------------

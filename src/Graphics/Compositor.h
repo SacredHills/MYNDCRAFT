@@ -41,7 +41,9 @@ public:
 private:
     static void drawGroup(QPainter& p, const Layer& group, const QRect& region, const QSize& canvas, const Ctx& ctx);
     static void drawLayer(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx);
-    static void drawAnimationLayer(QPainter& p, const Layer& l, const QRect& region, const Ctx& ctx);
+    static void drawAnimationLayer(QPainter& p, const Layer& l, const QRect& region, const Ctx& ctx, double opacity);
+    static void drawLayerContent(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx,
+                                 double opacity, BlendMode blend);
 };
 
 }  // namespace mynd

@@ -72,12 +72,12 @@ static QVector<QUuid> onionDrawings(const AnimationState& a, int frame, int step
     return out;
 }
 
-void Compositor::drawAnimationLayer(QPainter& p, const Layer& l, const QRect& region, const Ctx& ctx) {
+void Compositor::drawAnimationLayer(QPainter& p, const Layer& l, const QRect& region, const Ctx& ctx, double opacity) {
     const OnionSkin* on = ctx.onion;
     const bool onion = on && on->enabled && (!on->activeLayerOnly || on->activeLayer == l.id);
     if (!onion) {
         if (const QImage* img = l.imageAt(ctx.frame)) {
-            p.setOpacity(l.props.opacity);
+            p.setOpacity(opacity);
             p.setCompositionMode(mode(l.props.blend));
             p.drawImage(region.topLeft(), *img, region);
         }
@@ -99,24 +99,24 @@ void Compositor::drawAnimationLayer(QPainter& p, const Layer& l, const QRect& re
     bp.setOpacity(1.0);
     if (const QImage* img = l.imageAt(ctx.frame)) bp.drawImage(0, 0, img->copy(region));
     bp.end();
-    p.setOpacity(l.props.opacity);
+    p.setOpacity(opacity);
     p.setCompositionMode(mode(l.props.blend));
     p.drawImage(region.topLeft(), buf);
 }
 
-void Compositor::drawLayer(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx) {
-    if (!l.props.visible || l.props.opacity <= 0) return;
-    const bool plain = l.props.opacity >= 1.0 && l.props.blend == BlendMode::Normal;
-
+// Draws the layer's own content (no transform) into `p`, restricted to `region`, with `opacity` and `blend`.
+void Compositor::drawLayerContent(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx,
+                                  double opacity, BlendMode blend) {
+    const bool plain = opacity >= 1.0 && blend == BlendMode::Normal;
     p.save();
     if (l.type == LayerType::Raster) {
         if (!l.raster.isNull()) {
-            p.setOpacity(l.props.opacity);
-            p.setCompositionMode(mode(l.props.blend));
+            p.setOpacity(opacity);
+            p.setCompositionMode(mode(blend));
             p.drawImage(region.topLeft(), l.raster, region);
         }
     } else if (l.type == LayerType::Animation) {
-        drawAnimationLayer(p, l, region, ctx);
+        drawAnimationLayer(p, l, region, ctx, opacity);
     } else if (plain) {
         // Fast path: no isolation needed.
         if (l.type == LayerType::Vector) drawShapes(p, l.shapes);
@@ -134,10 +134,42 @@ void Compositor::drawLayer(QPainter& p, const Layer& l, const QRect& region, con
         else if (l.type == LayerType::Text) l.textContent.draw(bp);
         else drawGroup(bp, l, region, canvas, ctx);
         bp.end();
-        p.setOpacity(l.props.opacity);
-        p.setCompositionMode(mode(l.props.blend));
+        p.setOpacity(opacity);
+        p.setCompositionMode(mode(blend));
         p.drawImage(region.topLeft(), buf);
     }
+    p.restore();
+}
+
+void Compositor::drawLayer(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx) {
+    if (!l.props.visible) return;
+    const LayerXform xf = l.xformAt(ctx.frame);
+    const double opacity = l.props.opacity * xf.opacity;
+    if (opacity <= 0) return;
+    if (xf.isIdentity()) { drawLayerContent(p, l, region, canvas, ctx, opacity, l.props.blend); return; }
+
+    // Transformed layer: render its content unrotated into a buffer covering just the part of the canvas that
+    // can land inside `region`, then draw that buffer through the layer matrix.
+    const QTransform m = xf.matrix(QPointF(canvas.width() / 2.0, canvas.height() / 2.0));
+    bool invertible = false;
+    const QTransform inv = m.inverted(&invertible);
+    if (!invertible) return;                                   // zero scale: nothing visible
+    const QRect src = inv.mapRect(QRectF(region)).toAlignedRect().adjusted(-2, -2, 2, 2).intersected(QRect(QPoint(0, 0), canvas));
+    if (src.isEmpty()) return;
+    QImage buf(src.size(), QImage::Format_ARGB32_Premultiplied);
+    buf.fill(Qt::transparent);
+    QPainter bp(&buf);
+    bp.setRenderHint(QPainter::Antialiasing);
+    bp.translate(-src.topLeft());
+    bp.setClipRect(src);
+    drawLayerContent(bp, l, src, canvas, ctx, 1.0, BlendMode::Normal);
+    bp.end();
+    p.save();
+    p.setRenderHint(QPainter::SmoothPixmapTransform);
+    p.setWorldTransform(m, true);
+    p.setOpacity(opacity);
+    p.setCompositionMode(mode(l.props.blend));
+    p.drawImage(src.topLeft(), buf);
     p.restore();
 }
 

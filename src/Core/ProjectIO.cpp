@@ -36,6 +36,7 @@ QJsonObject layerToJson(const Layer& l) {
     if (l.type == LayerType::Vector) o["shapes"] = shapesToJson(l.shapes);
     if (l.type == LayerType::Text) o["text"] = l.textContent.toJson();
     if (l.type == LayerType::Animation) o["animation"] = l.anim.toJson();
+    if (!l.tracks.isEmpty()) o["tracks"] = tracksToJson(l.tracks);
     if (l.type == LayerType::Group) {
         QJsonArray ch;
         for (const auto& c : l.children) ch.append(layerToJson(*c));
@@ -173,6 +174,7 @@ bool ProjectIO::save(Document& doc, const QString& path, QString* error, bool ke
 }
 
 bool ProjectIO::migrate(QJsonObject&, int fromVersion, QString* error) {
+    // v2 -> v3 added per-layer property tracks (transform/opacity keyframes), also optional.
     // v1 -> v2 added animation layers, drawings and timeline settings. Every new field is optional with
     // a default, so a v1 document needs no transformation. Each future breaking change adds a step here.
     if (fromVersion < 1 || fromVersion > kProjectFormatVersion) {
@@ -217,6 +219,11 @@ LayerPtr layerFromJson(const QJsonObject& o, zip_t* z, const Document& doc, QStr
     bool ok = false;
     l->props.blend = blendModeFromKey(o["blend"].toString("normal"), &ok);
     if (!ok) warnings << QString("Layer '%1': unknown blend mode, using Normal").arg(l->props.name);
+    if (o.contains("tracks")) {
+        QStringList tw;
+        if (!tracksFromJson(o["tracks"].toObject(), l->tracks, err, &tw)) return nullptr;
+        for (const QString& w : tw) warnings << QString("Layer '%1': %2").arg(l->props.name, w);
+    }
 
     if (t == LayerType::Raster) {
         QString asset = o["asset"].toString();

@@ -98,6 +98,17 @@ void AnimationStateCommand::redo() {
 void AnimationStateCommand::undo() {
     if (Layer* l = m_doc->findLayer(m_layer)) { l->anim = m_before; m_doc->emitAnimationChanged(m_layer); }
 }
+TracksCommand::TracksCommand(Document* d, const QUuid& layer, const PropertyTracks& b, const PropertyTracks& a,
+                             const QString& text, const QString& mergeKey)
+    : m_doc(d), m_layer(layer), m_before(b), m_after(a), m_key(mergeKey) { setText(text); }
+void TracksCommand::redo() { if (Layer* l = m_doc->findLayer(m_layer)) { l->tracks = m_after; m_doc->emitTracksChanged(m_layer); } }
+void TracksCommand::undo() { if (Layer* l = m_doc->findLayer(m_layer)) { l->tracks = m_before; m_doc->emitTracksChanged(m_layer); } }
+bool TracksCommand::mergeWith(const QUndoCommand* other) {
+    auto* o = dynamic_cast<const TracksCommand*>(other);
+    if (!o || m_key.isEmpty() || o->m_key != m_key || o->m_layer != m_layer) return false;
+    m_after = o->m_after;
+    return true;
+}
 TimingCommand::TimingCommand(Document* d, const TimingSettings& b, const TimingSettings& a, const QString& text)
     : m_doc(d), m_before(b), m_after(a) { setText(text); }
 void TimingCommand::redo() { m_doc->applyTiming(m_after); }

@@ -77,6 +77,7 @@ LayerPtr Layer::cloneExact() const {
     c->shapes = shapes;
     c->textContent = textContent;
     c->anim = anim;
+    c->tracks = tracks;
     for (const auto& [did, img] : drawingImages) c->drawingImages[did] = img.copy();
     for (const auto& ch : children) {
         auto cc = ch->cloneExact();
@@ -93,6 +94,7 @@ LayerPtr Layer::cloneWithNewIds() const {
     c->shapes = shapes;
     c->textContent = textContent;
     c->anim = anim;
+    c->tracks = tracks;
     for (const auto& [did, img] : drawingImages) c->drawingImages[did] = img.copy();
     for (auto& s : c->shapes) s.id = QUuid::createUuid();  // group ids stay consistent within the layer
     QHash<QUuid, QUuid> gmap;

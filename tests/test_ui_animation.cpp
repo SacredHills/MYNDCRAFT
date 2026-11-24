@@ -554,6 +554,42 @@ private slots:
         QCOMPARE(doc->undoStack()->undoText(), QString("Delete Frames"));
     }
 
+    void exposureSheetSelectsSeveralFramesAndSharesTheSelectionWithTheTimeline() {
+        makeClipSource();
+        QTableView* t = sheet()->table();
+        const int col = sheet()->model()->columnOf(layerId);
+        QVERIFY(col >= 0);
+        const QPoint a = t->visualRect(sheet()->model()->index(0, col)).center();
+        const QPoint b = t->visualRect(sheet()->model()->index(2, col)).center();
+        QTest::mousePress(t->viewport(), Qt::LeftButton, {}, a);
+        QTest::mouseMove(t->viewport(), b);
+        QTest::mouseRelease(t->viewport(), Qt::LeftButton, {}, b);
+        QVERIFY(s->hasFrameSelection());
+        int f, l; s->selectedFrameRange(&f, &l);
+        QCOMPARE(f, 0); QCOMPARE(l, 2);
+        QCOMPARE(t->selectionModel()->selectedIndexes().size(), 3);
+        // Copy from the sheet's selection and paste further down.
+        QVERIFY(s->copyFrames(false));
+        doc->setCurrentFrame(10);
+        QVERIFY(s->pasteFrames(false));
+        QVERIFY(L()->anim.at(10) && L()->anim.at(11));
+        // A selection made elsewhere (timeline API) shows up in the table.
+        s->setFrameSelection(layerId, 4, 7);
+        QCOMPARE(t->selectionModel()->selectedIndexes().size(), 4);
+        // Cells in two different layers are not treated as a frame selection.
+        s->clearFrameSelection();
+        QVERIFY(!s->hasFrameSelection());
+    }
+
+    void exportAnimationIsOnTheFileMenu() {
+        bool found = false;
+        for (QAction* m : w->menuBar()->actions()) {
+            if (!m->menu() || !m->text().contains("File")) continue;
+            for (QAction* a : m->menu()->actions()) found |= QString(a->text()).remove('&').contains("Export Animation");
+        }
+        QVERIFY(found);
+    }
+
     // Optional: MYND_SHOT=/path/out.png renders the Animation workspace with sample content for visual review.
     void zzScreenshotForReview() {
         const QString out = qEnvironmentVariable("MYND_SHOT");

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "Scene/Animation.h"
+#include "Scene/Property.h"
 #include "Scene/TextContent.h"
 #include "Scene/VectorShape.h"
 
@@ -52,6 +53,8 @@ public:
     // Images stay in the map even when no exposure references them, so undo can bring them back.
     AnimationState anim;
     std::map<QUuid, QImage> drawingImages;
+    // Keyframe-animatable properties (transform, opacity). Sparse: absent = default value, no keys.
+    PropertyTracks tracks;
     std::vector<LayerPtr> children;  // Group layers
     Layer* parent = nullptr;         // maintained by Document
 
@@ -63,6 +66,8 @@ public:
     const QImage* imageAt(int frame) const;
     QImage* imageForEdit(int frame);
     QImage* drawingImage(const QUuid& id);
+    // Transform/opacity evaluated at `frame` (identity when nothing is set).
+    LayerXform xformAt(double frame) const { return evaluateTransform(tracks, frame); }
     // Deep copy with fresh ids (for duplicate).
     LayerPtr cloneWithNewIds() const;
     // Deep copy keeping ids (for undo snapshots).

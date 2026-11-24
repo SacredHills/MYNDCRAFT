@@ -68,6 +68,19 @@ private:
     Document* m_doc; QUuid m_layer; AnimationState m_before, m_after;
 };
 
+// Keyframes and static values of a layer's animatable properties.
+class TracksCommand : public QUndoCommand {
+public:
+    TracksCommand(Document* d, const QUuid& layer, const PropertyTracks& before, const PropertyTracks& after,
+                  const QString& text, const QString& mergeKey);
+    void undo() override;
+    void redo() override;
+    int id() const override { return m_key.isEmpty() ? -1 : 0x7F3A; }
+    bool mergeWith(const QUndoCommand* other) override;
+private:
+    Document* m_doc; QUuid m_layer; PropertyTracks m_before, m_after; QString m_key;
+};
+
 // Frame rate, duration and work area of the composition.
 struct TimingSettings {
     FrameRate fps{24, 1};

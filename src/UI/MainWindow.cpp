@@ -17,6 +17,11 @@
 #include <QStatusBar>
 #include <QToolBar>
 
+#include <QCheckBox>
+#include <QComboBox>
+#include <QProgressDialog>
+#include <QSpinBox>
+#include "Core/Exporter.h"
 #include "Core/Settings.h"
 #include "Graphics/Compositor.h"
 #include "UI/ExposureSheet.h"
@@ -247,6 +252,7 @@ void MainWindow::buildActions() {
     aSaveAs = mk(tr("Save &As…"), QKeySequence::SaveAs); connect(aSaveAs, &QAction::triggered, this, [this] { actSaveAs(); });
     aImport = mk(tr("&Import Image…"), QKeySequence("Ctrl+Shift+I")); connect(aImport, &QAction::triggered, this, &MainWindow::actImport);
     aExport = mk(tr("&Export Image…"), QKeySequence("Ctrl+E")); connect(aExport, &QAction::triggered, this, &MainWindow::actExport);
+    aExportAnim = mk(tr("Export &Animation…"), QKeySequence("Ctrl+Shift+E")); connect(aExportAnim, &QAction::triggered, this, &MainWindow::actExportAnimation);
     aPrefs = mk(tr("&Preferences…"), QKeySequence::Preferences); connect(aPrefs, &QAction::triggered, this, &MainWindow::actPreferences);
     aQuit = mk(tr("&Quit"), QKeySequence::Quit); connect(aQuit, &QAction::triggered, this, &QWidget::close);
 
@@ -449,7 +455,7 @@ void MainWindow::buildMenus() {
     file->addSeparator();
     file->addActions({aSave, aSaveAs});
     file->addSeparator();
-    file->addActions({aImport, aExport});
+    file->addActions({aImport, aExport, aExportAnim});
     file->addSeparator();
     file->addActions({aPrefs, aQuit});
     updateRecentMenu();
@@ -662,6 +668,59 @@ void MainWindow::actExport() {
     QString err;
     if (!exportImage(p, &err)) QMessageBox::critical(this, tr("Export failed"), err);
     else statusBar()->showMessage(tr("Exported %1").arg(p), 3000);
+}
+
+void MainWindow::actExportAnimation() {
+    if (!m_doc) return;
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("Export Animation"));
+    auto* form = new QFormLayout(&dlg);
+    auto* fmt = new QComboBox; fmt->addItems({tr("Animated GIF"), tr("PNG sequence")});
+    auto* first = new QSpinBox; auto* last = new QSpinBox;
+    const int maxF = qMax(0, m_doc->durationFrames() - 1);
+    for (auto* sp : {first, last}) sp->setRange(0, maxF);
+    first->setValue(m_doc->rangeStart()); last->setValue(m_doc->rangeEnd());
+    first->setPrefix(tr("frame ")); last->setPrefix(tr("frame "));
+    auto* transparent = new QCheckBox(tr("Transparent background"));
+    auto* loops = new QSpinBox; loops->setRange(0, 65535); loops->setSpecialValueText(tr("forever"));
+    form->addRow(tr("Format:"), fmt);
+    form->addRow(tr("First frame:"), first);
+    form->addRow(tr("Last frame:"), last);
+    form->addRow(QString(), transparent);
+    form->addRow(tr("GIF loops:"), loops);
+    auto* note = new QLabel(tr("Frames are numbered from the first one exported. Onion skin is never included. "
+                               "No video encoder is built in; use the PNG sequence with ffmpeg for video."));
+    note->setWordWrap(true); note->setMinimumWidth(360);
+    form->addRow(note);
+    auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    form->addRow(bb);
+    connect(fmt, &QComboBox::currentIndexChanged, &dlg, [loops](int i) { loops->setEnabled(i == 0); });
+    if (dlg.exec() != QDialog::Accepted) return;
+    if (last->value() < first->value()) { QMessageBox::warning(this, tr("Export Animation"), tr("The last frame comes before the first.")); return; }
+
+    const bool gif = fmt->currentIndex() == 0;
+    const QString p = gif ? QFileDialog::getSaveFileName(this, tr("Export GIF"), {}, tr("GIF (*.gif)"))
+                          : QFileDialog::getSaveFileName(this, tr("Export PNG sequence (base name)"), {}, tr("PNG (*.png)"));
+    if (p.isEmpty()) return;
+    exporter::ExportOptions o;
+    o.firstFrame = first->value(); o.lastFrame = last->value();
+    o.transparentBackground = transparent->isChecked(); o.loopCount = loops->value();
+    QProgressDialog prog(tr("Exporting frames…"), tr("Cancel"), 0, o.lastFrame - o.firstFrame + 1, this);
+    prog.setWindowModality(Qt::WindowModal); prog.setMinimumDuration(400);
+    o.progress = [&prog](int done, int) { prog.setValue(done); QApplication::processEvents(); return !prog.wasCanceled(); };
+    QString err; bool ok;
+    if (gif) {
+        QString path = p; if (QFileInfo(path).suffix().isEmpty()) path += ".gif";
+        ok = exporter::writeGif(*m_doc, path, o, &err);
+    } else {
+        const QFileInfo fi(p);
+        ok = exporter::writePngSequence(*m_doc, fi.absolutePath(), fi.completeBaseName(), o, nullptr, &err);
+    }
+    prog.close();
+    if (!ok) { if (!err.contains("cancel", Qt::CaseInsensitive)) QMessageBox::critical(this, tr("Export failed"), err); else statusBar()->showMessage(tr("Export cancelled"), 3000); }
+    else statusBar()->showMessage(tr("Exported %1 frames").arg(o.lastFrame - o.firstFrame + 1), 4000);
 }
 
 void MainWindow::actPreferences() {

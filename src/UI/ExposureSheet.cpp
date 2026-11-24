@@ -156,7 +156,7 @@ ExposureSheetPanel::ExposureSheetPanel(EditorSession* s, AnimationActions* a, QW
     m_model = new ExposureModel(s, this);
     m_table = new QTableView;
     m_table->setModel(m_model);
-    m_table->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_table->setSelectionMode(QAbstractItemView::ContiguousSelection);
     m_table->setSelectionBehavior(QAbstractItemView::SelectItems);
     m_table->verticalHeader()->setDefaultSectionSize(20);
     m_table->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
@@ -173,9 +173,36 @@ ExposureSheetPanel::ExposureSheetPanel(EditorSession* s, AnimationActions* a, QW
         m_s->doc()->setCurrentFrame(cur.row());
         m_busy = false;
     });
+    // Dragging / Shift+click over several frames of one layer selects them for Copy / Cut / Paste / Delete,
+    // exactly like the same range on the timeline.
+    connect(m_table->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this] {
+        if (m_busy || !m_s->doc()) return;
+        const QModelIndexList sel = m_table->selectionModel()->selectedIndexes();
+        if (sel.size() < 2) return;
+        int col = sel.first().column(), lo = sel.first().row(), hi = lo;
+        for (const QModelIndex& i : sel) { if (i.column() != col) return; lo = qMin(lo, i.row()); hi = qMax(hi, i.row()); }
+        const QUuid layer = m_model->layerAt(col);
+        if (layer.isNull()) return;
+        m_busy = true;
+        m_s->setActiveLayer(layer);
+        m_s->setFrameSelection(layer, lo, hi);
+        m_busy = false;
+    });
+    connect(s, &EditorSession::frameSelectionChanged, this, [this] {
+        if (m_busy || !m_s->hasFrameSelection()) return;
+        const int col = m_model->columnOf(m_s->frameSelectionLayer());
+        if (col < 0) return;
+        int a, b; m_s->selectedFrameRange(&a, &b);
+        const int rows = m_model->rowCount();
+        if (rows == 0) return;
+        m_busy = true;
+        m_table->selectionModel()->select(QItemSelection(m_model->index(qBound(0, a, rows - 1), col), m_model->index(qBound(0, b, rows - 1), col)),
+                                          QItemSelectionModel::ClearAndSelect);
+        m_busy = false;
+    });
     connect(m_table, &QTableView::customContextMenuRequested, this, [this](const QPoint& pt) {
         const QModelIndex i = m_table->indexAt(pt);
-        if (i.isValid()) m_table->setCurrentIndex(i);
+        if (i.isValid() && !m_table->selectionModel()->isSelected(i)) m_table->setCurrentIndex(i);
         QMenu menu(this);
         m_a->fillContextMenu(&menu);
         menu.exec(m_table->viewport()->mapToGlobal(pt));

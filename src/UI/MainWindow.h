@@ -61,6 +61,7 @@ private:
     bool actSave();
     bool actSaveAs();
     void actExport();
+    void actExportAnimation();
     void actImport();
     void actPreferences();
     void actAbout();
@@ -79,7 +80,7 @@ private:
     QMap<QString, QDockWidget*> m_docks;
     QActionGroup* m_toolGroup;
     QMap<ToolId, QAction*> m_toolActions;
-    QAction *aNew, *aOpen, *aSave, *aSaveAs, *aExport, *aImport, *aPrefs, *aQuit;
+    QAction *aNew, *aOpen, *aSave, *aSaveAs, *aExport, *aExportAnim, *aImport, *aPrefs, *aQuit;
     QAction *aUndo, *aRedo, *aSelAll, *aDeselect, *aDeleteSel;
     QAction *aZoomIn, *aZoomOut, *aFit, *aActual, *aRotL, *aRotR, *aRotReset, *aGrid, *aRulers, *aGuides, *aSnap, *aClearGuides;
     QAction *aGroupShapes, *aUngroupShapes, *aFront, *aForward, *aBackward, *aBack;
