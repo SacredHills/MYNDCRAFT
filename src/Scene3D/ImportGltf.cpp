@@ -5,13 +5,17 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QMatrix4x4>
 #include <QQuaternion>
 #include <QUrl>
 #include <algorithm>
+#include <array>
+#include <climits>
 #include <cmath>
 #include <cstring>
 
 #include "Scene3D/ModelImport.h"
+#include "Scene3D/Anim3D.h"
 
 namespace mynd {
 
@@ -110,7 +114,7 @@ double toSrgb(double c) { c = std::clamp(c, 0.0, 1.0); return c <= 0.0031308 ? 1
 
 }  // namespace
 
-ImportResult importGltfData(const QByteArray& data, const QString& baseDir, const QString& name) {
+ImportResult importGltfData(const QByteArray& data, const QString& baseDir, const QString& name, double fps) {
     ImportResult r;
     Ctx c; c.baseDir = baseDir; c.warnings = &r.warnings;
     QByteArray jsonData = data;
@@ -230,7 +234,7 @@ ImportResult importGltfData(const QByteArray& data, const QString& baseDir, cons
         auto mesh = std::make_shared<Mesh>();
         mesh->id = QUuid::createUuid();
         mesh->name = mo["name"].toString(QString("Mesh %1").arg(mi));
-        struct PrimOut { std::vector<QVector3D> p, n; std::vector<QVector2D> t; std::vector<uint32_t> idx; bool hasN, hasT; QUuid mat; };
+        struct PrimOut { std::vector<QVector3D> p, n; std::vector<QVector2D> t; std::vector<uint32_t> idx; bool hasN, hasT; bool hasS = false; std::vector<std::array<uint16_t, 4>> j; std::vector<std::array<float, 4>> w; QUuid mat; };
         std::vector<PrimOut> prims;
         for (const auto& pv : mo["primitives"].toArray()) {
             const QJsonObject po = pv.toObject();
@@ -244,6 +248,27 @@ ImportResult importGltfData(const QByteArray& data, const QString& baseDir, cons
             o.hasN = at.contains("NORMAL") && readAccessor(c, at["NORMAL"].toInt(-1), nor, &nc, &why) && nc == 3 && nor.size() == pos.size();
             o.hasT = at.contains("TEXCOORD_0") && readAccessor(c, at["TEXCOORD_0"].toInt(-1), uv, &uc, &why) && uc == 2 && uv.size() / 2 == pos.size() / 3;
             const size_t vc = pos.size() / 3;
+            if (at.contains("JOINTS_0") && at.contains("WEIGHTS_0")) {
+                std::vector<double> jv, wv; int jc = 0, wc = 0; QString why2;
+                if (readAccessor(c, at["JOINTS_0"].toInt(-1), jv, &jc, &why2) && jc == 4 && jv.size() == vc * 4 &&
+                    readAccessor(c, at["WEIGHTS_0"].toInt(-1), wv, &wc, &why2) && wc == 4 && wv.size() == vc * 4) {
+                    bool ok = true;
+                    o.j.resize(vc); o.w.resize(vc);
+                    for (size_t i = 0; i < vc && ok; ++i) {
+                        float sum = 0;
+                        for (size_t k = 0; k < 4; ++k) {
+                            const double jj = jv[i * 4 + k], ww = wv[i * 4 + k];
+                            if (!(jj >= 0 && jj <= 65535)) { ok = false; break; }
+                            o.j[i][k] = uint16_t(jj);
+                            o.w[i][k] = std::isfinite(ww) ? float(std::clamp(ww, 0.0, 1.0)) : 0.0f;
+                            sum += o.w[i][k];
+                        }
+                        if (sum > 1e-6f) for (size_t k = 0; k < 4; ++k) o.w[i][k] /= sum; else { o.j[i] = {0, 0, 0, 0}; o.w[i] = {1, 0, 0, 0}; }
+                    }
+                    o.hasS = ok;
+                }
+                if (!o.hasS) r.warnings << QObject::tr("Mesh '%1': skin weights could not be read; it is shown undeformed.").arg(mesh->name);
+            }
             for (size_t i = 0; i < vc; ++i) o.p.push_back({float(pos[i * 3]), float(pos[i * 3 + 1]), float(pos[i * 3 + 2])});
             if (o.hasN) for (size_t i = 0; i < vc; ++i) o.n.push_back(QVector3D(float(nor[i * 3]), float(nor[i * 3 + 1]), float(nor[i * 3 + 2])).normalized());
             if (o.hasT) for (size_t i = 0; i < vc; ++i) o.t.push_back({float(uv[i * 2]), float(1.0 - uv[i * 2 + 1])});     // glTF v is down, ours is up
@@ -263,14 +288,18 @@ ImportResult importGltfData(const QByteArray& data, const QString& baseDir, cons
             o.mat = matId(po["material"].toInt(-1));
             prims.push_back(std::move(o));
         }
-        bool anyT = false;
-        for (const auto& p : prims) anyT |= p.hasT;
+        bool anyT = false, anyS = false;
+        for (const auto& p : prims) { anyT |= p.hasT; anyS |= p.hasS; }
         for (auto& p : prims) {
             const uint32_t base = uint32_t(mesh->positions.size());
             Mesh tmp; tmp.positions = p.p; tmp.indices = p.idx;
             if (!p.hasN) { tmp.computeNormals(); p.n = tmp.normals; }
             mesh->positions.insert(mesh->positions.end(), p.p.begin(), p.p.end());
             mesh->normals.insert(mesh->normals.end(), p.n.begin(), p.n.end());
+            if (anyS) {
+                if (p.hasS) { mesh->joints.insert(mesh->joints.end(), p.j.begin(), p.j.end()); mesh->weights.insert(mesh->weights.end(), p.w.begin(), p.w.end()); }
+                else { mesh->joints.insert(mesh->joints.end(), p.p.size(), std::array<uint16_t, 4>{0, 0, 0, 0}); mesh->weights.insert(mesh->weights.end(), p.p.size(), std::array<float, 4>{1, 0, 0, 0}); }
+            }
             if (anyT) { if (p.hasT) mesh->uvs.insert(mesh->uvs.end(), p.t.begin(), p.t.end()); else mesh->uvs.insert(mesh->uvs.end(), p.p.size(), QVector2D(0, 0)); }
             MeshPart part; part.firstIndex = int(mesh->indices.size()); part.indexCount = int(p.idx.size()); part.material = p.mat;
             for (uint32_t i : p.idx) mesh->indices.push_back(base + i);
@@ -363,9 +392,164 @@ ImportResult importGltfData(const QByteArray& data, const QString& baseDir, cons
     } else {
         for (int i = 0; i < nodes.size(); ++i) if (!isChild[size_t(i)]) build(i, rootId, 0);
     }
-    if (c.root.contains("animations") && !c.root["animations"].toArray().isEmpty())
-        r.warnings << QObject::tr("This model contains animation clips; they are not imported yet (the model is shown in its rest pose).");
-    if (c.root.contains("skins")) r.warnings << QObject::tr("This model is skinned; it is shown in its bind pose without skeletal deformation.");
+    // ---- animations: translation / rotation / scale channels of nodes become keyframed clips ----
+    {
+        const QJsonArray anims = c.root["animations"].toArray();
+        if (!(fps > 0 && fps <= 1000)) fps = 24.0;
+        bool weightsWarned = false, cubicWarned = false;
+        int imported = 0, skipped = 0;
+        for (int ai = 0; ai < anims.size() && ai < 256; ++ai) {
+            const QJsonObject ao = anims[ai].toObject();
+            const QJsonArray samplers = ao["samplers"].toArray();
+            AnimClip clip;
+            clip.id = QUuid::createUuid();
+            clip.name = ao["name"].toString();
+            if (clip.name.isEmpty()) clip.name = QObject::tr("Clip %1").arg(ai + 1);
+            const QJsonArray channels = ao["channels"].toArray();
+            for (int ci = 0; ci < channels.size() && ci < 100000; ++ci) {
+                const QJsonObject ch = channels[ci].toObject();
+                const QJsonObject tg = ch["target"].toObject();
+                const int ni = tg["node"].toInt(-1), si = ch["sampler"].toInt(-1);
+                const QString path = tg["path"].toString();
+                if (path == "weights") { if (!weightsWarned) { r.warnings << QObject::tr("Morph-target (blend shape) animation is not supported and was skipped."); weightsWarned = true; } continue; }
+                if (path != "translation" && path != "rotation" && path != "scale") { ++skipped; continue; }
+                if (ni < 0 || ni >= int(nodeIds.size()) || nodeIds[size_t(ni)].isNull() || si < 0 || si >= samplers.size()) { ++skipped; continue; }
+                const QJsonObject so = samplers[si].toObject();
+                std::vector<double> times, vals;
+                int tc = 0, vc = 0;
+                QString why;
+                if (!readAccessor(c, so["input"].toInt(-1), times, &tc, &why) || tc != 1 || times.empty()) { ++skipped; continue; }
+                if (!readAccessor(c, so["output"].toInt(-1), vals, &vc, &why)) { ++skipped; continue; }
+                const int comps = path == "rotation" ? 4 : 3;
+                const QString interp = so["interpolation"].toString("LINEAR");
+                const bool cubic = interp == "CUBICSPLINE";
+                if (cubic && !cubicWarned) { r.warnings << QObject::tr("Cubic-spline animation was imported as linear keyframes."); cubicWarned = true; }
+                if (vc != comps || vals.size() != times.size() * size_t(comps) * (cubic ? 3 : 1)) { ++skipped; continue; }
+                const bool hold = interp == "STEP";
+                const QString id = nodePropId(nodeIds[size_t(ni)], path == "translation" ? "pos" : path == "rotation" ? "rot" : "scl");
+                const PropertyDef* def = findPropertyDef(id);
+                if (!def) { ++skipped; continue; }
+                auto valueAt = [&](size_t k, int comp) { return cubic ? vals[(k * 3 + 1) * size_t(comps) + size_t(comp)] : vals[k * size_t(comps) + size_t(comp)]; };
+                PropertyTrack track;
+                track.base = def->def;
+                int lastFrame = INT_MIN;
+                QQuaternion prevQ;
+                QVector3D prevE;
+                bool havePrev = false;
+                // Two Euler triples describe the same rotation, (x,y,z) and (x+180, 180-y, z+180); pick the one (and the 360° multiples)
+                // nearest to the previous key so that interpolating the angles follows the real turn.
+                auto nearestEuler = [](QVector3D e, const QVector3D& prev) {
+                    auto unwrap = [&](QVector3D v) {
+                        for (int a = 0; a < 3; ++a) { while (v[a] - prev[a] > 180) v[a] -= 360; while (v[a] - prev[a] < -180) v[a] += 360; }
+                        return v;
+                    };
+                    const QVector3D a = unwrap(e), b = unwrap(QVector3D(e.x() + 180, 180 - e.y(), e.z() + 180));
+                    return (a - prev).lengthSquared() <= (b - prev).lengthSquared() ? a : b;
+                };
+                auto addKey = [&](int frame, PropValue v, bool holdOut) {
+                    track.setKey(*def, frame, v);
+                    const int ix = track.indexOfKey(frame);
+                    if (ix >= 0 && holdOut) track.keys[ix].out = Interp::Hold;
+                };
+                bool okTimes = true;
+                for (size_t k = 0; k < times.size() && okTimes; ++k) {
+                    if (!std::isfinite(times[k]) || times[k] < 0 || times[k] > 1e6) { okTimes = false; break; }
+                    const int frame = int(std::lround(times[k] * fps));
+                    if (frame <= lastFrame) continue;                        // closer together than one frame: the first one wins
+                    if (track.keys.size() >= 20000) break;
+                    if (path == "rotation") {
+                        QQuaternion q(float(valueAt(k, 3)), float(valueAt(k, 0)), float(valueAt(k, 1)), float(valueAt(k, 2)));   // glTF stores x,y,z,w
+                        if (q.isNull() || !std::isfinite(q.lengthSquared())) q = QQuaternion();
+                        q.normalize();
+                        if (havePrev) {
+                            if (QQuaternion::dotProduct(prevQ, q) < 0) q = QQuaternion(-q.scalar(), -q.vector());       // shortest way round
+                            // Euler angles interpolate linearly between keys, so long turns get intermediate keys
+                            const double ang = 2.0 * std::acos(std::min(1.0, double(std::abs(QQuaternion::dotProduct(prevQ, q))))) * 180.0 / M_PI;
+                            const int f0 = lastFrame;
+                            const int steps = std::min(frame - f0, int(std::ceil(ang / 15.0 - 1e-6)));
+                            for (int st = 1; st < steps; ++st) {
+                                const float u = float(st) / float(steps);
+                                const int f = f0 + int(std::lround(double(frame - f0) * u));
+                                if (f <= lastFrame || f >= frame) continue;
+                                QMatrix4x4 m; m.rotate(QQuaternion::slerp(prevQ, q, u));
+                                QVector3D e = eulerFromMatrix(m);
+                                e = nearestEuler(e, prevE);
+                                addKey(f, PropValue::of(e.x(), e.y(), e.z()), hold);
+                                prevE = e; lastFrame = f;
+                            }
+                        }
+                        QMatrix4x4 m; m.rotate(q);
+                        QVector3D e = eulerFromMatrix(m);
+                        if (havePrev) e = nearestEuler(e, prevE);
+                        addKey(frame, PropValue::of(e.x(), e.y(), e.z()), hold);
+                        prevQ = q; prevE = e; havePrev = true;
+                    } else {
+                        addKey(frame, PropValue::of(valueAt(k, 0), valueAt(k, 1), valueAt(k, 2)), hold);
+                    }
+                    lastFrame = frame;
+                }
+                if (!okTimes || track.keys.isEmpty()) { ++skipped; continue; }
+                clip.length = std::max(clip.length, track.keys.last().frame);
+                clip.tracks.insert(id, track);
+            }
+            if (clip.tracks.isEmpty() || clip.length <= 0) { ++skipped; continue; }
+            scene->clips.push_back(std::move(clip));
+            ++imported;
+        }
+        if (anims.size() > 256) r.warnings << QObject::tr("Only the first 256 animations were read.");
+        if (!scene->clips.empty()) {
+            ClipPlacement p;
+            p.id = QUuid::createUuid(); p.clip = scene->clips.front().id; p.start = 0; p.loop = true;
+            scene->placements.push_back(p);
+            r.warnings << QObject::tr("Imported %1 animation clip(s); \"%2\" is placed on the timeline and loops. Others are in the Animation Clips list.").arg(imported).arg(scene->clips.front().name);
+        } else if (!anims.isEmpty()) {
+            r.warnings << QObject::tr("The model's animations contain nothing that could be imported (only node translation/rotation/scale is supported).");
+        }
+        if (skipped) r.warnings << QObject::tr("%1 animation channel(s)/clip(s) could not be read and were skipped.").arg(skipped);
+    }
+    // ---- skins ----
+    {
+        const QJsonArray skinsJ = c.root["skins"].toArray();
+        std::vector<QUuid> skinIds(size_t(skinsJ.size()));
+        int bad = 0;
+        for (int si = 0; si < skinsJ.size() && si < 4096; ++si) {
+            const QJsonObject so = skinsJ[si].toObject();
+            Skin k;
+            k.id = QUuid::createUuid();
+            bool ok = true;
+            for (const auto& jv : so["joints"].toArray()) {
+                const int ji = jv.toInt(-1);
+                if (ji < 0 || ji >= int(nodeIds.size()) || nodeIds[size_t(ji)].isNull() || k.joints.size() >= 65535) { ok = false; break; }
+                k.joints.push_back(nodeIds[size_t(ji)]);
+            }
+            if (!ok || k.joints.empty()) { ++bad; continue; }
+            std::vector<double> ibm; int ic = 0; QString why;
+            if (so.contains("inverseBindMatrices")) {
+                if (!readAccessor(c, so["inverseBindMatrices"].toInt(-1), ibm, &ic, &why) || ic != 16 || ibm.size() != k.joints.size() * 16) { ++bad; continue; }
+            }
+            for (size_t j = 0; j < k.joints.size(); ++j) {
+                QMatrix4x4 m;
+                if (!ibm.empty()) { float* d = m.data(); for (int i = 0; i < 16; ++i) { const double x = ibm[j * 16 + size_t(i)]; d[i] = std::isfinite(x) ? float(x) : 0.0f; } }
+                k.inverseBind.push_back(m);
+            }
+            skinIds[size_t(si)] = k.id;
+            scene->skins.push_back(std::move(k));
+        }
+        int skinnedNodes = 0;
+        for (int i = 0; i < nodes.size(); ++i) {
+            const QJsonObject no = nodes[i].toObject();
+            const int si = no["skin"].toInt(-1);
+            if (si < 0 || si >= int(skinIds.size()) || skinIds[size_t(si)].isNull() || nodeIds[size_t(i)].isNull()) continue;
+            Node3D* n = scene->node(nodeIds[size_t(i)]);
+            if (!n || n->kind != NodeKind::Mesh) continue;
+            auto mit = scene->meshes.find(n->mesh);
+            if (mit == scene->meshes.end() || !mit->second->skinned()) continue;
+            n->skin = skinIds[size_t(si)];
+            ++skinnedNodes;
+        }
+        if (bad) r.warnings << QObject::tr("%1 skin(s) were damaged and ignored; their meshes are shown in the bind pose.").arg(bad);
+        if (skinnedNodes) r.warnings << QObject::tr("Skeletal deformation uses up to 4 joints per vertex, no morph targets (blend shapes).");
+    }
     int meshNodes = 0;
     for (const auto& n : scene->nodes) if (n.kind == NodeKind::Mesh) ++meshNodes;
     if (!meshNodes) { r.error = QObject::tr("The glTF file contains no drawable meshes."); return r; }

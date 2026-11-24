@@ -5,6 +5,8 @@
 #include <QJsonObject>
 
 #include "TestEnv.h"
+#include "AnimGltf.h"
+#include "Scene3D/Anim3D.h"
 #include "Scene3D/ModelImport.h"
 #include "Scene3D/Render3D.h"
 
@@ -251,7 +253,7 @@ private slots:
         { QByteArray buf = triangleBuffer(); QByteArray json = QJsonDocument(triangleGltf(QJsonObject{{"byteLength", buf.size()}})).toJson(QJsonDocument::Compact); while (json.size() % 4) json.append(' ');
           glb = QByteArray("glTF") + raw(quint32(2)) + raw(quint32(12 + 8 + json.size() + 8 + buf.size())) + raw(quint32(json.size())) + raw(quint32(0x4E4F534A)) + json + raw(quint32(buf.size())) + raw(quint32(0x004E4942)) + buf; }
         const QByteArray obj = "mtllib none.mtl\no A\nv 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 1 1\nvn 0 0 1\nusemtl X\nf 1/1/1 2/2/1 3/3/1 4/1/1\nf -1 -2 -3\n";
-        const std::vector<std::pair<int, QByteArray>> seeds = {{0, obj}, {1, gltfJson}, {2, glb}, {3, cubeFbx(7400, true)}, {3, cubeFbx(7500, false)}};
+        const std::vector<std::pair<int, QByteArray>> seeds = {{0, obj}, {1, gltfJson}, {2, glb}, {3, cubeFbx(7400, true)}, {3, cubeFbx(7500, false)}, {1, testmodels::animatedGltf()}, {1, testmodels::skinnedGltf()}};
         QRandomGenerator rng(12345);
         int accepted = 0;
         for (const auto& [kind, base] : seeds) for (int iter = 0; iter < 400; ++iter) {
@@ -272,7 +274,7 @@ private slots:
             for (const auto& [id, m] : r.scene->meshes) { QString why; QVERIFY2(m->validate(&why), qPrintable(why)); }
             Scene3D dst; mergeImport(dst, *r.scene);                                   // and the result must be usable
             QVERIFY(dst.validate().isEmpty());
-            renderScene(dst, frameScene(dst, 1.0), QSize(32, 32));
+            for (int f : {0, 7, 30}) renderScene(evaluateScene(dst, {}, f), frameScene(dst, 1.0), QSize(32, 32));      // animated and skinned poses too
         }
         QVERIFY(accepted > 100);                                                       // many mutations are harmless, so the importers are not just rejecting everything
     }

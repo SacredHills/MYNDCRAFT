@@ -7,9 +7,12 @@
 #include <QUuid>
 #include <QVector2D>
 #include <QVector3D>
+#include <array>
 #include <map>
 #include <memory>
 #include <vector>
+
+#include "Scene/Property.h"
 
 namespace mynd {
 
@@ -32,6 +35,11 @@ struct Mesh {
     std::vector<QVector2D> uvs;          // empty or same size as positions
     std::vector<uint32_t> indices;       // triangle list
     std::vector<MeshPart> parts;
+    // Skinning (optional; both empty or both the size of positions): up to four joints per vertex, indices into the Skin used by
+    // the mesh node. Weights sum to 1.
+    std::vector<std::array<uint16_t, 4>> joints;
+    std::vector<std::array<float, 4>> weights;
+    bool skinned() const { return !joints.empty() && joints.size() == positions.size() && weights.size() == positions.size(); }
     int triangleCount() const { return int(indices.size() / 3); }
     void computeNormals();               // smooth normals from the triangles (when the source had none)
     bool validate(QString* why = nullptr) const;
@@ -56,6 +64,14 @@ struct Material {
     }
 };
 
+// Joints of a skeleton: nodes of the scene plus the inverse of each joint's world transform in the bind pose.
+struct Skin {
+    QUuid id;
+    std::vector<QUuid> joints;                  // node ids
+    std::vector<QMatrix4x4> inverseBind;        // same size as joints
+    bool operator==(const Skin& o) const { return id == o.id && joints == o.joints && inverseBind == o.inverseBind; }
+};
+
 enum class NodeKind { Group, Mesh, Light, Camera };
 enum class LightType { Directional, Point, Spot };
 QString nodeKindKey(NodeKind k);
@@ -75,6 +91,7 @@ struct Node3D {
     // Mesh nodes
     QUuid mesh;                          // key into Scene3D::meshes
     QUuid materialOverride;              // replaces every part's material when set
+    QUuid skin;                          // key into Scene3D::skins; the mesh then follows the skin's joints and this node's own transform is ignored
     // Light nodes
     LightType lightType = LightType::Point;
     QColor lightColor{255, 255, 255};
@@ -88,6 +105,30 @@ struct Node3D {
     bool operator==(const Node3D& o) const;
 };
 
+// A named piece of keyframe animation of this scene's properties (ids as in Anim3D.h), e.g. imported from a model file. Times are in
+// composition frames at the time of import. Clips are played by placing them on the layer's timeline (ClipPlacement).
+struct AnimClip {
+    QUuid id;
+    QString name;
+    int length = 0;                      // frames; the clip's time runs 0..length
+    PropertyTracks tracks;
+    bool operator==(const AnimClip& o) const { return id == o.id && name == o.name && length == o.length && tracks == o.tracks; }
+};
+// A clip placed on the timeline: it starts at composition frame `start`, runs at `speed`, begins `offset` frames into the clip, and
+// either loops or holds its last pose.
+struct ClipPlacement {
+    QUuid id;
+    QUuid clip;
+    int start = 0;
+    double speed = 1.0;                  // 1 = as authored, 2 = twice as fast; always > 0
+    int offset = 0;                      // frames into the clip at `start`
+    bool loop = false;
+    bool enabled = true;
+    bool operator==(const ClipPlacement& o) const {
+        return id == o.id && clip == o.clip && start == o.start && speed == o.speed && offset == o.offset && loop == o.loop && enabled == o.enabled;
+    }
+};
+
 // Identifies a state of a scene for render caching. Every edit that goes through the undo system takes a new one; code that
 // changes a scene directly must call Scene3D::touch().
 quint64 nextSceneRevision();
@@ -99,6 +140,9 @@ struct Scene3D {
     std::map<QUuid, QImage> textures;
     std::vector<Material> materials;
     std::vector<Node3D> nodes;           // parents are not necessarily before children
+    std::vector<Skin> skins;
+    std::vector<AnimClip> clips;
+    std::vector<ClipPlacement> placements;       // applied in order, before the layer's own keyframes
     QUuid activeCamera;
     QColor ambient{255, 255, 255};
     double ambientIntensity = 0.25;
@@ -124,6 +168,8 @@ struct Scene3D {
     // Drops resources nothing refers to.
     void pruneUnused();
     QString uniqueName(const QString& base) const;
+    const AnimClip* clip(const QUuid& id) const;
+    const Skin* skinById(const QUuid& id) const;
     QJsonObject toJson() const;                                    // structure only; blobs/images stored by the caller
     static bool fromJson(const QJsonObject& o, Scene3D& out, QString* err);
     // Validity checks used on load: unknown parents, cycles, missing mesh/material references (reported, not fatal).

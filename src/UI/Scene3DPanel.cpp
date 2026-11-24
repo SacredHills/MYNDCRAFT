@@ -10,6 +10,9 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QInputDialog>
+#include <QListWidget>
+#include <QSpinBox>
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
@@ -20,6 +23,7 @@
 
 #include "Scene3D/Anim3D.h"
 #include <QVBoxLayout>
+#include <algorithm>
 #include <functional>
 
 namespace mynd {
@@ -161,6 +165,32 @@ Scene3DPanel::Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent)
     m_ambientInt = spin(0, 10, 0.05, 2, this); fs->addRow(tr("Ambient level"), m_ambientInt);
     m_bgColor = new QPushButton; fs->addRow(tr("Background"), m_bgColor);
     il->addWidget(m_gScene);
+
+    m_gClips = new QGroupBox(tr("Animation Clips"));
+    auto* fcl = new QVBoxLayout(m_gClips);
+    auto* clipHint = new QLabel(tr("Clips come from imported models. Add one to the timeline to play it; keyframes you set on the same property override it."));
+    clipHint->setWordWrap(true);
+    fcl->addWidget(clipHint);
+    m_clipList = new QListWidget; m_clipList->setMaximumHeight(90);
+    fcl->addWidget(m_clipList);
+    auto* cb = new QHBoxLayout;
+    m_clipAdd = new QPushButton(tr("Add to Timeline")); m_clipRename = new QPushButton(tr("Rename…")); m_clipDelete = new QPushButton(tr("Delete"));
+    cb->addWidget(m_clipAdd); cb->addWidget(m_clipRename); cb->addWidget(m_clipDelete);
+    fcl->addLayout(cb);
+    fcl->addWidget(new QLabel(tr("On the timeline:")));
+    m_placeList = new QListWidget; m_placeList->setMaximumHeight(90);
+    fcl->addWidget(m_placeList);
+    auto* pf = new QFormLayout;
+    m_pStart = new QSpinBox; m_pStart->setRange(-100000, 100000); m_pStart->setToolTip(tr("Composition frame where the clip starts"));
+    m_pSpeed = spin(0.01, 100, 0.1, 2, this); m_pSpeed->setToolTip(tr("Playback speed: 2 plays twice as fast"));
+    m_pOffset = new QSpinBox; m_pOffset->setRange(-100000, 100000); m_pOffset->setToolTip(tr("Frames into the clip at the start frame (time offset)"));
+    m_pLoop = new QCheckBox(tr("Loop (otherwise holds the last pose)")); m_pEnabled = new QCheckBox(tr("Enabled"));
+    pf->addRow(tr("Start frame"), m_pStart); pf->addRow(tr("Speed"), m_pSpeed); pf->addRow(tr("Offset (frames)"), m_pOffset);
+    pf->addRow(QString(), m_pLoop); pf->addRow(QString(), m_pEnabled);
+    m_placeRemove = new QPushButton(tr("Remove from Timeline"));
+    pf->addRow(QString(), m_placeRemove);
+    fcl->addLayout(pf);
+    il->addWidget(m_gClips);
     il->addStretch(1);
     auto* scroll = new QScrollArea; scroll->setWidgetResizable(true); scroll->setWidget(inner); scroll->setFrameShape(QFrame::NoFrame);
     split->addWidget(scroll);
@@ -216,6 +246,48 @@ Scene3DPanel::Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent)
     connect(m_near, &QDoubleSpinBox::valueChanged, this, [this](double v) { if (!m_updating) edit(tr("Near Plane"), "c3d:near", [v](Scene3D&, Node3D& n) { if (n.nearPlane == v) return false; n.nearPlane = v; n.farPlane = std::max(n.farPlane, v * 1.01); return true; }); });
     connect(m_far, &QDoubleSpinBox::valueChanged, this, [this](double v) { if (!m_updating) edit(tr("Far Plane"), "c3d:far", [v](Scene3D&, Node3D& n) { const double f = std::max(v, n.nearPlane * 1.01); if (n.farPlane == f) return false; n.farPlane = f; return true; }); });
     connect(m_isSceneCam, &QCheckBox::clicked, this, [this](bool on) { if (on) m_a->setSceneCamera(m_s->selectedNode()); else refreshInspector(); });
+    // clips
+    connect(m_clipAdd, &QPushButton::clicked, this, [this] { addSelectedClipToTimeline(); });
+    connect(m_clipRename, &QPushButton::clicked, this, [this] {
+        const Layer* l = m_s->active3DLayer();
+        QListWidgetItem* it = m_clipList->currentItem();
+        if (!l || !it || l->props.locked) return;
+        const QUuid cid(it->data(Qt::UserRole).toString());
+        const AnimClip* c = l->scene3d->clip(cid);
+        if (!c) return;
+        bool ok = false;
+        const QString n = QInputDialog::getText(this, tr("Rename Clip"), tr("Name"), QLineEdit::Normal, c->name, &ok).trimmed();
+        if (ok && !n.isEmpty()) m_s->doc()->editScene3D(l->id, [&](Scene3D& sc) { for (AnimClip& x : sc.clips) if (x.id == cid && x.name != n) { x.name = n; return true; } return false; }, tr("Rename Clip"), {}, false);
+    });
+    connect(m_clipDelete, &QPushButton::clicked, this, [this] {
+        const Layer* l = m_s->active3DLayer();
+        QListWidgetItem* it = m_clipList->currentItem();
+        if (!l || !it || l->props.locked) return;
+        const QUuid cid(it->data(Qt::UserRole).toString());
+        m_s->doc()->editScene3D(l->id, [&](Scene3D& sc) {
+            const size_t n = sc.clips.size();
+            sc.clips.erase(std::remove_if(sc.clips.begin(), sc.clips.end(), [&](const AnimClip& c) { return c.id == cid; }), sc.clips.end());
+            sc.placements.erase(std::remove_if(sc.placements.begin(), sc.placements.end(), [&](const ClipPlacement& p) { return p.clip == cid; }), sc.placements.end());
+            return sc.clips.size() != n;
+        }, tr("Delete Clip"), {}, false);
+    });
+    connect(m_clipList, &QListWidget::currentRowChanged, this, [this](int) { m_clipAdd->setEnabled(m_clipList->currentItem() != nullptr); });
+    connect(m_placeList, &QListWidget::currentRowChanged, this, [this](int) { if (!m_updating) refreshClips(); });
+    connect(m_pStart, &QSpinBox::valueChanged, this, [this](int v) { if (!m_updating) editPlacement(tr("Move Clip"), "pl:start", [v](ClipPlacement& p) { p.start = v; }); });
+    connect(m_pOffset, &QSpinBox::valueChanged, this, [this](int v) { if (!m_updating) editPlacement(tr("Clip Offset"), "pl:off", [v](ClipPlacement& p) { p.offset = v; }); });
+    connect(m_pSpeed, &QDoubleSpinBox::valueChanged, this, [this](double v) { if (!m_updating) editPlacement(tr("Clip Speed"), "pl:speed", [v](ClipPlacement& p) { p.speed = v; }); });
+    connect(m_pLoop, &QCheckBox::toggled, this, [this](bool v) { if (!m_updating) editPlacement(tr("Clip Loop"), {}, [v](ClipPlacement& p) { p.loop = v; }); });
+    connect(m_pEnabled, &QCheckBox::toggled, this, [this](bool v) { if (!m_updating) editPlacement(tr("Enable Clip"), {}, [v](ClipPlacement& p) { p.enabled = v; }); });
+    connect(m_placeRemove, &QPushButton::clicked, this, [this] {
+        const Layer* l = m_s->active3DLayer();
+        const QUuid pid = selectedPlacement();
+        if (!l || pid.isNull() || l->props.locked) return;
+        m_s->doc()->editScene3D(l->id, [&](Scene3D& sc) {
+            const size_t n = sc.placements.size();
+            sc.placements.erase(std::remove_if(sc.placements.begin(), sc.placements.end(), [&](const ClipPlacement& p) { return p.id == pid; }), sc.placements.end());
+            return sc.placements.size() != n;
+        }, tr("Remove Clip from Timeline"), {}, false);
+    });
     // scene
     connect(m_cameraCombo, &QComboBox::activated, this, [this](int i) { m_a->setSceneCamera(QUuid(m_cameraCombo->itemData(i).toString())); });
     connect(m_ambientColor, &QPushButton::clicked, this, [this] { pickColor(m_ambientColor, tr("Ambient colour"), false, [this](const QColor& c) { editScene(tr("Ambient Colour"), "s3d:amb", [c](Scene3D& sc) { if (sc.ambient == c) return false; sc.ambient = c; return true; }); }); });
@@ -312,6 +384,79 @@ QString Scene3DPanel::keyPropId(const KeyRow& r) const {
     return n.isNull() ? QString() : nodePropId(n, r.what);
 }
 
+bool Scene3DPanel::addSelectedClipToTimeline() {
+    const Layer* l = m_s->active3DLayer();
+    QListWidgetItem* it = m_clipList->currentItem();
+    if (!l || !it || l->props.locked) return false;
+    const QUuid cid(it->data(Qt::UserRole).toString());
+    const int frame = m_s->doc()->currentFrame();
+    return m_s->doc()->editScene3D(l->id, [&](Scene3D& sc) {
+        if (!sc.clip(cid)) return false;
+        ClipPlacement p; p.id = QUuid::createUuid(); p.clip = cid; p.start = frame;
+        sc.placements.push_back(p);
+        return true;
+    }, tr("Add Clip to Timeline"), {}, false);
+}
+
+QUuid Scene3DPanel::selectedPlacement() const {
+    QListWidgetItem* it = m_placeList->currentItem();
+    return it ? QUuid(it->data(Qt::UserRole).toString()) : QUuid();
+}
+
+void Scene3DPanel::editPlacement(const QString& text, const QString& key, const std::function<void(ClipPlacement&)>& fn) {
+    const QUuid pid = selectedPlacement();
+    if (pid.isNull()) return;
+    editScene(text, key.isEmpty() ? key : key + ":" + pid.toString(QUuid::WithoutBraces), [&](Scene3D& sc) {
+        for (ClipPlacement& p : sc.placements) {
+            if (p.id != pid) continue;
+            const ClipPlacement before = p;
+            fn(p);
+            return !(p == before);
+        }
+        return false;
+    });
+}
+
+void Scene3DPanel::refreshClips() {
+    const Layer* l = m_s->active3DLayer();
+    const Scene3D* sc = l ? l->scene3d.get() : nullptr;
+    const bool had = m_updating;
+    m_updating = true;
+    const QString keepClip = m_clipList->currentItem() ? m_clipList->currentItem()->data(Qt::UserRole).toString() : QString();
+    const QString keepPl = m_placeList->currentItem() ? m_placeList->currentItem()->data(Qt::UserRole).toString() : QString();
+    m_clipList->clear(); m_placeList->clear();
+    m_gClips->setVisible(sc != nullptr && (!sc->clips.empty()));
+    if (sc) {
+        for (const AnimClip& c : sc->clips) {
+            auto* it = new QListWidgetItem(tr("%1  (%2 frames)").arg(c.name).arg(c.length), m_clipList);
+            it->setData(Qt::UserRole, c.id.toString());
+            if (c.id.toString() == keepClip) m_clipList->setCurrentItem(it);
+        }
+        if (!m_clipList->currentItem() && m_clipList->count() > 0) m_clipList->setCurrentRow(0);
+        for (const ClipPlacement& p : sc->placements) {
+            const AnimClip* c = sc->clip(p.clip);
+            auto* it = new QListWidgetItem(tr("%1 @ frame %2").arg(c ? c->name : tr("(missing clip)")).arg(p.start), m_placeList);
+            it->setData(Qt::UserRole, p.id.toString());
+            if (p.id.toString() == keepPl) m_placeList->setCurrentItem(it);
+        }
+        if (!m_placeList->currentItem() && m_placeList->count() > 0) m_placeList->setCurrentRow(0);
+    }
+    const ClipPlacement* cur = nullptr;
+    if (sc) for (const ClipPlacement& p : sc->placements) if (p.id == selectedPlacement()) cur = &p;
+    for (QWidget* w : {static_cast<QWidget*>(m_pStart), static_cast<QWidget*>(m_pSpeed), static_cast<QWidget*>(m_pOffset), static_cast<QWidget*>(m_pLoop),
+                       static_cast<QWidget*>(m_pEnabled), static_cast<QWidget*>(m_placeRemove)}) w->setEnabled(cur != nullptr);
+    if (cur) {
+        if (!m_pStart->hasFocus()) m_pStart->setValue(cur->start);
+        if (!m_pSpeed->hasFocus()) m_pSpeed->setValue(cur->speed);
+        if (!m_pOffset->hasFocus()) m_pOffset->setValue(cur->offset);
+        m_pLoop->setChecked(cur->loop); m_pEnabled->setChecked(cur->enabled);
+    }
+    m_clipAdd->setEnabled(m_clipList->currentItem() != nullptr);
+    m_clipRename->setEnabled(m_clipList->currentItem() != nullptr);
+    m_clipDelete->setEnabled(m_clipList->currentItem() != nullptr);
+    m_updating = had;
+}
+
 QUuid Scene3DPanel::currentMaterialId() const { return QUuid(m_matCombo->currentData().toString()); }
 
 void Scene3DPanel::editMaterial(const QString& text, const QString& key, const std::function<bool(Material&)>& fn) {
@@ -398,6 +543,7 @@ void Scene3DPanel::refreshInspector() {
         r.key->setEnabled(!id.isEmpty());
         r.key->setText(animated && it->indexOfKey(m_s->doc()->currentFrame()) >= 0 ? QString::fromUtf8("◆") : QString::fromUtf8("◇"));
     }
+    refreshClips();
     if (sc) {
         m_cameraCombo->clear();
         for (const auto& nd : sc->nodes) if (nd.kind == NodeKind::Camera) m_cameraCombo->addItem(nd.name, nd.id.toString());

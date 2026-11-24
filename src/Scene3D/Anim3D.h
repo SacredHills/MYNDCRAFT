@@ -1,4 +1,5 @@
 #pragma once
+#include <QSet>
 #include <QString>
 #include <QUuid>
 #include <QVector>
@@ -42,6 +43,12 @@ bool readSceneProp(const Scene3D& s, const QString& id, PropValue* out);
 bool writeSceneProp(Scene3D& s, const QString& id, PropValue v);
 // "Cube › Position"
 QString describeSceneProp(const Scene3D& s, const QString& id);
+
+// Where a placed clip is at composition frame `frame`: its own time in 0..length, or false when the placement has not started yet
+// (or is disabled / refers to a missing clip). Looping placements wrap; others hold the last pose.
+bool clipTimeAt(const ClipPlacement& p, const AnimClip& c, double frame, double* clipTime);
+// Properties of the scene that currently follow some animation: layer keyframes or an enabled clip placement.
+QSet<QString> drivenProps(const Scene3D& s, const PropertyTracks& t);
 
 // True when any track of `t` targets this scene and has keyframes.
 bool hasSceneAnimation(const Scene3D& s, const PropertyTracks& t);

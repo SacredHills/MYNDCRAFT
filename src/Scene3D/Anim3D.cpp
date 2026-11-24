@@ -164,7 +164,35 @@ QString describeSceneProp(const Scene3D& s, const QString& id) {
     return who + QStringLiteral(" › ") + d->label;
 }
 
+bool clipTimeAt(const ClipPlacement& p, const AnimClip& c, double frame, double* out) {
+    if (!p.enabled || frame < p.start || c.length <= 0) return false;
+    double t = (frame - p.start) * p.speed + p.offset;
+    if (p.loop) { t = std::fmod(t, double(c.length)); if (t < 0) t += c.length; }
+    else t = std::clamp(t, 0.0, double(c.length));
+    if (out) *out = t;
+    return true;
+}
+
+static bool placementHasTracks(const Scene3D& s, const ClipPlacement& p) {
+    if (!p.enabled) return false;
+    const AnimClip* c = s.clip(p.clip);
+    return c && c->length > 0 && !c->tracks.isEmpty();
+}
+
+QSet<QString> drivenProps(const Scene3D& s, const PropertyTracks& t) {
+    QSet<QString> v;
+    for (const ClipPlacement& p : s.placements) {
+        if (!placementHasTracks(s, p)) continue;
+        const AnimClip* c = s.clip(p.clip);
+        for (auto it = c->tracks.begin(); it != c->tracks.end(); ++it) if (it->animated() && scenePropExists(s, it.key())) v.insert(it.key());
+    }
+    for (auto it = t.begin(); it != t.end(); ++it)
+        if (isScene3DPropId(it.key()) && it->animated() && scenePropExists(s, it.key())) v.insert(it.key());
+    return v;
+}
+
 bool hasSceneAnimation(const Scene3D& s, const PropertyTracks& t) {
+    for (const ClipPlacement& p : s.placements) if (placementHasTracks(s, p)) return true;
     for (auto it = t.begin(); it != t.end(); ++it)
         if (isScene3DPropId(it.key()) && it->animated() && scenePropExists(s, it.key())) return true;
     return false;
@@ -175,14 +203,32 @@ Scene3D evaluateScene(const Scene3D& base, const PropertyTracks& t, double frame
     Scene3D s = base;
     quint64 h = 1469598103934665603ull;     // FNV-1a over the evaluated values
     auto mix = [&h](quint64 x) { h ^= x; h *= 1099511628211ull; };
+    auto mixValue = [&](const QString& id, const PropValue& v) {
+        mix(qHash(id));
+        for (int i = 0; i < 4; ++i) { quint64 b; double x = v.c[i]; memcpy(&b, &x, sizeof b); mix(b); }
+    };
+    // Placed clips first (in order), then the layer's own keyframes override them.
+    for (const ClipPlacement& p : base.placements) {
+        if (!placementHasTracks(base, p)) continue;
+        const AnimClip* c = base.clip(p.clip);
+        double ct;
+        if (!clipTimeAt(p, *c, frame, &ct)) continue;
+        for (auto it = c->tracks.begin(); it != c->tracks.end(); ++it) {
+            if (!it->animated()) continue;
+            const PropertyDef* d = scene3DPropertyDef(it.key());
+            if (!d || !scenePropExists(s, it.key())) continue;
+            const PropValue v = it->valueAt(*d, ct);
+            writeSceneProp(s, it.key(), v);
+            mixValue(it.key(), v);
+        }
+    }
     for (auto it = t.begin(); it != t.end(); ++it) {
         if (!isScene3DPropId(it.key()) || !it->animated()) continue;
         const PropertyDef* d = scene3DPropertyDef(it.key());
         if (!d || !scenePropExists(s, it.key())) continue;
         const PropValue v = it->valueAt(*d, frame);
         writeSceneProp(s, it.key(), v);
-        mix(qHash(it.key()));
-        for (int i = 0; i < 4; ++i) { quint64 b; double x = v.c[i]; memcpy(&b, &x, sizeof b); mix(b); }
+        mixValue(it.key(), v);
     }
     s.revision = (base.revision * 0x9E3779B97F4A7C15ull) ^ h ^ (1ull << 63);
     return s;

@@ -6,6 +6,38 @@
 
 namespace mynd {
 
+std::shared_ptr<const Mesh> skinnedMeshFor(const Scene3D& s, const Node3D& n) {
+    if (n.skin.isNull() || n.kind != NodeKind::Mesh) return nullptr;
+    auto mit = s.meshes.find(n.mesh);
+    if (mit == s.meshes.end() || !mit->second->skinned()) return nullptr;
+    const Skin* k = s.skinById(n.skin);
+    if (!k || k->joints.empty() || k->inverseBind.size() != k->joints.size()) return nullptr;
+    const Mesh& m = *mit->second;
+    std::vector<QMatrix4x4> M(k->joints.size());
+    for (size_t j = 0; j < M.size(); ++j) M[j] = s.node(k->joints[j]) ? s.worldMatrix(k->joints[j]) * k->inverseBind[j] : QMatrix4x4();
+    auto out = std::make_shared<Mesh>(m);
+    out->joints.clear(); out->weights.clear();
+    const bool hasN = m.normals.size() == m.positions.size();
+    for (size_t v = 0; v < m.positions.size(); ++v) {
+        QVector3D p, nr;
+        float sum = 0;
+        for (int i = 0; i < 4; ++i) {
+            const float w = m.weights[v][size_t(i)];
+            if (w <= 0) continue;
+            const size_t j = m.joints[v][size_t(i)];
+            if (j >= M.size()) continue;
+            p += M[j].map(m.positions[v]) * w;
+            if (hasN) nr += M[j].mapVector(m.normals[v]) * w;
+            sum += w;
+        }
+        if (sum <= 1e-6f) { p = m.positions[v]; nr = hasN ? m.normals[v] : QVector3D(); sum = 1; }
+        out->positions[v] = p / sum;
+        if (hasN) out->normals[v] = nr.isNull() ? m.normals[v] : nr.normalized();
+    }
+    return out;
+}
+
+
 // ============================================================ cameras
 QVector3D OrbitCamera::eye() const {
     const double y = yawDeg * M_PI / 180, p = pitchDeg * M_PI / 180;
@@ -276,8 +308,9 @@ QImage renderScene(const Scene3D& s, const RenderCamera& cam, const QSize& size,
         if (n.kind != NodeKind::Mesh || !s.effectivelyVisible(n.id)) continue;
         auto mit = s.meshes.find(n.mesh);
         if (mit == s.meshes.end()) continue;
-        const Mesh& mesh = *mit->second;
-        const QMatrix4x4 world = s.worldMatrix(n.id);
+        const std::shared_ptr<const Mesh> skinnedHolder = skinnedMeshFor(s, n);
+        const Mesh& mesh = skinnedHolder ? *skinnedHolder : *mit->second;
+        const QMatrix4x4 world = skinnedHolder ? QMatrix4x4() : s.worldMatrix(n.id);
         const QMatrix4x4 mvp = vp * world;
         const QMatrix3x3 nm = world.normalMatrix();
         const bool hasN = mesh.normals.size() == mesh.positions.size(), hasUv = mesh.uvs.size() == mesh.positions.size();
@@ -351,13 +384,15 @@ PickHit pickNode(const Scene3D& s, const RenderCamera& cam, const QSize& size, c
         if (n.kind == NodeKind::Mesh) {
             auto mit = s.meshes.find(n.mesh);
             if (mit == s.meshes.end()) continue;
-            const QMatrix4x4 inv = world.inverted();
+            const std::shared_ptr<const Mesh> skinnedHolder = skinnedMeshFor(s, n);
+            const QMatrix4x4 modelM = skinnedHolder ? QMatrix4x4() : world;
+            const QMatrix4x4 inv = modelM.inverted();
             const QVector3D o = inv.map(ray.origin), d = inv.mapVector(ray.dir);
-            const Mesh& m = *mit->second;
+            const Mesh& m = skinnedHolder ? *skinnedHolder : *mit->second;
             for (size_t i = 0; i + 2 < m.indices.size(); i += 3) {
                 float t;
                 if (!rayTriangle(o, d, m.positions[m.indices[i]], m.positions[m.indices[i + 1]], m.positions[m.indices[i + 2]], &t)) continue;
-                const double dist = double((world.map(o + d * t) - ray.origin).length());
+                const double dist = double((modelM.map(o + d * t) - ray.origin).length());
                 if (dist < best.distance) { best.distance = dist; best.node = n.id; }
             }
         } else if (n.kind == NodeKind::Light || n.kind == NodeKind::Camera) {

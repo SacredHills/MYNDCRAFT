@@ -12,6 +12,8 @@ class QDoubleSpinBox;
 class QGroupBox;
 class QPushButton;
 class QToolButton;
+class QListWidget;
+class QSpinBox;
 
 namespace mynd {
 
@@ -32,6 +34,11 @@ public:
     QGroupBox *materialGroup() const { return m_gMat; }
     QGroupBox *lightGroup() const { return m_gLight; }
     QGroupBox *cameraGroup() const { return m_gCam; }
+    // Animation clips (test access)
+    QListWidget* clipList() const { return m_clipList; }
+    QListWidget* placementList() const { return m_placeList; }
+    QGroupBox* clipGroup() const { return m_gClips; }
+    bool addSelectedClipToTimeline();                              // what "Add to Timeline" does
     void dropOn(const QUuid& node, const QUuid& newParent);      // what a drag & drop in the tree does
     bool setBaseTexture(const QImage& img);                       // what "Texture…" does after the file is read
 
@@ -66,6 +73,15 @@ private:
     QDoubleSpinBox* m_ambientInt;
     QComboBox* m_cameraCombo;
     QVector<KeyRow> m_keyRows;
+    QGroupBox* m_gClips = nullptr;
+    QListWidget *m_clipList = nullptr, *m_placeList = nullptr;
+    QSpinBox *m_pStart = nullptr, *m_pOffset = nullptr;
+    QDoubleSpinBox* m_pSpeed = nullptr;
+    QCheckBox *m_pLoop = nullptr, *m_pEnabled = nullptr;
+    QPushButton *m_clipAdd = nullptr, *m_clipRename = nullptr, *m_clipDelete = nullptr, *m_placeRemove = nullptr;
+    void refreshClips();
+    QUuid selectedPlacement() const;
+    void editPlacement(const QString& text, const QString& key, const std::function<void(ClipPlacement&)>& fn);
     QColor m_baseC, m_emisC, m_lightC, m_ambC, m_bgC;
 };
 

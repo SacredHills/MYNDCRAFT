@@ -166,7 +166,7 @@ QUuid Scene3DActions::createCamera() {
 
 QUuid Scene3DActions::importModelFile(const QString& path, QString* error, QStringList* warnings) {
     if (!m_s->doc()) { if (error) *error = tr("No document is open."); return {}; }
-    ImportResult r = mynd::importModelFile(path);
+    ImportResult r = mynd::importModelFile(path, m_s->doc()->comp().fps.fps());
     if (!r) { if (error) *error = r.error; return {}; }
     if (warnings) *warnings = r.warnings;
     Document* d = m_s->doc();

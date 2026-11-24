@@ -236,9 +236,37 @@ Limitations (honest list):
 - Not done in Phase 6 (by design): modelling tools, animation of 3D properties (Phase 7), instancing/duplicated meshes share
   geometry by copy, no mesh editing, no shadow casting.
 
+## Phase 7 — 3D animation (implemented, headless-tested; not yet hand-tested on Windows)
+- **Keyframing 3D properties on the normal timeline/graph editor.** 3D properties are stored as ordinary property tracks of the 3D layer
+  (ids `3d:n:<node>:<what>`, `3d:m:<material>:<what>`; see `src/Scene3D/Anim3D.h`), so the timeline rows, graph editor, key selection/move/delete,
+  Easy Ease presets and undo work the same as for 2D. Animatable: node position / rotation / scale, camera field of view, light intensity /
+  colour / range / spot angle, material base colour / emissive / roughness / metallic.
+- **Inspector and viewport.** Every animatable row in the 3D panel has a stopwatch and a key button. The viewport and inspector show the scene
+  evaluated at the current frame. Editing an animated property (typing or dragging a gizmo) writes a key at the current frame in one undo
+  step; with Auto-Key on, editing any animatable property keys it. Unanimated properties keep changing the stored scene as before.
+- **Rendering.** The compositor evaluates the scene at the frame (cached by scene revision + evaluated values). Export uses the same path.
+- **Imported animation.** glTF/GLB node translation/rotation/scale animations become clips (times converted to composition frames at import
+  time). Clips can be placed on the timeline with start frame, speed, offset and loop/hold, enabled/disabled, from the "Animation Clips" group in
+  the 3D panel. The first clip is placed looping on import. Keyframes you set on a property override the clip on that property.
+- **Skeletal animation.** glTF skins (up to 4 joints per vertex) are imported and drawn deformed by the animated joint nodes (CPU skinning).
+- **Persistence.** Keyframes, clips, placements and skins are saved in the project (3D scene JSON, mesh blobs carry joints/weights). Keyframes of
+  deleted nodes are dropped on save; duplicated layers renumber their keyframes, clips and skins.
+- **Tests.** `test_anim3d` (15), additions to `test_ui_3d` and the import fuzz test; also clean under ASAN/UBSAN.
+- **Limitations (honest list).**
+  - Clip time is stored in composition frames at import: changing the project frame rate later changes the clip's real-time speed.
+  - Clips are not drawn as blocks on the timeline; manage them in the 3D panel. No blending/crossfade between clips; placements are applied in list order.
+  - glTF only: FBX and OBJ import no animation or skins (FBX animation/skeleton is not implemented). Morph targets (blend shapes) are ignored.
+  - Cubic-spline channels are imported as linear keys; rotation is converted to Euler keys (extra keys are inserted on long turns) so
+    imported rotations are an approximation of the original quaternion interpolation, and graph editor shows Euler angles.
+  - Skinning ignores the skinned node's own transform (as glTF specifies); picking uses the deformed pose but the selection gizmo/bounds use the node's own transform.
+  - Duplicating a single node does not copy its keyframes (duplicating the whole layer does).
+  - The scene camera, ambient/background and light type are not animatable (only the properties listed above).
+
 ## Next tasks
-Visual tween spans in the timeline, swapping an instance's symbol, per-instance Movie Clip play/stop.
-Also: re-evaluate renderer choice (Skia vs. QPainter) and add a frame cache before the GPU/3D work.
+1. 2D layers in 3D space (raster/vector/text/animation layers as textured planes inside a 3D scene) — next.
+2. Phase 8: unified 2D/3D composition (awaiting go-ahead).
+3. Visual tween spans in the timeline, swapping an instance's symbol, per-instance Movie Clip play/stop; FBX animation; clip blocks on the timeline.
+4. The 3D renderer is a CPU software renderer; a GPU backend is future work.
 
 ## Build / CI status
 `.github/workflows/build.yml` builds and runs the tests on Linux, Windows (MSVC, Qt 6.8.3, vcpkg libzip) and

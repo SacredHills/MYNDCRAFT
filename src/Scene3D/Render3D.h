@@ -12,6 +12,10 @@ namespace mynd {
 // and headless, so previews, exports and tests all agree. It does not do shadows, reflections, normal maps,
 // transparency sorting or skinning.
 
+// The mesh of a skinned mesh node deformed by its skeleton's current pose, in world space (so it is drawn with an identity model
+// matrix, as glTF specifies). Null when the node has no usable skin.
+std::shared_ptr<const Mesh> skinnedMeshFor(const Scene3D& s, const Node3D& n);
+
 struct RenderCamera {
     QMatrix4x4 view, proj;
     QVector3D eye;

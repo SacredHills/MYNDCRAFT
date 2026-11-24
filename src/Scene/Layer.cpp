@@ -201,6 +201,15 @@ LayerPtr Layer::cloneWithNewIds() const {
         for (auto& n : c->scene3d->nodes) { const QUuid nid = QUuid::createUuid(); nodeMap[n.id] = nid; n.id = nid; }
         for (auto& n : c->scene3d->nodes) if (nodeMap.count(n.parent)) n.parent = nodeMap[n.parent];
         if (nodeMap.count(c->scene3d->activeCamera)) c->scene3d->activeCamera = nodeMap[c->scene3d->activeCamera];
+        for (AnimClip& ac : c->scene3d->clips) {
+            PropertyTracks rt;
+            for (auto it = ac.tracks.begin(); it != ac.tracks.end(); ++it) {
+                mynd::PropTarget pt;
+                if (mynd::parseScene3DPropId(it.key(), &pt) && !pt.material && nodeMap.count(pt.target)) rt.insert(mynd::nodePropId(nodeMap[pt.target], pt.what), it.value());
+            }
+            ac.tracks = rt;
+        }
+        for (auto& k : c->scene3d->skins) for (QUuid& j : k.joints) if (nodeMap.count(j)) j = nodeMap[j];
         // 3D keyframe tracks follow their nodes (materials keep their ids: they are per-scene).
         PropertyTracks remapped;
         for (auto it = tracks.begin(); it != tracks.end(); ++it) {

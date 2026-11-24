@@ -3,8 +3,10 @@
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QGroupBox>
+#include <QListWidget>
 
 #include "TestEnv.h"
+#include "AnimGltf.h"
 #include "Core/ProjectIO.h"
 #include "Core/Settings.h"
 #include "UI/GraphEditor.h"
@@ -197,6 +199,34 @@ private slots:
         // everything undoes
         while (doc->undoStack()->canUndo()) doc->undoStack()->undo();
         QVERIFY(doc->root()->children.empty());
+    }
+
+    void anImportedAnimationIsListedPlayedAndEditableAsAPlacement() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("spin.gltf");
+        QFile f(path); QVERIFY(f.open(QIODevice::WriteOnly)); f.write(testmodels::animatedGltf()); f.close();
+        QString err; QStringList warn;
+        QVERIFY2(!a->importModelFile(path, &err, &warn).isNull(), qPrintable(err));
+        QVERIFY2(warn.join("|").contains("animation clip"), qPrintable(warn.join("|")));
+        Scene3DPanel* p = w->scene3dPanel();
+        QApplication::processEvents();
+        QVERIFY(p->clipGroup()->isVisibleTo(p));
+        QCOMPARE(p->clipList()->count(), 1);
+        QCOMPARE(p->placementList()->count(), 1);
+        QUuid child;
+        for (const Node3D& n : scene()->nodes) if (n.name == "Child") child = n.id;
+        QVERIFY(!child.isNull());
+        doc->setCurrentFrame(12);
+        QCOMPARE(s->active3DLayer()->sceneAt(12)->node(child)->position, QVector3D(1, 0, 0));
+        // retiming the placement through the panel moves the whole animation
+        const int steps = doc->undoStack()->count();
+        p->placementList()->setCurrentRow(0);
+        s->active3DLayer();                                                      // (selection of the placement is panel state)
+        QVERIFY(p->addSelectedClipToTimeline());
+        QCOMPARE(p->placementList()->count(), 2);
+        QCOMPARE(doc->undoStack()->count(), steps + 1);
+        doc->undoStack()->undo();
+        QCOMPARE(p->placementList()->count(), 1);
     }
 
     void rotateAndScaleGizmosWork() {

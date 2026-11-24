@@ -5,9 +5,14 @@
 #include "Graphics/Compositor.h"
 #include "Scene/Document.h"
 #include "Scene3D/Anim3D.h"
+#include "Scene3D/ModelImport.h"
 #include "Scene3D/Render3D.h"
 
 using namespace mynd;
+
+#include "AnimGltf.h"
+using testmodels::animatedGltf;
+using testmodels::skinnedGltf;
 
 class TestAnim3D : public QObject {
     Q_OBJECT
@@ -253,6 +258,169 @@ private slots:
         for (auto it = dup->tracks.begin(); it != dup->tracks.end(); ++it) QVERIFY2(scenePropExists(*dup->scene3d, it.key()), qPrintable(it.key()));
         QVERIFY(!dup->tracks.contains(nodePropId(ids.box, "pos")));
         QVERIFY(dup->sceneAt(10)->nodes[0].position.x() == 2.0f);
+    }
+
+    void placedClipsStartLoopHoldScaleAndOffset() {
+        Document d(cs());
+        const Ids ids = build(d);
+        const QString id = nodePropId(ids.box, "pos");
+        AnimClip clip; clip.id = QUuid::createUuid(); clip.name = "Slide"; clip.length = 10;
+        PropertyTrack tr;
+        tr.setKey(*findPropertyDef(id), 0, pos(0)); tr.setKey(*findPropertyDef(id), 10, pos(10));
+        clip.tracks.insert(id, tr);
+        ClipPlacement p; p.id = QUuid::createUuid(); p.clip = clip.id; p.start = 4;
+        d.editScene3D(ids.layer, [&](Scene3D& s) { s.clips.push_back(clip); s.placements.push_back(p); return true; }, "Place");
+        auto x = [&](int f) { return d.findLayer(ids.layer)->sceneAt(f)->node(ids.box)->position.x(); };
+        QCOMPARE(x(0), 0.0f);                                  // before the start nothing is applied
+        QCOMPARE(x(4), 0.0f);
+        QCOMPARE(x(9), 5.0f);
+        QCOMPARE(x(14), 10.0f);
+        QCOMPARE(x(20), 10.0f);                                // holds the last pose
+        auto edit = [&](const std::function<void(ClipPlacement&)>& f) { d.editScene3D(ids.layer, [&](Scene3D& s) { f(s.placements[0]); return true; }, "Edit placement"); };
+        edit([](ClipPlacement& q) { q.loop = true; });
+        QCOMPARE(x(14 + 3), 3.0f);                             // wrapped around
+        edit([](ClipPlacement& q) { q.speed = 2.0; });
+        QCOMPARE(x(6), 4.0f);                                  // twice as fast: 2 frames in = 4 clip frames
+        edit([](ClipPlacement& q) { q.offset = 5; q.speed = 1.0; });
+        QCOMPARE(x(4), 5.0f);                                  // starts halfway through the clip
+        edit([](ClipPlacement& q) { q.enabled = false; });
+        QCOMPARE(x(9), 0.0f);
+        // a clip never touches the stored (static) scene, and animating the same property in the layer overrides it
+        edit([](ClipPlacement& q) { q.enabled = true; });
+        QCOMPARE(d.findLayer(ids.layer)->scene3d->node(ids.box)->position.x(), 0.0f);
+        d.setCurrentFrame(6);
+        QVERIFY(d.editScene3D(ids.layer, [&](Scene3D& s) { s.node(ids.box)->position = {9, 0, 0}; return true; }, "Override"));
+        QCOMPARE(d.findLayer(ids.layer)->tracks[id].keys.size(), 1);             // the edit became a key on top of the clip
+        QCOMPARE(x(6), 9.0f);
+        QCOMPARE(d.findLayer(ids.layer)->scene3d->node(ids.box)->position.x(), 0.0f);
+        // saved and reloaded
+        QTemporaryDir dir; QString err;
+        QVERIFY2(ProjectIO::save(d, dir.filePath("c.studio"), &err), qPrintable(err));
+        LoadResult r = ProjectIO::load(dir.filePath("c.studio"));
+        QVERIFY2(r.doc, qPrintable(r.error));
+        QVERIFY2(r.warnings.isEmpty(), qPrintable(r.warnings.join("; ")));
+        QCOMPARE(r.doc->findLayer(ids.layer)->scene3d->clips.size(), size_t(1));
+        QVERIFY(r.doc->findLayer(ids.layer)->scene3d->clips[0] == d.findLayer(ids.layer)->scene3d->clips[0]);
+        QVERIFY(r.doc->findLayer(ids.layer)->scene3d->placements[0] == d.findLayer(ids.layer)->scene3d->placements[0]);
+        QCOMPARE(r.doc->findLayer(ids.layer)->scene3d->placements.size(), size_t(1));
+        d.undoStack()->undo();                                                   // the override undoes together with its key
+        QVERIFY(d.findLayer(ids.layer)->tracks.isEmpty());
+    }
+
+    void gltfAnimationBecomesAClipThatPlaysOnTheTimeline() {
+        ImportResult r = importGltfData(animatedGltf(), ".", "Model", 24.0);
+        QVERIFY2(r, qPrintable(r.error));
+        QCOMPARE(r.scene->clips.size(), size_t(1));
+        QCOMPARE(r.scene->clips[0].name, QString("Spin"));
+        QCOMPARE(r.scene->clips[0].length, 24);                                  // 1 s at 24 fps
+        QCOMPARE(r.scene->placements.size(), size_t(1));
+        QVERIFY(r.scene->placements[0].loop);
+        // merged into a layer the node ids are renumbered and the clip still addresses the right nodes
+        Document d(cs());
+        const QUuid lid = d.addScene3DLayer("Imported");
+        d.editScene3D(lid, [&](Scene3D& s) { mergeImport(s, *r.scene); return true; }, "Import");
+        const Layer* l = d.findLayer(lid);
+        QCOMPARE(l->scene3d->clips.size(), size_t(1));
+        QCOMPARE(l->scene3d->clips[0].tracks.size(), 2);
+        for (auto it = l->scene3d->clips[0].tracks.begin(); it != l->scene3d->clips[0].tracks.end(); ++it) QVERIFY2(scenePropExists(*l->scene3d, it.key()), qPrintable(it.key()));
+        QUuid child;
+        for (const Node3D& n : l->scene3d->nodes) if (n.name == "Child") child = n.id;
+        QVERIFY(!child.isNull());
+        auto xAxis = [&](int f) { return l->sceneAt(f)->node(child)->localMatrix().mapVector(QVector3D(1, 0, 0)); };
+        auto near = [](QVector3D a, QVector3D b) { return (a - b).length() < 0.02f; };
+        QVERIFY2(near(xAxis(0), QVector3D(2, 0, 0)), qPrintable(QString::number(xAxis(0).x())));
+        QVERIFY(near(xAxis(12), QVector3D(0, 0, -2)));                           // 90° about Y turns +X to -Z (scale 2)
+        QVERIFY2(near(xAxis(6), QVector3D(1.4142f, 0, -1.4142f)), qPrintable(QString("%1 %2 %3").arg(xAxis(6).x()).arg(xAxis(6).y()).arg(xAxis(6).z())));                // and halfway is 45°, not a jump
+        QVERIFY2(near(xAxis(23), QVector3D(-1.9829f, 0, -0.2611f)), qPrintable(QString("%1 %2 %3").arg(xAxis(23).x()).arg(xAxis(23).y()).arg(xAxis(23).z())));       // 172.5°; frame 24 wraps back to the start of the loop
+        QVERIFY(near(xAxis(24), QVector3D(2, 0, 0)));
+        QCOMPARE(l->sceneAt(12)->node(child)->position, QVector3D(1, 0, 0));
+        QCOMPARE(l->sceneAt(24 + 12)->node(child)->position, QVector3D(1, 0, 0));   // looping
+        QVERIFY(l->scene3d->node(child)->position == QVector3D(0, 0, 0));             // the stored scene is the rest pose
+        // at a different frame rate the same second is a different number of frames
+        ImportResult r30 = importGltfData(animatedGltf(), ".", "Model", 30.0);
+        QCOMPARE(r30.scene->clips[0].length, 30);
+        // a damaged animation is skipped with a note, the model still imports
+        QJsonObject o = QJsonDocument::fromJson(animatedGltf()).object();
+        QJsonArray ch = o["animations"].toArray()[0].toObject()["channels"].toArray();
+        QJsonObject c0 = ch[0].toObject(); c0["sampler"] = 9; ch[0] = c0;
+        QJsonObject a0 = o["animations"].toArray()[0].toObject(); a0["channels"] = ch;
+        o["animations"] = QJsonArray{a0};
+        ImportResult bad = importGltfData(QJsonDocument(o).toJson(), ".", "Model");
+        QVERIFY(bad);
+        QCOMPARE(bad.scene->clips[0].tracks.size(), 1);
+        QVERIFY(!bad.warnings.isEmpty());
+    }
+
+    void skinnedMeshesFollowTheirAnimatedJointsAndSurviveSavingAndDuplicating() {
+        ImportResult r = importGltfData(skinnedGltf(), ".", "Rig", 24.0);
+        QVERIFY2(r, qPrintable(r.error));
+        QCOMPARE(r.scene->skins.size(), size_t(1));
+        QCOMPARE(r.scene->skins[0].joints.size(), size_t(2));
+        const Mesh& im = *r.scene->meshes.begin()->second;
+        QVERIFY(im.skinned());
+        QCOMPARE(im.joints[2][1], uint16_t(1));
+        QVERIFY(std::abs(im.weights[2][0] - 0.5f) < 1e-6f);
+        Document d(cs());
+        const QUuid lid = d.addScene3DLayer("Rig");
+        d.editScene3D(lid, [&](Scene3D& s) { mergeImport(s, *r.scene); return true; }, "Import");
+        QUuid meshNode;
+        for (const Node3D& n : d.findLayer(lid)->scene3d->nodes) if (n.name == "Skinned") meshNode = n.id;
+        auto pose = [&](const Layer& l, int frame) {
+            const auto sc = l.sceneAt(frame);
+            const Node3D* n = sc->node(meshNode);
+            auto m = n ? skinnedMeshFor(*sc, *n) : nullptr;
+            return m;
+        };
+        const Layer* l = d.findLayer(lid);
+        auto rest = pose(*l, 0);
+        QVERIFY(rest);
+        QCOMPARE(rest->positions[1], QVector3D(1, 0, 0));
+        auto mid = pose(*l, 12);                                                   // J1 has slid +1 on X
+        QVERIFY(mid);
+        QCOMPARE(mid->positions[0], QVector3D(0, 0, 0));                           // bound to the fixed joint
+        QVERIFY((mid->positions[1] - QVector3D(2, 0, 0)).length() < 1e-4f);        // bound to the moving joint
+        QVERIFY((mid->positions[2] - QVector3D(0.5f, 1, 0)).length() < 1e-4f);     // half and half
+        QCOMPARE(mid->normals.size(), mid->positions.size());
+        // moving the whole rig moves the skinned mesh with it
+        const QUuid root = d.findLayer(lid)->scene3d->nodes[0].id;
+        d.editScene3D(lid, [&](Scene3D& s) { s.node(root)->position = {0, 5, 0}; return true; }, "Move rig");
+        QVERIFY((pose(*d.findLayer(lid), 0)->positions[0] - QVector3D(0, 5, 0)).length() < 1e-4f);
+        // it renders (the triangle covers pixels) and can be picked where it is now
+        {
+            Scene3D s = *d.findLayer(lid)->sceneAt(12);
+            s.nodes[0].position = {0, 0, 0};
+            Node3D cam; cam.kind = NodeKind::Camera; cam.position = {1, 0.5f, 5}; s.addNode(cam);
+            s.ambientIntensity = 1;
+            const QImage img = renderScene(s, sceneCamera(s, 1.0), QSize(80, 80));
+            int covered = 0;
+            for (int y = 0; y < img.height(); ++y) for (int x = 0; x < img.width(); ++x) covered += qAlpha(img.pixel(x, y)) > 0;
+            QVERIFY2(covered > 50, qPrintable(QString::number(covered)));
+        }
+        // saved and reloaded
+        QTemporaryDir dir; QString err;
+        QVERIFY2(ProjectIO::save(d, dir.filePath("rig.studio"), &err), qPrintable(err));
+        LoadResult loaded = ProjectIO::load(dir.filePath("rig.studio"));
+        QVERIFY2(loaded.doc, qPrintable(loaded.error));
+        QVERIFY2(loaded.warnings.isEmpty(), qPrintable(loaded.warnings.join("; ")));
+        const Layer* ll = loaded.doc->findLayer(lid);
+        QCOMPARE(ll->scene3d->skins.size(), size_t(1));
+        QVERIFY(ll->scene3d->meshes.begin()->second->skinned());
+        QVERIFY((pose(*ll, 12)->positions[1] - pose(*d.findLayer(lid), 12)->positions[1]).length() < 1e-5f);
+        // a duplicate of the layer has its own skeleton and its own clip targets
+        auto dup = d.findLayer(lid)->cloneWithNewIds();
+        QUuid dupMesh;
+        for (const Node3D& n : dup->scene3d->nodes) if (n.name == "Skinned") dupMesh = n.id;
+        QVERIFY(dupMesh != meshNode);
+        for (const QUuid& j : dup->scene3d->skins[0].joints) QVERIFY(dup->scene3d->node(j));
+        const auto dsc = dup->sceneAt(12);
+        QVERIFY((skinnedMeshFor(*dsc, *dsc->node(dupMesh))->positions[1] - pose(*d.findLayer(lid), 12)->positions[1]).length() < 1e-5f);
+        // damaged skin data (a joint index that does not exist) is reported and the model still imports
+        QJsonObject o = QJsonDocument::fromJson(skinnedGltf()).object();
+        QJsonArray sk = o["skins"].toArray(); QJsonObject s0 = sk[0].toObject(); s0["joints"] = QJsonArray{1, 99}; sk[0] = s0; o["skins"] = sk;
+        ImportResult bad = importGltfData(QJsonDocument(o).toJson(), ".", "Rig");
+        QVERIFY(bad);
+        QVERIFY(bad.scene->skins.empty());
+        QVERIFY(!bad.warnings.isEmpty());
     }
 
     void brokenAnimationInAFileIsReportedNotFatal() {

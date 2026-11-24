@@ -139,10 +139,11 @@ bool Document::editScene3D(const QUuid& layerId, const std::function<bool(Scene3
         m_undo.push(new Scene3DCommand(this, layerId, std::make_shared<Scene3D>(base), after, text, mergeKey));
         return true;
     }
+    const QSet<QString> driven = drivenProps(base, l->tracks);     // layer keyframes or placed clips
     for (const QString& id : animatableProps(edited)) {
         PropValue was, now, stat;
         if (!readSceneProp(seen, id, &was) || !readSceneProp(edited, id, &now) || !readSceneProp(base, id, &stat)) continue;
-        const bool hasKeys = tracks.contains(id) && tracks[id].animated();
+        const bool hasKeys = driven.contains(id);
         if (now != was) {
             if (hasKeys || autoKey) {
                 const PropertyDef* d = scene3DPropertyDef(id);
@@ -179,8 +180,10 @@ bool Document::toggleScene3DAnimation(const QUuid& layerId, const QString& propI
         text = tr("Stop Animating %1").arg(l->propertyLabel(propId));
     } else {
         PropertyTrack trk;
+        PropValue shown = stat;                                    // a clip may be driving it: key what is on screen
+        readSceneProp(*l->sceneAt(frame), propId, &shown);
         trk.base = stat;
-        trk.setKey(*d, frame, stat);
+        trk.setKey(*d, frame, shown);
         tracks.insert(propId, trk);
         text = tr("Animate %1").arg(l->propertyLabel(propId));
     }

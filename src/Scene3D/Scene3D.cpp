@@ -57,7 +57,7 @@ QMatrix4x4 Node3D::localMatrix() const {
 
 bool Node3D::operator==(const Node3D& o) const {
     return id == o.id && parent == o.parent && name == o.name && kind == o.kind && visible == o.visible && position == o.position &&
-           rotation == o.rotation && scale == o.scale && mesh == o.mesh && materialOverride == o.materialOverride &&
+           rotation == o.rotation && scale == o.scale && mesh == o.mesh && materialOverride == o.materialOverride && skin == o.skin &&
            lightType == o.lightType && lightColor == o.lightColor && intensity == o.intensity && range == o.range &&
            spotAngle == o.spotAngle && fov == o.fov && nearPlane == o.nearPlane && farPlane == o.farPlane;
 }
@@ -116,6 +116,10 @@ bool Mesh::validate(QString* why) const {
         cover += p.indexCount;
     }
     (void)cover;
+    if (!joints.empty() || !weights.empty()) {
+        if (joints.size() != positions.size() || weights.size() != positions.size()) return fail("skin weight count mismatch");
+        for (const auto& w : weights) for (float f : w) if (!std::isfinite(f) || f < 0 || f > 1.0001f) return fail("invalid skin weight");
+    }
     for (const auto& v : positions) if (!std::isfinite(v.x()) || !std::isfinite(v.y()) || !std::isfinite(v.z())) return fail("non-finite vertex");
     return true;
 }
@@ -138,6 +142,7 @@ QJsonObject Mesh::toJson() const {
     o["indices"] = int(indices.size());
     o["normals"] = !normals.empty();
     o["uvs"] = !uvs.empty();
+    if (skinned()) o["skinned"] = true;
     QJsonArray pa;
     for (const auto& p : parts) {
         QJsonObject po; po["first"] = p.firstIndex; po["count"] = p.indexCount; po["material"] = p.material.toString(QUuid::WithoutBraces);
@@ -156,6 +161,10 @@ QByteArray Mesh::geometryBlob() const {
     for (const auto& n : normals) s << n.x() << n.y() << n.z();
     for (const auto& t : uvs) s << t.x() << t.y();
     for (uint32_t i : indices) s << quint32(i);
+    if (skinned()) {
+        for (const auto& j : joints) for (uint16_t v : j) s << quint16(v);
+        for (const auto& w : weights) for (float v : w) s << v;
+    }
     return b;
 }
 
@@ -168,7 +177,8 @@ std::shared_ptr<Mesh> Mesh::fromJson(const QJsonObject& o, const QByteArray& blo
     const qint64 vc = o["vertices"].toInt(-1), ic = o["indices"].toInt(-1);
     const bool hn = o["normals"].toBool(), hu = o["uvs"].toBool();
     if (vc <= 0 || ic < 0 || vc > 50000000 || ic > 200000000) return fail("mesh '" + m->name + "' has an invalid size");
-    const qint64 need = vc * 12 + (hn ? vc * 12 : 0) + (hu ? vc * 8 : 0) + ic * 4;
+    const bool hs = o["skinned"].toBool();
+    const qint64 need = vc * 12 + (hn ? vc * 12 : 0) + (hu ? vc * 8 : 0) + ic * 4 + (hs ? vc * 24 : 0);
     if (blob.size() != need) return fail("mesh '" + m->name + "' geometry is truncated or the wrong size");
     QDataStream s(blob);
     s.setByteOrder(QDataStream::LittleEndian);
@@ -179,6 +189,11 @@ std::shared_ptr<Mesh> Mesh::fromJson(const QJsonObject& o, const QByteArray& blo
     if (hu) { m->uvs.resize(size_t(vc)); for (auto& t : m->uvs) { float x, y; s >> x >> y; t = QVector2D(x, y); } }
     m->indices.resize(size_t(ic));
     for (auto& i : m->indices) { quint32 v; s >> v; i = v; }
+    if (hs) {
+        m->joints.resize(size_t(vc)); m->weights.resize(size_t(vc));
+        for (auto& j : m->joints) for (auto& v : j) { quint16 x; s >> x; v = x; }
+        for (auto& w : m->weights) for (auto& v : w) { float x; s >> x; v = std::isfinite(x) ? std::clamp(x, 0.0f, 1.0f) : 0.0f; }
+    }
     for (const auto& pv : o["parts"].toArray()) {
         const QJsonObject po = pv.toObject();
         m->parts.push_back({po["first"].toInt(), po["count"].toInt(), QUuid(po["material"].toString())});
@@ -244,11 +259,26 @@ bool Scene3D::isAncestor(const QUuid& anc, const QUuid& of) const {
 }
 bool Scene3D::sameAs(const Scene3D& o) const {
     if (nodes.size() != o.nodes.size() || materials.size() != o.materials.size() || meshes != o.meshes || textures.size() != o.textures.size()) return false;
+    if (skins.size() != o.skins.size()) return false;
+    for (size_t i = 0; i < skins.size(); ++i) if (!(skins[i] == o.skins[i])) return false;
+    if (clips.size() != o.clips.size() || placements.size() != o.placements.size()) return false;
+    for (size_t i = 0; i < clips.size(); ++i) if (!(clips[i] == o.clips[i])) return false;
+    for (size_t i = 0; i < placements.size(); ++i) if (!(placements[i] == o.placements[i])) return false;
     if (activeCamera != o.activeCamera || ambient != o.ambient || ambientIntensity != o.ambientIntensity || background != o.background) return false;
     for (size_t i = 0; i < nodes.size(); ++i) if (!(nodes[i] == o.nodes[i])) return false;
     for (size_t i = 0; i < materials.size(); ++i) if (!(materials[i] == o.materials[i])) return false;
     for (const auto& [k, img] : textures) { auto it = o.textures.find(k); if (it == o.textures.end() || it->second.cacheKey() != img.cacheKey()) return false; }
     return true;
+}
+
+const Skin* Scene3D::skinById(const QUuid& id) const {
+    for (const Skin& k : skins) if (k.id == id) return &k;
+    return nullptr;
+}
+
+const AnimClip* Scene3D::clip(const QUuid& id) const {
+    for (const AnimClip& c : clips) if (c.id == id) return &c;
+    return nullptr;
 }
 
 QString Scene3D::uniqueName(const QString& base) const {
@@ -324,6 +354,8 @@ void Scene3D::pruneUnused() {
 
 QStringList Scene3D::validate() const {
     QStringList w;
+    for (const auto& n : nodes) if (!n.skin.isNull() && !skinById(n.skin)) w << QString("node '%1' refers to a missing skin").arg(n.name);
+    for (const ClipPlacement& p : placements) if (!clip(p.clip)) w << QString("a placed animation clip refers to a missing clip");
     QSet<QUuid> ids;
     for (const auto& n : nodes) { if (ids.contains(n.id)) w << QString("duplicate node id for '%1'").arg(n.name); ids.insert(n.id); }
     for (const auto& n : nodes) {
@@ -364,6 +396,7 @@ QJsonObject Scene3D::toJson() const {
         if (n.kind == NodeKind::Mesh) {
             j["mesh"] = n.mesh.toString(QUuid::WithoutBraces);
             if (!n.materialOverride.isNull()) j["material"] = n.materialOverride.toString(QUuid::WithoutBraces);
+            if (!n.skin.isNull()) j["skin"] = n.skin.toString(QUuid::WithoutBraces);
         } else if (n.kind == NodeKind::Light) {
             j["lightType"] = lightTypeKey(n.lightType); j["color"] = colorStr(n.lightColor); j["intensity"] = n.intensity;
             j["range"] = n.range; j["spotAngle"] = n.spotAngle;
@@ -389,6 +422,38 @@ QJsonObject Scene3D::toJson() const {
     for (const auto& [id, img] : textures) te.append(id.toString(QUuid::WithoutBraces));
     o["textures"] = te;
     if (!activeCamera.isNull()) o["activeCamera"] = activeCamera.toString(QUuid::WithoutBraces);
+    if (!skins.empty()) {
+        QJsonArray ka;
+        for (const Skin& k : skins) {
+            QJsonObject j;
+            j["id"] = k.id.toString(QUuid::WithoutBraces);
+            QJsonArray ja, ma;
+            for (const QUuid& u : k.joints) ja.append(u.toString(QUuid::WithoutBraces));
+            for (const QMatrix4x4& m : k.inverseBind) for (int i = 0; i < 16; ++i) ma.append(double(m.constData()[i]));
+            j["joints"] = ja; j["inverseBind"] = ma;
+            ka.append(j);
+        }
+        o["skins"] = ka;
+    }
+    if (!clips.empty()) {
+        QJsonArray ca;
+        for (const AnimClip& c : clips) {
+            QJsonObject j;
+            j["id"] = c.id.toString(QUuid::WithoutBraces); j["name"] = c.name; j["length"] = c.length; j["tracks"] = tracksToJson(c.tracks);
+            ca.append(j);
+        }
+        o["clips"] = ca;
+    }
+    if (!placements.empty()) {
+        QJsonArray pa;
+        for (const ClipPlacement& p : placements) {
+            QJsonObject j;
+            j["id"] = p.id.toString(QUuid::WithoutBraces); j["clip"] = p.clip.toString(QUuid::WithoutBraces);
+            j["start"] = p.start; j["speed"] = p.speed; j["offset"] = p.offset; j["loop"] = p.loop; j["enabled"] = p.enabled;
+            pa.append(j);
+        }
+        o["placements"] = pa;
+    }
     o["ambient"] = colorStr(ambient); o["ambientIntensity"] = ambientIntensity; o["background"] = colorStr(background);
     return o;
 }
@@ -407,7 +472,7 @@ bool Scene3D::fromJson(const QJsonObject& o, Scene3D& out, QString* err) {
         n.visible = j["visible"].toBool(true);
         if (!readVec3(j["position"], n.position) || !readVec3(j["rotation"], n.rotation) || !readVec3(j["scale"], n.scale))
             return fail("3D node '" + n.name + "' has an invalid transform");
-        if (n.kind == NodeKind::Mesh) { n.mesh = QUuid(j["mesh"].toString()); n.materialOverride = QUuid(j["material"].toString()); }
+        if (n.kind == NodeKind::Mesh) { n.mesh = QUuid(j["mesh"].toString()); n.materialOverride = QUuid(j["material"].toString()); n.skin = QUuid(j["skin"].toString()); }
         else if (n.kind == NodeKind::Light) {
             if (!lightTypeFromKey(j["lightType"].toString("point"), n.lightType)) return fail("unknown light type");
             n.lightColor = colorFrom(j["color"].toString(), Qt::white);
@@ -434,6 +499,58 @@ bool Scene3D::fromJson(const QJsonObject& o, Scene3D& out, QString* err) {
         m.emissive = colorFrom(j["emissive"].toString(), Qt::black);
         m.doubleSided = j["doubleSided"].toBool(false);
         out.materials.push_back(m);
+    }
+    out.clips.clear(); out.placements.clear(); out.skins.clear();
+    {
+        const QJsonArray ka = o["skins"].toArray();
+        if (ka.size() > 4096) return fail("too many skins");
+        for (const auto& v : ka) {
+            const QJsonObject j = v.toObject();
+            Skin k;
+            k.id = QUuid(j["id"].toString());
+            if (k.id.isNull()) return fail("skin without a valid id");
+            const QJsonArray ja = j["joints"].toArray(), ma = j["inverseBind"].toArray();
+            if (ja.size() > 65535 || ma.size() != ja.size() * 16) return fail("skin has inconsistent joint data");
+            for (const auto& u : ja) k.joints.push_back(QUuid(u.toString()));
+            for (int mi = 0; mi < ja.size(); ++mi) {
+                QMatrix4x4 m;
+                float* d = m.data();
+                for (int i = 0; i < 16; ++i) { const double x = ma[mi * 16 + i].toDouble(i % 5 == 0 ? 1 : 0); d[i] = std::isfinite(x) ? float(x) : (i % 5 == 0 ? 1.0f : 0.0f); }
+                k.inverseBind.push_back(m);
+            }
+            out.skins.push_back(std::move(k));
+        }
+    }
+    {
+        const QJsonArray ca = o["clips"].toArray();
+        if (ca.size() > 1024) return fail("too many animation clips");
+        for (const auto& v : ca) {
+            const QJsonObject j = v.toObject();
+            AnimClip c;
+            c.id = QUuid(j["id"].toString());
+            if (c.id.isNull()) return fail("animation clip without a valid id");
+            c.name = j["name"].toString();
+            c.length = std::clamp(j["length"].toInt(0), 0, 10000000);
+            QString terr;
+            if (!tracksFromJson(j["tracks"].toObject(), c.tracks, &terr)) return fail("animation clip '" + c.name + "': " + terr);
+            out.clips.push_back(std::move(c));
+        }
+        const QJsonArray pa = o["placements"].toArray();
+        if (pa.size() > 100000) return fail("too many animation clip placements");
+        for (const auto& v : pa) {
+            const QJsonObject j = v.toObject();
+            ClipPlacement p;
+            p.id = QUuid(j["id"].toString());
+            p.clip = QUuid(j["clip"].toString());
+            if (p.id.isNull()) p.id = QUuid::createUuid();
+            p.start = std::clamp(j["start"].toInt(0), -10000000, 10000000);
+            const double sp = j["speed"].toDouble(1.0);
+            p.speed = std::isfinite(sp) ? std::clamp(sp, 0.01, 100.0) : 1.0;
+            p.offset = std::clamp(j["offset"].toInt(0), -10000000, 10000000);
+            p.loop = j["loop"].toBool(false);
+            p.enabled = j["enabled"].toBool(true);
+            out.placements.push_back(p);
+        }
     }
     out.activeCamera = QUuid(o["activeCamera"].toString());
     out.ambient = colorFrom(o["ambient"].toString(), Qt::white);
