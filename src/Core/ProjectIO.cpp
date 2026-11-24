@@ -336,6 +336,7 @@ LayerPtr layerFromJson(const QJsonObject& o, zip_t* z, const Document& doc, QStr
             if (found && img.loadFromData(png, "PNG") && !img.isNull()) l->scene3d->textures[tid] = img;
             else warnings << QString("3D scene '%1': a texture is missing or unreadable; surfaces using it are drawn untextured").arg(l->props.name);
         }
+        l->scene3d->touch();
         for (const QString& w : l->scene3d->validate()) {
             if (w.contains("ancestor") || w.contains("duplicate")) { *err = "3D scene '" + l->props.name + "': " + w; return nullptr; }
             warnings << QString("3D scene '%1': %2").arg(l->props.name, w);

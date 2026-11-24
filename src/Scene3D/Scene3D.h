@@ -88,7 +88,13 @@ struct Node3D {
     bool operator==(const Node3D& o) const;
 };
 
+// Identifies a state of a scene for render caching. Every edit that goes through the undo system takes a new one; code that
+// changes a scene directly must call Scene3D::touch().
+quint64 nextSceneRevision();
+
 struct Scene3D {
+    quint64 revision = nextSceneRevision();
+    void touch() { revision = nextSceneRevision(); }
     std::map<QUuid, std::shared_ptr<const Mesh>> meshes;
     std::map<QUuid, QImage> textures;
     std::vector<Material> materials;

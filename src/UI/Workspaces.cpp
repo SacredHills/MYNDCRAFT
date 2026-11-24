@@ -31,7 +31,7 @@ void WorkspaceManager::resetCurrent() {
     }
 }
 
-QStringList WorkspaceManager::presetNames() { return {"Drawing", "Illustration", "Animation"}; }
+QStringList WorkspaceManager::presetNames() { return {"Drawing", "Illustration", "Animation", "3D"}; }
 QStringList WorkspaceManager::customNames() const { return settings::workspaceNames(); }
 
 void WorkspaceManager::reapplyCurrent() {
@@ -72,7 +72,10 @@ void WorkspaceManager::applyPreset(const QString& name) {
     QDockWidget* exs = m_docks["exposure"];
     QDockWidget* oni = m_docks["onion"];
     QDockWidget* prp = m_docks["properties"];
-    for (QDockWidget* d : {opt, sty, lay, his, tim, exs, oni, prp}) { if (d) m_win->removeDockWidget(d); }
+    QDockWidget* s3d = m_docks.value("scene3d");
+    QDockWidget* v3d = m_docks.value("viewport3d");
+    for (QDockWidget* d : {opt, sty, lay, his, tim, exs, oni, prp, s3d, v3d}) { if (d) m_win->removeDockWidget(d); }
+    if (name != "3D") for (QDockWidget* d : {s3d, v3d}) if (d) d->hide();       // still available from the Window menu
     if (name != "Animation") for (QDockWidget* d : {tim, exs, oni, prp}) if (d) d->hide();   // still available from the Window menu
     if (QToolBar* tb = m_win->findChild<QToolBar*>("tools")) { tb->show(); m_win->addToolBar(Qt::LeftToolBarArea, tb); }
 
@@ -105,6 +108,27 @@ void WorkspaceManager::applyPreset(const QString& name) {
         m_win->resizeDocks({tim}, {210}, Qt::Vertical);
         m_win->resizeDocks({opt, exs}, {250, 270}, Qt::Horizontal);
         m_win->resizeDocks({exs, lay}, {330, 220}, Qt::Vertical);
+    } else if (name == "3D") {
+        // 3D view on the right with the layers below it; scene hierarchy + inspector (tabbed with tool options) on the left; timeline below.
+        m_win->addDockWidget(Qt::LeftDockWidgetArea, s3d);
+        m_win->addDockWidget(Qt::LeftDockWidgetArea, opt);
+        m_win->tabifyDockWidget(s3d, opt);
+        m_win->addDockWidget(Qt::LeftDockWidgetArea, prp);
+        m_win->tabifyDockWidget(opt, prp);
+        m_win->addDockWidget(Qt::RightDockWidgetArea, v3d);
+        m_win->addDockWidget(Qt::RightDockWidgetArea, lay);
+        m_win->splitDockWidget(v3d, lay, Qt::Vertical);
+        m_win->addDockWidget(Qt::RightDockWidgetArea, his);
+        m_win->tabifyDockWidget(lay, his);
+        m_win->addDockWidget(Qt::BottomDockWidgetArea, tim);
+        for (auto* d : {s3d, opt, prp, v3d, lay, his, tim}) d->show();
+        s3d->raise(); lay->raise();
+        m_win->resizeDocks({tim}, {200}, Qt::Vertical);
+        m_win->resizeDocks({s3d, v3d}, {300, 520}, Qt::Horizontal);
+        m_win->resizeDocks({v3d, lay}, {420, 160}, Qt::Vertical);
+        if (sty) sty->hide();
+        if (exs) exs->hide();
+        if (oni) oni->hide();
     } else {  // Illustration: options on the left, layers + history (tabbed) on the right
         m_win->addDockWidget(Qt::LeftDockWidgetArea, opt);
         m_win->addDockWidget(Qt::LeftDockWidgetArea, sty);

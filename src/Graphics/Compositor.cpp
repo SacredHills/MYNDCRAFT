@@ -1,5 +1,8 @@
 #include "Graphics/Compositor.h"
 
+#include <mutex>
+#include <vector>
+
 #include "Scene3D/Render3D.h"
 
 namespace mynd {
@@ -118,9 +121,26 @@ void Compositor::drawAnimationLayer(QPainter& p, const Layer& l, const QRect& re
 
 void Compositor::drawScene3D(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx) {
     if (!l.scene3d || canvas.isEmpty()) return;
-    RenderOptions ro;
-    ro.supersample = ctx.ss3d;
-    const QImage img = renderScene(*l.scene3d, sceneCamera(*l.scene3d, double(canvas.width()) / canvas.height()), canvas, ro);
+    int ss = ctx.ss3d;
+    if (ss <= 0) ss = (qint64(canvas.width()) * canvas.height() <= 1200000) ? 2 : 1;
+    // The software renderer draws the whole canvas, so keep the last few results: repaints of other layers, partial redraws and
+    // scrubbing over frames where the scene did not change are free.
+    struct Entry { quint64 rev; QSize size; int ss; QImage img; };
+    static std::mutex mu;
+    static std::vector<Entry> cache;
+    QImage img;
+    {
+        std::lock_guard<std::mutex> lock(mu);
+        for (const Entry& e : cache) if (e.rev == l.scene3d->revision && e.size == canvas && e.ss == ss) { img = e.img; break; }
+    }
+    if (img.isNull()) {
+        RenderOptions ro;
+        ro.supersample = ss;
+        img = renderScene(*l.scene3d, sceneCamera(*l.scene3d, double(canvas.width()) / canvas.height()), canvas, ro);
+        std::lock_guard<std::mutex> lock(mu);
+        cache.insert(cache.begin(), Entry{l.scene3d->revision, canvas, ss, img});
+        if (cache.size() > 4) cache.pop_back();
+    }
     p.drawImage(region.topLeft(), img, region);
 }
 

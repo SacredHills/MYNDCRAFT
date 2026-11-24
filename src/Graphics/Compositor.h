@@ -29,7 +29,7 @@ public:
         bool includeBackground = true;
         int frame = -1;          // -1 = the document's current frame
         OnionSkin onion;
-        int scene3dSupersample = 1;   // 2 = anti-aliased 3D (export); 1 keeps editing responsive
+        int scene3dSupersample = 0;   // 0 = automatic (2x anti-aliasing unless the canvas is large), 1 = fastest, 2 = anti-aliased (export)
     };
     struct Ctx { int frame; const OnionSkin* onion; const SymbolResolver* syms = nullptr; int depth = 0; int ss3d = 1; };
     static QImage render(const Document& doc, const QRect& region, const Options& opt);

@@ -13,6 +13,9 @@ class QDropEvent;
 #include "UI/CanvasView.h"
 #include "UI/AnimationActions.h"
 #include "UI/SymbolActions.h"
+#include "UI/Scene3DActions.h"
+#include "UI/Scene3DPanel.h"
+#include "UI/Viewport3D.h"
 #include "UI/EditorSession.h"
 #include "UI/Panels.h"
 #include "UI/Workspaces.h"
@@ -32,6 +35,10 @@ public:
     WorkspaceManager* workspaces() const { return m_workspaces; }
     AnimationActions* animation() const { return m_anim; }
     SymbolActions* symbols() const { return m_symbolActions; }
+    Scene3DActions* scene3d() const { return m_scene3dActions; }
+    Viewport3D* viewport3d() const { return m_viewport3d; }
+    Scene3DPanel* scene3dPanel() const { return m_scene3dPanel; }
+    void show3DPanels();
     Autosaver* autosaver() const { return m_autosave; }
 
     // Non-interactive API (used by menu handlers after dialogs, by tests and by command line).
@@ -79,6 +86,9 @@ private:
     WorkspaceManager* m_workspaces = nullptr;
     AnimationActions* m_anim = nullptr;
     SymbolActions* m_symbolActions = nullptr;
+    Scene3DActions* m_scene3dActions = nullptr;
+    Viewport3D* m_viewport3d = nullptr;
+    Scene3DPanel* m_scene3dPanel = nullptr;
     QLabel* m_crumb = nullptr;
     QToolButton* m_crumbExit = nullptr;
     QAction* m_crumbExitAction = nullptr;

@@ -116,6 +116,7 @@ void Scene3DCommand::apply(const Scene3D& s) {
     Layer* l = m_doc->findLayer(m_layer);
     if (!l || !l->scene3d) return;
     *l->scene3d = s;
+    l->scene3d->touch();
     m_doc->emitScene3DChanged(m_layer);
 }
 void Scene3DCommand::redo() { apply(*m_after); }

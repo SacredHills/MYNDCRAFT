@@ -65,6 +65,11 @@ public:
     QUuid activeLayerId() const { return m_activeLayer; }
     Layer* activeLayer() const { return m_doc ? m_doc->findLayer(m_activeLayer) : nullptr; }
     void setActiveLayer(const QUuid& id);
+    // ---- 3D ----
+    // The 3D scene layer the 3D panels edit: the active layer when it is a 3D scene, otherwise null.
+    Layer* active3DLayer() const { Layer* l = activeLayer(); return l && l->type == LayerType::Scene3D && l->scene3d ? l : nullptr; }
+    QUuid selectedNode() const { return m_node; }          // a node of the active 3D layer's scene (null = none)
+    void setSelectedNode(const QUuid& id);
     // Returns the active layer if it has the requested type and is editable; otherwise (optionally)
     // creates one above the active layer. Emits message() when it cannot edit.
     Layer* editableLayer(LayerType t, bool autoCreate);
@@ -188,6 +193,7 @@ public:
 signals:
     void documentChanged();
     void activeLayerChanged(const QUuid& id);
+    void nodeSelectionChanged(const QUuid& id);
     void selectionChanged();
     void toolChanged(ToolId t);
     void colorsChanged();
@@ -206,6 +212,7 @@ signals:
 private:
     Document* m_doc = nullptr;
     QUuid m_activeLayer;
+    QUuid m_node;
     QSet<QUuid> m_selected;
     ToolId m_tool = ToolId::Brush;
     QColor m_fg = Qt::black, m_bg = Qt::white;

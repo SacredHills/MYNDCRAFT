@@ -209,6 +209,33 @@ Limitations (honest list):
 - Independent symbol timelines: Movie Clips loop on their own, Graphics follow the parent (see above).
 - No visual tween span in the timeline yet.
 
+## Phase 6 — 3D scene editor (implemented, headless-tested; not yet hand-tested on Windows)
+- **3D scene layers** (3D menu → New 3D Scene Layer, or just import a model / add a primitive). A scene has a node hierarchy
+  (groups, meshes, lights, cameras), materials, textures and a scene camera. The layer is rendered through the scene camera
+  into the composition like any other layer (transform, opacity, blend mode, undo, save/load all work). Project format v5.
+- **Renderer:** our own CPU renderer (no GPU, identical everywhere, usable headless): perspective camera, z-buffer, per-pixel
+  Blinn-Phong lighting with metallic/roughness-style materials, bilinear base-colour textures, directional/point/spot lights
+  (+ ambient), 2x anti-aliasing (automatic below ~1.2 MP, always for export), render cache. **Not** supported: shadows,
+  reflections/environment maps, normal/roughness/emissive maps, transparency sorting, skinning. Speed is software speed:
+  fine for modest models, slow for very heavy ones.
+- **Importers:** glTF 2.0 / GLB (hierarchy, TRS or matrix, PBR base colour/metal/rough factors, base-colour textures,
+  cameras, KHR lights; Draco/meshopt compressed files are refused with a message), Wavefront OBJ + MTL (polygons, negative
+  indices, per-object nodes, Kd/Ke/Ns/d, map_Kd), binary FBX 7.1-7.7 (geometry with normals/UVs/materials per polygon, hierarchy,
+  Lcl/Pre rotation, scale, diffuse colour + texture; Z-up files are rotated). **FBX limits:** ASCII FBX, cameras, lights,
+  skeletons/skins and animation are not imported; units are kept as in the file (FBX is usually centimetres, rescale the root
+  group). glTF animation/skins are ignored with a warning (Phase 7). Every importer range-checks its input and was fuzzed with
+  random corruption (also under ASan/UBSan). The importers have only been tested with files we generate ourselves
+  and the formats' documentation - not with a large collection of real-world exports.
+- **3D View** (dock, "3D" workspace): orbit (Alt+drag / right drag), pan (Shift+Alt+drag), wheel zoom, F to frame, click to
+  select, Move / Rotate / Scale gizmos (W/E/R; Ctrl snaps), a "Camera View" that shows exactly what the composition gets.
+  Move/Rotate use world axes, Scale uses the node's own axes (centre handle = uniform).
+- **3D Scene** (dock): hierarchy tree (visibility checkbox, drag onto a node to re-parent, context menu), Import Model, Add
+  (cube, sphere, plane, cylinder, point/directional/spot light, camera, group), and an inspector: transform, material
+  (colour, roughness, metallic, emissive, double-sided, base texture), light, camera, scene (ambient, background, scene camera).
+- Importing a model into a scene with no light/camera adds a directional light and a camera framing the model.
+- Not done in Phase 6 (by design): modelling tools, animation of 3D properties (Phase 7), instancing/duplicated meshes share
+  geometry by copy, no mesh editing, no shadow casting.
+
 ## Next tasks
 Visual tween spans in the timeline, swapping an instance's symbol, per-instance Movie Clip play/stop.
 Also: re-evaluate renderer choice (Skia vs. QPainter) and add a frame cache before the GPU/3D work.

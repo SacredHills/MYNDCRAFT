@@ -4,10 +4,16 @@
 #include <QDataStream>
 #include <QJsonArray>
 #include <QSet>
+#include <atomic>
 #include <cmath>
 #include <functional>
 
 namespace mynd {
+
+quint64 nextSceneRevision() {
+    static std::atomic<quint64> counter{1};
+    return counter.fetch_add(1);
+}
 
 // ============================================================ keys
 QString nodeKindKey(NodeKind k) {
@@ -424,6 +430,7 @@ bool Scene3D::fromJson(const QJsonObject& o, Scene3D& out, QString* err) {
     out.ambient = colorFrom(o["ambient"].toString(), Qt::white);
     out.ambientIntensity = std::clamp(o["ambientIntensity"].toDouble(0.25), 0.0, 10.0);
     out.background = colorFrom(o["background"].toString(), QColor(0, 0, 0, 0));
+    out.touch();
     return true;
 }
 

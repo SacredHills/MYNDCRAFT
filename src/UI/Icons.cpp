@@ -121,6 +121,10 @@ QIcon layerType(LayerType t) {
         } else if (t == LayerType::Symbol) {      // two stacked frames with a dot: a reusable component
             p.drawRect(QRectF(3.5, 3.5, 12, 12)); p.drawRect(QRectF(8.5, 8.5, 12, 12));
             p.setBrush(c); p.drawEllipse(QPointF(14.5, 14.5), 2.2, 2.2);
+        } else if (t == LayerType::Scene3D) {     // a cube
+            QPolygonF top; top << QPointF(12, 3.5) << QPointF(19.5, 7.5) << QPointF(12, 11.5) << QPointF(4.5, 7.5);
+            p.drawPolygon(top);
+            p.drawLine(4.5, 7.5, 4.5, 16.5); p.drawLine(4.5, 16.5, 12, 20.5); p.drawLine(12, 20.5, 19.5, 16.5); p.drawLine(19.5, 16.5, 19.5, 7.5); p.drawLine(12, 11.5, 12, 20.5);
         } else {
             QPainterPath f; f.moveTo(3.5, 7); f.lineTo(9, 7); f.lineTo(11, 9); f.lineTo(20.5, 9);
             f.lineTo(20.5, 19.5); f.lineTo(3.5, 19.5); f.closeSubpath(); p.drawPath(f);

@@ -3,6 +3,9 @@
 #include "UI/MainWindow.h"
 #include "UI/GraphEditor.h"
 #include "UI/SymbolPanel.h"
+#include "UI/Scene3DActions.h"
+#include "UI/Scene3DPanel.h"
+#include "UI/Viewport3D.h"
 #include <QTabWidget>
 #include <QLabel>
 #include <QToolButton>
@@ -450,6 +453,17 @@ void MainWindow::buildToolbars() {
     updateBreadcrumb();
 }
 
+// Brings the 3D panels up (placing them if the current workspace never had them).
+void MainWindow::show3DPanels() {
+    QDockWidget* sc = m_docks.value("scene3d");
+    QDockWidget* vp = m_docks.value("viewport3d");
+    if (!sc || !vp) return;
+    if (!vp->isVisible() && dockWidgetArea(vp) == Qt::NoDockWidgetArea) addDockWidget(Qt::RightDockWidgetArea, vp);
+    if (!sc->isVisible() && dockWidgetArea(sc) == Qt::NoDockWidgetArea) addDockWidget(Qt::LeftDockWidgetArea, sc);
+    sc->show(); vp->show();
+    sc->raise(); vp->raise();
+}
+
 void MainWindow::updateBreadcrumb() {
     const Document* d = m_session ? m_session->doc() : nullptr;
     const bool inside = d && d->editingSymbol();
@@ -477,6 +491,8 @@ void MainWindow::buildDocks() {
     mkDock("history", tr("History"), new HistoryPanel(m_session));
     m_anim = new AnimationActions(m_session, this);
     m_symbolActions = new SymbolActions(m_session, this);
+    m_scene3dActions = new Scene3DActions(m_session, this);
+    connect(m_scene3dActions, &Scene3DActions::sceneLayerActivated, this, &MainWindow::show3DPanels);
     {
         // The graph editor lives in a tab next to the timeline (same dock: saved layouts stay valid).
         auto* tabs = new QTabWidget;
@@ -490,6 +506,10 @@ void MainWindow::buildDocks() {
     mkDock("exposure", tr("Exposure Sheet"), new ExposureSheetPanel(m_session, m_anim));
     mkDock("onion", tr("Onion Skin"), new OnionSkinPanel(m_session));
     mkDock("properties", tr("Properties"), new PropertiesPanel(m_session, m_anim));
+    m_scene3dPanel = new Scene3DPanel(m_session, m_scene3dActions);
+    m_viewport3d = new Viewport3D(m_session, m_scene3dActions);
+    mkDock("scene3d", tr("3D Scene"), m_scene3dPanel)->hide();
+    mkDock("viewport3d", tr("3D View"), m_viewport3d)->hide();
     m_workspaces = new WorkspaceManager(this, m_docks, this);
     connect(m_workspaces, &WorkspaceManager::changed, this, &MainWindow::rebuildWorkspaceMenu);
 }
@@ -547,6 +567,7 @@ void MainWindow::buildMenus() {
     QMenu* anim = menuBar()->addMenu(tr("&Animation"));
     m_anim->fillMenu(anim);
     m_symbolActions->fillMenu(menuBar()->addMenu(tr("&Symbol")));
+    m_scene3dActions->fillMenu(menuBar()->addMenu(tr("&3D")));
 
     QMenu* win = menuBar()->addMenu(tr("&Window"));
     m_workspaceMenu = win->addMenu(tr("&Workspace"));

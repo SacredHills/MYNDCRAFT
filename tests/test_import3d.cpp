@@ -244,6 +244,39 @@ private slots:
         QCOMPARE(s.materials.size(), size_t(1));
     }
 
+    void randomlyDamagedFilesNeverCrashOrYieldInvalidScenes() {
+        QByteArray gltfJson;
+        { QByteArray buf = triangleBuffer(); gltfJson = QJsonDocument(triangleGltf(QJsonObject{{"byteLength", buf.size()}, {"uri", "data:application/octet-stream;base64," + QString::fromLatin1(buf.toBase64())}})).toJson(QJsonDocument::Compact); }
+        QByteArray glb;
+        { QByteArray buf = triangleBuffer(); QByteArray json = QJsonDocument(triangleGltf(QJsonObject{{"byteLength", buf.size()}})).toJson(QJsonDocument::Compact); while (json.size() % 4) json.append(' ');
+          glb = QByteArray("glTF") + raw(quint32(2)) + raw(quint32(12 + 8 + json.size() + 8 + buf.size())) + raw(quint32(json.size())) + raw(quint32(0x4E4F534A)) + json + raw(quint32(buf.size())) + raw(quint32(0x004E4942)) + buf; }
+        const QByteArray obj = "mtllib none.mtl\no A\nv 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 1 1\nvn 0 0 1\nusemtl X\nf 1/1/1 2/2/1 3/3/1 4/1/1\nf -1 -2 -3\n";
+        const std::vector<std::pair<int, QByteArray>> seeds = {{0, obj}, {1, gltfJson}, {2, glb}, {3, cubeFbx(7400, true)}, {3, cubeFbx(7500, false)}};
+        QRandomGenerator rng(12345);
+        int accepted = 0;
+        for (const auto& [kind, base] : seeds) for (int iter = 0; iter < 400; ++iter) {
+            QByteArray d = base;
+            const int edits = 1 + int(rng.bounded(8));
+            for (int e = 0; e < edits && !d.isEmpty(); ++e) {
+                switch (rng.bounded(4)) {
+                case 0: d[int(rng.bounded(quint32(d.size())))] = char(rng.bounded(256)); break;
+                case 1: d.truncate(int(rng.bounded(quint32(d.size()) + 1))); break;
+                case 2: { const int at = int(rng.bounded(quint32(d.size()))); d.insert(at, QByteArray(int(rng.bounded(16)), char(rng.bounded(256)))); break; }
+                default: { const int at = int(rng.bounded(quint32(d.size()))); d.remove(at, int(rng.bounded(8))); break; }
+                }
+            }
+            ImportResult r = kind == 0 ? importObjData(d, ".", "f") : kind == 1 || kind == 2 ? importGltfData(d, ".", "f") : importFbxData(d, ".", "f");
+            if (!r) { QVERIFY(!r.error.isEmpty()); continue; }
+            ++accepted;
+            QVERIFY2(r.scene->validate().isEmpty(), qPrintable(r.scene->validate().join(";")));
+            for (const auto& [id, m] : r.scene->meshes) { QString why; QVERIFY2(m->validate(&why), qPrintable(why)); }
+            Scene3D dst; mergeImport(dst, *r.scene);                                   // and the result must be usable
+            QVERIFY(dst.validate().isEmpty());
+            renderScene(dst, frameScene(dst, 1.0), QSize(32, 32));
+        }
+        QVERIFY(accepted > 100);                                                       // many mutations are harmless, so the importers are not just rejecting everything
+    }
+
     void dispatchByExtensionAndMissingFiles() {
         QVERIFY(!importModelFile("/nonexistent/thing.glb"));
         QTemporaryDir dir; QFile f(dir.filePath("x.stl")); f.open(QIODevice::WriteOnly); f.write("solid"); f.close();

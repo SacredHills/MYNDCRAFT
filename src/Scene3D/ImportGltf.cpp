@@ -296,7 +296,8 @@ ImportResult importGltfData(const QByteArray& data, const QString& baseDir, cons
     for (int i = 0; i < nodes.size(); ++i) for (const auto& cv : nodes[i].toObject()["children"].toArray()) { const int ci = cv.toInt(-1); if (ci >= 0 && ci < nodes.size()) isChild[size_t(ci)] = true; }
     std::vector<int> visiting(size_t(nodes.size()), 0);
     std::function<void(int, const QUuid&, int)> build = [&](int i, const QUuid& parent, int depth) {
-        if (i < 0 || i >= nodes.size() || depth > 128 || visiting[size_t(i)]) { if (visiting[size_t(i < 0 || i >= nodes.size() ? 0 : i)]) r.warnings << QObject::tr("A node is referenced twice (or loops); the repeat was ignored."); return; }
+        if (i < 0 || i >= nodes.size() || depth > 128) return;
+        if (visiting[size_t(i)]) { r.warnings << QObject::tr("A node is referenced twice (or loops); the repeat was ignored."); return; }
         visiting[size_t(i)] = 1;
         const QJsonObject no = nodes[i].toObject();
         Node3D n;

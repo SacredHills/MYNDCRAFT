@@ -60,6 +60,7 @@ void EditorSession::setDocument(Document* d) {
     m_selected.clear();
     m_keySel.clear();
     m_activeLayer = {};
+    m_node = {};
     if (d) {
         connect(d, &Document::tracksChanged, this, [this] {
             // keep the keyframe selection valid when keys disappear (delete / undo)
@@ -71,7 +72,12 @@ void EditorSession::setDocument(Document* d) {
             }
             if (keep.size() != m_keySel.size()) { m_keySel = keep; emit keySelectionChanged(); }
         });
+        connect(d, &Document::scene3DChanged, this, [this] {      // the selected node may have been deleted / undone away
+            const Layer* l = active3DLayer();
+            if (!m_node.isNull() && (!l || !l->scene3d->node(m_node))) setSelectedNode({});
+        });
         connect(d, &Document::contextChanged, this, [this] {      // entered/left a symbol: nothing selected carries over
+            setSelectedNode({});
             clearFrameSelection();
             m_selected.clear();
             if (!m_keySel.isEmpty()) { m_keySel.clear(); emit keySelectionChanged(); }
@@ -87,6 +93,7 @@ void EditorSession::setDocument(Document* d) {
                 Layer* pick = nullptr;
                 Document::forEachLayer(m_doc->root(), [&](Layer* l) { pick = l; });
                 m_activeLayer = pick ? pick->id : QUuid();
+                setSelectedNode({});
                 m_selected.clear();
                 emit activeLayerChanged(m_activeLayer);
                 emit selectionChanged();
@@ -98,9 +105,16 @@ void EditorSession::setDocument(Document* d) {
     emit selectionChanged();
 }
 
+void EditorSession::setSelectedNode(const QUuid& id) {
+    if (id == m_node) return;
+    m_node = id;
+    emit nodeSelectionChanged(id);
+}
+
 void EditorSession::setActiveLayer(const QUuid& id) {
     if (id == m_activeLayer) return;
     m_activeLayer = id;
+    setSelectedNode({});
     if (!m_selLayer.isNull() && m_selLayer != id) clearFrameSelection();
     m_selected.clear();
     emit activeLayerChanged(id);

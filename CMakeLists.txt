@@ -71,6 +71,9 @@ add_library(myndui STATIC
   src/UI/GraphEditor.cpp
   src/UI/SymbolActions.cpp
   src/UI/SymbolPanel.cpp
+  src/UI/Scene3DActions.cpp
+  src/UI/Scene3DPanel.cpp
+  src/UI/Viewport3D.cpp
   src/UI/Workspaces.cpp
   src/UI/MainWindow.cpp
 )
@@ -109,3 +112,4 @@ myndcraft_test(test_compositor)
 myndcraft_test(test_ui_workflow)
 myndcraft_test(test_ui_animation)
 myndcraft_test(test_ui_keyframes)
+myndcraft_test(test_ui_3d)
