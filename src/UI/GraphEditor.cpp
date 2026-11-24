@@ -229,10 +229,31 @@ void GraphCanvas::paintEvent(QPaintEvent*) {
         }
     }
     p.setClipping(false);
-    p.setPen(QColor(0x99, 0x99, 0x9e));
-    QString legend = m_mode == Mode::Speed ? tr("Speed (units per frame)") : d->label;
-    if (m_mode == Mode::Value) for (int c = 0; c < n; ++c) legend += QString("   %1").arg(c < d->componentNames.size() ? d->componentNames[c] : QString::number(c + 1));
-    p.drawText(QPointF(m_left, height() - 4), legend);
+    // Legend: a coloured swatch per curve with a plain-language name, along the bottom.
+    {
+        QFont lf = font(); lf.setBold(true); p.setFont(lf);
+        const QFontMetrics fm(lf);
+        QStringList names; QVector<QColor> cols;
+        if (m_mode == Mode::Speed) { names << tr("Speed (units per frame)"); cols << QColor(0xe0, 0x9a, 0x3a); }
+        else for (int c = 0; c < n; ++c) {
+            const QString nm = c < d->componentNames.size() ? d->componentNames[c] : QString::number(c + 1);
+            QString hint;
+            if (d->id == "transform.position" || d->id == "transform.anchor") hint = c == 0 ? tr(" (left / right)") : tr(" (up / down)");
+            else if (d->id == "transform.scale") hint = c == 0 ? tr(" (width)") : tr(" (height)");
+            names << (n > 1 ? QString("%1 %2%3").arg(d->label, nm, hint) : d->label);
+            cols << kComp[c];
+        }
+        int x = m_left;
+        const int base = height() - 5;
+        for (int i = 0; i < names.size(); ++i) {
+            p.setBrush(cols[i]); p.setPen(Qt::NoPen);
+            p.drawRect(QRectF(x, base - 9, 10, 10));
+            x += 14;
+            p.setPen(cols[i]);
+            p.drawText(QPointF(x, base), names[i]);
+            x += fm.horizontalAdvance(names[i]) + 18;
+        }
+    }
 }
 
 void GraphCanvas::mousePressEvent(QMouseEvent* e) {
