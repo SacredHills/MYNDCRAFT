@@ -46,6 +46,8 @@ add_library(myndcore STATIC
   src/Drawing/BrushEngine.cpp
   src/Drawing/FloodFill.cpp
   src/Graphics/Compositor.cpp
+  src/Scene3D/Scene3D.cpp
+  src/Scene3D/Render3D.cpp
 )
 target_include_directories(myndcore PUBLIC src)
 target_link_libraries(myndcore PUBLIC Qt6::Core Qt6::Gui ${MYND_ZIP_TARGET})
@@ -93,6 +95,7 @@ myndcraft_test(test_animation)
 myndcraft_test(test_playback)
 myndcraft_test(test_property)
 myndcraft_test(test_symbols)
+myndcraft_test(test_scene3d)
 myndcraft_test(test_export)
 myndcraft_test(test_document)
 myndcraft_test(test_projectio)
