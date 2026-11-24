@@ -225,8 +225,6 @@ void MainWindow::showEvent(QShowEvent* e) {
         if (cur.isEmpty()) return;
         m_workspaces->reapplyCurrent();
         if (m_canvas) m_canvas->updateGeometry();
-        QResizeEvent re(size(), size());
-        QCoreApplication::sendEvent(this, &re);
     });
 }
 

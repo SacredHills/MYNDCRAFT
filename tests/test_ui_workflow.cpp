@@ -332,6 +332,23 @@ private slots:
         QCOMPARE(v->shapes[0].fill.type, Paint::Solid);
     }
 
+    void startingWithSavedLayoutAndGeometryShowsWithoutCrashing() {
+        w->show(); QApplication::processEvents();
+        w->workspaces()->apply("Illustration");
+        w->workspaces()->saveCurrent();
+        settings::setWindowGeometry(w->saveGeometry());
+        w->document()->markSaved(); w->close(); w.reset();
+        auto w2 = std::make_unique<MainWindow>();
+        w2->show();
+        QTest::qWait(50);                                       // lets the deferred layout re-apply run
+        QApplication::processEvents();
+        QVERIFY(w2->isVisible());
+        QCOMPARE(w2->workspaces()->current(), QString("Illustration"));
+        w2->document()->markSaved(); w2->close();
+        for (const QString& n : WorkspaceManager::presetNames()) settings::removePresetLayout(n);
+        w = std::make_unique<MainWindow>();
+    }
+
     void panelsCanBeStackedAndEachWorkspaceRemembersItsArrangement() {
         auto* ws = w->workspaces();
         QVERIFY(ws->apply("Illustration"));
