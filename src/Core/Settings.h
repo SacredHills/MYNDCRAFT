@@ -1,4 +1,5 @@
 #pragma once
+#include <QRect>
 #include <QByteArray>
 #include <QString>
 #include <QStringList>
@@ -28,6 +29,9 @@ QByteArray presetLayout(const QString& name);   // user's rearranged layout of a
 void savePresetLayout(const QString& name, const QByteArray& state);
 void removePresetLayout(const QString& name);
 QString lastWorkspace();
+// Where the canvas panel was floating in a workspace (empty rect = docked in the middle).
+QRect canvasFloatRect(const QString& workspace);
+void setCanvasFloatRect(const QString& workspace, const QRect& r);
 void setLastWorkspace(const QString& n);
 
 QString autosaveDir();

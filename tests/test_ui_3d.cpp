@@ -540,6 +540,45 @@ private slots:
         QVERIFY(w->canvas()->isVisible());
     }
 
+    void theMainCanvasIsAPanelThatFloatsAndIsRememberedPerWorkspace() {
+        QDockWidget* cd = w->canvasDock();
+        QVERIFY(cd && !cd->isFloating());
+        QVERIFY(w->canvas()->parentWidget() == cd);
+        for (const QString& n : WorkspaceManager::presetNames()) {      // docked in the middle of every workspace, with real room
+            w->workspaces()->apply(n); QApplication::processEvents();
+            QVERIFY2(!cd->isFloating() && w->canvas()->width() > 200 && w->canvas()->height() > 150, qPrintable(n));
+        }
+        w->workspaces()->apply("Drawing"); QApplication::processEvents();
+        cd->setFloating(true);                                          // what dragging the title bar out does
+        cd->setGeometry(QRect(200, 200, 700, 500));
+        QApplication::processEvents();
+        QVERIFY(cd->isFloating() && w->canvas()->width() > 200);
+        // the timeline and other panels still resize: the outer layout does not depend on the canvas
+        w->workspaces()->apply("Animation"); QApplication::processEvents();
+        QVERIFY(!cd->isFloating());                                     // Animation never had it floating
+        QVERIFY(w->canvas()->width() > 200);
+        auto* tl = w->findChild<QDockWidget*>("dock.timeline");
+        const int h0 = tl->height();
+        w->resizeDocks({tl}, {h0 + 80}, Qt::Vertical);
+        QApplication::processEvents();
+        QVERIFY(tl->height() != h0);
+        w->workspaces()->apply("Drawing"); QApplication::processEvents();
+        QVERIFY(cd->isFloating());                                      // Drawing remembered it
+        // paint through the floating canvas
+        const QUuid L = doc->addLayer(LayerType::Raster, "R"); s->setActiveLayer(L);
+        s->setForeground(Qt::black); s->setTool(ToolId::Brush);
+        const QPoint a = w->canvas()->docToView().map(QPointF(50, 50)).toPoint(), b = w->canvas()->docToView().map(QPointF(150, 50)).toPoint();
+        QTest::mousePress(w->canvas(), Qt::LeftButton, {}, a);
+        QTest::mouseMove(w->canvas(), (a + b) / 2);
+        QTest::mouseMove(w->canvas(), b);
+        QTest::mouseRelease(w->canvas(), Qt::LeftButton, {}, b);
+        QVERIFY(doc->undoStack()->count() > 0);
+        cd->setFloating(false);                                         // dock it back
+        QApplication::processEvents();
+        QVERIFY(!cd->isFloating() && w->canvas()->width() > 200);
+        for (const QString& n : WorkspaceManager::presetNames()) settings::setCanvasFloatRect(n, QRect());
+    }
+
     void rotateAndScaleGizmosWork() {
         const QUuid cube = buildScene();
         vp->setMode(Viewport3D::Mode::Rotate);

@@ -31,6 +31,7 @@ public:
     Document* document() const { return m_doc.get(); }
     EditorSession* session() const { return m_session; }
     CanvasView* canvas() const { return m_canvas; }
+    QDockWidget* canvasDock() const { return m_canvasDock; }
     CanvasView* openCanvasWindow();    // another view of the document in its own movable window (any screen); the main canvas stays in every workspace
     int canvasWindowCount() const { return int(m_extraCanvases.size()); }
     LayerPanel* layerPanel() const { return m_layers; }
@@ -85,6 +86,10 @@ private:
     std::unique_ptr<Document> m_doc;
     EditorSession* m_session;
     CanvasView* m_canvas;
+    QDockWidget* m_canvasDock = nullptr;      // the canvas is a panel inside the central area: drag its title bar to float it, drag it back to dock it
+    bool m_applyingCanvas = false;
+    void rememberCanvasPlacement();
+    void applyCanvasPlacement();
     QList<CanvasView*> m_extraCanvases;
     QAction* aDetachCanvas = nullptr;
     LayerPanel* m_layers;

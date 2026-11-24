@@ -55,7 +55,21 @@ MainWindow::MainWindow() {
     resize(1500, 900);
     m_session = new EditorSession(this);
     m_canvas = new CanvasView(m_session, this);
-    setCentralWidget(m_canvas);
+    {   // The canvas is a dock panel (movable, floatable like the others) inside a small inner window that fills the middle. Sizing is trivial
+        // there (one panel, nothing else), and the outer panel layout never depends on the canvas.
+        auto* host = new QMainWindow(this);
+        host->setObjectName("canvasHost");
+        host->setWindowFlags(Qt::Widget);
+        auto* ph = new QWidget(host);
+        ph->setMaximumSize(0, 0);
+        host->setCentralWidget(ph);
+        m_canvasDock = new QDockWidget(tr("Canvas"), host);
+        m_canvasDock->setObjectName("dock.canvas");
+        m_canvasDock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);   // never closable
+        m_canvasDock->setWidget(m_canvas);
+        host->addDockWidget(Qt::TopDockWidgetArea, m_canvasDock);
+        setCentralWidget(host);
+    }
     m_autosave = new Autosaver(this);
     m_autosave->setEnabled(settings::autosaveEnabled());
     m_autosave->setInterval(settings::autosaveIntervalSeconds());
@@ -486,6 +500,26 @@ CanvasView* MainWindow::openCanvasWindow() {
     return cv;
 }
 
+// Each workspace remembers whether the canvas panel was floating (and where).
+void MainWindow::rememberCanvasPlacement() {
+    if (!m_workspaces || m_workspaces->current().isEmpty() || m_applyingCanvas) return;
+    settings::setCanvasFloatRect(m_workspaces->current(), m_canvasDock->isFloating() ? m_canvasDock->geometry() : QRect());
+}
+
+void MainWindow::applyCanvasPlacement() {
+    if (!m_workspaces) return;
+    const QRect r = settings::canvasFloatRect(m_workspaces->current());
+    m_applyingCanvas = true;
+    if (r.isEmpty()) {
+        if (m_canvasDock->isFloating()) m_canvasDock->setFloating(false);
+    } else {
+        if (!m_canvasDock->isFloating()) m_canvasDock->setFloating(true);
+        m_canvasDock->setGeometry(r);
+        m_canvasDock->show();
+    }
+    m_applyingCanvas = false;
+}
+
 // Brings the 3D panels up (placing them if the current workspace never had them).
 void MainWindow::show3DPanels() {
     QDockWidget* sc = m_docks.value("scene3d");
@@ -545,6 +579,9 @@ void MainWindow::buildDocks() {
     mkDock("scene3d", tr("3D Scene"), m_scene3dPanel)->hide();
     mkDock("viewport3d", tr("3D View"), m_viewport3d)->hide();
     m_workspaces = new WorkspaceManager(this, m_docks, this);
+    connect(m_workspaces, &WorkspaceManager::aboutToChange, this, [this] { rememberCanvasPlacement(); });
+    connect(m_workspaces, &WorkspaceManager::changed, this, [this] { applyCanvasPlacement(); });
+    connect(m_canvasDock, &QDockWidget::topLevelChanged, this, [this] { if (!m_applyingCanvas) rememberCanvasPlacement(); });
     connect(m_workspaces, &WorkspaceManager::changed, this, &MainWindow::rebuildWorkspaceMenu);
 }
 

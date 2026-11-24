@@ -80,7 +80,7 @@ private slots:
             QVERIFY2(w->canvas()->width() >= 200, qPrintable(n + " canvas=" + QString::number(w->canvas()->width()) + " win=" + QString::number(w->width())));              // canvas keeps real room
             const QRect tools = w->findChild<QToolBar*>("tools")->geometry();
             for (QDockWidget* d : w->findChildren<QDockWidget*>())
-                if (d->isVisible() && !d->isFloating()) QVERIFY2(!d->geometry().intersects(tools), qPrintable(n + " " + d->objectName()));
+                if (d->isVisible() && !d->isFloating() && d->parentWidget() == w.get()) QVERIFY2(!d->geometry().intersects(tools), qPrintable(n + " " + d->objectName()));
         }
     }
 

@@ -26,6 +26,7 @@ public:
     void resetCurrent();                    // built-ins: back to the factory layout; custom: reload saved
 
 signals:
+    void aboutToChange();   // a different workspace is about to be applied (the current one is still intact)
     void changed();
 
 private:

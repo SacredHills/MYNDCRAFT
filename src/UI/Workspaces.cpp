@@ -87,7 +87,7 @@ void WorkspaceManager::clearDocks() {
 
 bool WorkspaceManager::apply(const QString& name) {
     if (!presetNames().contains(name) && !customNames().contains(name)) return false;
-    if (name != m_current) saveCurrent();                       // keep the arrangement of the one we are leaving
+    if (name != m_current) { emit aboutToChange(); saveCurrent(); }   // keep the arrangement of the one we are leaving
     if (presetNames().contains(name)) {
         const QByteArray mine = settings::presetLayout(name);
         if (mine.isEmpty() || !restoreLayout(mine)) applyPreset(name);

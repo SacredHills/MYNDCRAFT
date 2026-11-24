@@ -43,6 +43,9 @@ void setWindowGeometry(const QByteArray& g) { s().setValue("window/geometry", g)
 QByteArray presetLayout(const QString& n) { return s().value("presetLayouts/" + n).toByteArray(); }
 void savePresetLayout(const QString& n, const QByteArray& st) { s().setValue("presetLayouts/" + n, st); }
 void removePresetLayout(const QString& n) { s().remove("presetLayouts/" + n); }
+QRect canvasFloatRect(const QString& ws) { return s().value("canvasFloat/" + ws).toRect(); }
+void setCanvasFloatRect(const QString& ws, const QRect& r) { if (r.isEmpty()) s().remove("canvasFloat/" + ws); else s().setValue("canvasFloat/" + ws, r); }
+
 QString lastWorkspace() { return s().value("window/workspace", "Drawing").toString(); }
 void setLastWorkspace(const QString& n) { s().setValue("window/workspace", n); }
 
