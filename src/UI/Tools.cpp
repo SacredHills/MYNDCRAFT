@@ -1,3 +1,4 @@
+#include <QGuiApplication>
 #include "UI/Tools.h"
 
 #include <QLinearGradient>
@@ -1106,31 +1107,85 @@ public:
 
     void press(const PointerEvent& e) override {
         const Layer* l = m_s->activeLayer();
-        const bool shapes = l && (l->type == LayerType::Vector || l->type == LayerType::Text);
+        const bool shapes = isShapeLayer(l);
+        m_mapped = false;
         if (!shapes) m_active = &m_layer;
         else if (e.alt()) m_active = &m_layer;
-        else if (e.ctrl() && l->type == LayerType::Vector) m_active = &m_direct;
-        else m_active = &m_select;
-        m_active->press(e);
+        else if (e.ctrl() && l->type == LayerType::Vector) { m_active = &m_direct; m_mapped = true; selectShapeUnderPoint(e); }
+        else { m_active = &m_select; m_mapped = true; }
+        m_active->press(m_mapped ? local(e) : e);
     }
-    void move(const PointerEvent& e) override { if (m_active) m_active->move(e); }
-    void release(const PointerEvent& e) override { if (m_active) m_active->release(e); }
-    void doubleClick(const PointerEvent& e) override { if (m_active) m_active->doubleClick(e); }
+    void move(const PointerEvent& e) override { if (m_active) m_active->move(m_mapped ? local(e) : e); }
+    void release(const PointerEvent& e) override { if (m_active) m_active->release(m_mapped ? local(e) : e); }
+    void doubleClick(const PointerEvent& e) override {
+        const Layer* l = m_s->activeLayer();
+        // Double-clicking a path with Select edits its points (same gesture as the old Direct Selection tool).
+        Tool* t = (isShapeLayer(l) && l->type == LayerType::Vector) ? static_cast<Tool*>(&m_direct) : m_active;
+        if (t) t->doubleClick(t == &m_layer ? e : local(e));
+    }
     void cancel() override { if (m_active) m_active->cancel(); }
-    bool keyPress(QKeyEvent* k) override { return idleTool().keyPress(k); }
-    void paintOverlay(QPainter& p, const QTransform& t) override { idleTool().paintOverlay(p, t); }
+    bool keyPress(QKeyEvent* k) override {
+        if (m_active && m_active->busy()) return m_active->keyPress(k);
+        const Layer* l = m_s->activeLayer();
+        if (!isShapeLayer(l)) return m_layer.keyPress(k);
+        if (m_direct.keyPress(k)) return true;       // Delete removes the selected point (or the shape)
+        return m_select.keyPress(k);
+    }
+    void paintOverlay(QPainter& p, const QTransform& t) override {
+        const Layer* l = m_s->activeLayer();
+        if (!isShapeLayer(l)) { m_layer.paintOverlay(p, t); return; }
+        const QTransform lt = layerMatrix(l) * t;
+        if (m_active && m_active->busy()) { (m_active == &m_layer ? m_layer.paintOverlay(p, t) : m_active->paintOverlay(p, lt)); return; }
+        m_select.paintOverlay(p, lt);
+        const bool editing = l->type == LayerType::Vector && (QGuiApplication::keyboardModifiers() & Qt::ControlModifier);
+        if (!editing) return;
+        // Holding Ctrl: show the points of every shape (the selected one in full, with its handles).
+        p.setRenderHint(QPainter::Antialiasing);
+        for (const VectorShape& sh : l->shapes) {
+            if (m_s->selectedShapes().contains(sh.id)) continue;
+            p.setPen(QPen(QColor(20, 120, 255, 140), 1));
+            p.setBrush(Qt::NoBrush);
+            p.drawPath(lt.map(sh.path()));
+            for (const PathNode& n : sh.nodes) drawSquare(p, lt.map(n.pos), 4, false);
+        }
+        m_direct.paintOverlay(p, lt);
+    }
 
 private:
-    Tool& idleTool() {
-        if (m_active && m_active->busy()) return *m_active;
-        const Layer* l = m_s->activeLayer();
-        const bool shapes = l && (l->type == LayerType::Vector || l->type == LayerType::Text);
-        return shapes ? static_cast<Tool&>(m_select) : static_cast<Tool&>(m_layer);
+    static bool isShapeLayer(const Layer* l) { return l && (l->type == LayerType::Vector || l->type == LayerType::Text); }
+    QTransform layerMatrix(const Layer* l) const {
+        if (!l || !m_s->doc()) return {};
+        const QSize cs = m_s->doc()->canvasSize();
+        return l->xformAt(m_s->doc()->currentFrame()).matrix(QPointF(cs.width() / 2.0, cs.height() / 2.0));
+    }
+    // The shape tools work in the layer's own space; the layer may have been moved/rotated/scaled since.
+    PointerEvent local(const PointerEvent& e) const {
+        PointerEvent r = e;
+        bool ok = false;
+        const QTransform inv = layerMatrix(m_s->activeLayer()).inverted(&ok);
+        if (ok) r.doc = inv.map(e.doc);
+        return r;
+    }
+    // Ctrl-click on a point of a shape that is not selected yet: select that shape so the click grabs the point.
+    void selectShapeUnderPoint(const PointerEvent& e) {
+        Layer* l = m_s->activeLayer();
+        if (!l) return;
+        const QPointF q = local(e).doc;
+        const double tol = kHitPx / m_c->zoom();
+        for (const VectorShape& sh : l->shapes) {
+            if (m_s->selectedShapes().contains(sh.id)) {
+                for (const PathNode& n : sh.nodes) if (QLineF(q, n.pos).length() <= tol) return;   // already the right one
+            }
+        }
+        for (int i = int(l->shapes.size()) - 1; i >= 0; --i)
+            for (const PathNode& n : l->shapes[i].nodes)
+                if (QLineF(q, n.pos).length() <= tol) { m_s->setSelectedShapes({l->shapes[i].id}); return; }
     }
     SelectTool m_select;
     DirectSelectTool m_direct;
     LayerTransformTool m_layer;
     Tool* m_active = nullptr;
+    bool m_mapped = false;
 };
 
 }  // namespace

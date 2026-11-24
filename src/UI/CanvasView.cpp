@@ -409,11 +409,13 @@ void CanvasView::wheelEvent(QWheelEvent* e) {
 
 void CanvasView::keyPressEvent(QKeyEvent* e) {
     if (e->key() == Qt::Key_Space && !e->isAutoRepeat()) { m_spaceDown = true; updateCursor(); e->accept(); return; }
+    if (e->key() == Qt::Key_Control || e->key() == Qt::Key_Alt) update();   // tools show modifier-dependent overlays
     if (m_tool && m_tool->keyPress(e)) { e->accept(); return; }
     QWidget::keyPressEvent(e);
 }
 void CanvasView::keyReleaseEvent(QKeyEvent* e) {
     if (e->key() == Qt::Key_Space && !e->isAutoRepeat()) { m_spaceDown = false; updateCursor(); e->accept(); return; }
+    if (e->key() == Qt::Key_Control || e->key() == Qt::Key_Alt) update();
     QWidget::keyReleaseEvent(e);
 }
 void CanvasView::leaveEvent(QEvent*) { m_hasHover = false; update(); }

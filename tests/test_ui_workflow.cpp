@@ -180,6 +180,22 @@ private slots:
         QCOMPARE(v->shapes.last().nodes.size(), 3);
     }
 
+    void selectToolEditsPointsWithCtrlEvenAfterTheLayerWasMovedWithAlt() {
+        s->setTool(ToolId::Pen);
+        click(50, 200); click(150, 100); click(250, 200);
+        QTest::keyClick(cv, Qt::Key_Return);
+        Layer* v = s->activeLayer();
+        QCOMPARE(v->shapes.size(), 1);
+        s->setTool(ToolId::Select);
+        drag({{150, 150}, {170, 150}}, Qt::AltModifier);              // Alt+drag moves the whole layer by (20, 0)
+        QVERIFY(qAbs(v->xformAt(0).position.x() - 20) < 1.5);
+        QVERIFY(QLineF(v->shapes[0].nodes[1].pos, QPointF(150, 100)).length() <= 1.5);   // the shape itself is untouched
+        drag({{170, 100}, {170, 60}}, Qt::ControlModifier);          // Ctrl+drag the point where it now appears
+        QVERIFY(QLineF(v->shapes[0].nodes[1].pos, QPointF(150, 60)).length() <= 1.5);
+        drag({{120, 130}, {120, 110}});                              // plain drag still moves the shape
+        QVERIFY(v->shapes[0].nodes[0].pos.y() < 200);
+    }
+
     void bucketAndEyedropper() {
         // Draw a closed outline with the pencil, bucket-fill inside, then pick the color back.
         s->setForeground(Qt::black);
