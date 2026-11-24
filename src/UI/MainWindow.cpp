@@ -55,21 +55,21 @@ MainWindow::MainWindow() {
     resize(1500, 900);
     m_session = new EditorSession(this);
     m_canvas = new CanvasView(m_session, this);
-    {   // The canvas is a dock panel (movable, floatable like the others) inside a small inner window that fills the middle. Sizing is trivial
-        // there (one panel, nothing else), and the outer panel layout never depends on the canvas.
-        auto* host = new QMainWindow(this);
-        host->setObjectName("canvasHost");
-        host->setWindowFlags(Qt::Widget);
-        auto* ph = new QWidget(host);
-        ph->setMaximumSize(0, 0);
-        host->setCentralWidget(ph);
-        m_canvasDock = new QDockWidget(tr("Canvas"), host);
-        m_canvasDock->setObjectName("dock.canvas");
-        m_canvasDock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);   // never closable
-        m_canvasDock->setWidget(m_canvas);
-        host->addDockWidget(Qt::TopDockWidgetArea, m_canvasDock);
-        setCentralWidget(host);
-    }
+    // Every panel, the canvas included, lives in the docking system and can be placed anywhere (beside, above, tabbed, floating).
+    ads::CDockManager::setConfigFlag(ads::CDockManager::OpaqueSplitterResize, true);
+    ads::CDockManager::setConfigFlag(ads::CDockManager::DockAreaHasCloseButton, false);   // panels are closed from their tab or the Window menu
+    m_dockManager = new ads::CDockManager(this);
+    m_dockManager->setStyleSheet(m_dockManager->styleSheet() + QStringLiteral(R"(
+        ads--CDockAreaWidget { background: #38383c; border: 1px solid #1f1f22; }
+        ads--CDockAreaTitleBar { background: #2c2c30; }
+        ads--CDockWidgetTab { background: #2c2c30; border-color: #1f1f22; }
+        ads--CDockWidgetTab[activeTab="true"] { background: #4a4a52; }
+        ads--CDockWidgetTab QLabel { color: #d8d8dc; }
+        ads--CDockWidgetTab[activeTab="true"] QLabel { color: #ffffff; }
+        ads--CDockWidget { background: #38383c; }
+        ads--CDockSplitter::handle { background: #1f1f22; }
+    )"));
+    setCentralWidget(m_dockManager);
     m_autosave = new Autosaver(this);
     m_autosave->setEnabled(settings::autosaveEnabled());
     m_autosave->setInterval(settings::autosaveIntervalSeconds());
@@ -481,54 +481,37 @@ void MainWindow::buildToolbars() {
 }
 
 CanvasView* MainWindow::openCanvasWindow() {
-    // An extra view of the same document in its own movable window (own zoom and pan). The main canvas and the workspaces are untouched.
-    auto* cv = new CanvasView(m_session);
-    cv->setDocument(m_doc.get());
+    // An extra view of the same document in its own window (own zoom and pan). A plain top-level window: the docking system and the
+    // workspaces do not know about it, so it stays open across workspace changes. The main canvas is the dockable one.
     static int counter = 1;
-    auto* d = new QDockWidget(tr("Canvas %1").arg(++counter), this);
-    d->setObjectName(QString("dock.canvasWindow.%1").arg(counter));
-    d->setAttribute(Qt::WA_DeleteOnClose);
-    d->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
-    d->setWidget(cv);
-    addDockWidget(Qt::TopDockWidgetArea, d);
-    d->setFloating(true);
-    d->resize(qMax(700, width() / 2), qMax(500, height() / 2));
-    d->show();
+    auto* win = new QWidget(this, Qt::Window);
+    win->setAttribute(Qt::WA_DeleteOnClose);
+    win->setWindowTitle(tr("Canvas %1").arg(++counter));
+    auto* lay = new QVBoxLayout(win);
+    lay->setContentsMargins(0, 0, 0, 0);
+    auto* cv = new CanvasView(m_session, win);
+    cv->setDocument(m_doc.get());
+    lay->addWidget(cv);
+    win->resize(qMax(700, width() / 2), qMax(500, height() / 2));
+    win->show();
     cv->fitToView();
     m_extraCanvases.append(cv);
     connect(cv, &QObject::destroyed, this, [this] { m_extraCanvases.removeIf([](const QPointer<CanvasView>& p) { return p.isNull(); }); });
     return cv;
 }
 
-// Each workspace remembers whether the canvas panel was floating (and where).
-void MainWindow::rememberCanvasPlacement() {
-    if (!m_workspaces || m_workspaces->current().isEmpty() || m_applyingCanvas) return;
-    settings::setCanvasFloatRect(m_workspaces->current(), m_canvasDock->isFloating() ? m_canvasDock->geometry() : QRect());
-}
-
-void MainWindow::applyCanvasPlacement() {
-    if (!m_workspaces) return;
-    const QRect r = settings::canvasFloatRect(m_workspaces->current());
-    m_applyingCanvas = true;
-    if (r.isEmpty()) {
-        if (m_canvasDock->isFloating()) m_canvasDock->setFloating(false);
-    } else {
-        if (!m_canvasDock->isFloating()) m_canvasDock->setFloating(true);
-        m_canvasDock->setGeometry(r);
-        m_canvasDock->show();
-    }
-    m_applyingCanvas = false;
-}
-
-// Brings the 3D panels up (placing them if the current workspace never had them).
 void MainWindow::show3DPanels() {
-    QDockWidget* sc = m_docks.value("scene3d");
-    QDockWidget* vp = m_docks.value("viewport3d");
+    ads::CDockWidget* sc = m_docks.value("scene3d");
+    ads::CDockWidget* vp = m_docks.value("viewport3d");
     if (!sc || !vp) return;
-    if (!vp->isVisible() && dockWidgetArea(vp) == Qt::NoDockWidgetArea) addDockWidget(Qt::RightDockWidgetArea, vp);
-    if (!sc->isVisible() && dockWidgetArea(sc) == Qt::NoDockWidgetArea) addDockWidget(Qt::LeftDockWidgetArea, sc);
-    sc->show(); vp->show();
-    sc->raise(); vp->raise();
+    for (ads::CDockWidget* d : {sc, vp}) {
+        if (d->isClosed()) d->toggleView(true);          // reopens where it was last docked
+        d->setAsCurrentTab();
+    }
+    // Parked together (as tabs) in a workspace without them: show the 3D view beside the scene panel so both are visible.
+    if (sc->dockAreaWidget() && sc->dockAreaWidget() == vp->dockAreaWidget())
+        m_dockManager->addDockWidget(ads::RightDockWidgetArea, vp, sc->dockAreaWidget());
+    sc->setAsCurrentTab(); vp->setAsCurrentTab();
 }
 
 void MainWindow::updateBreadcrumb() {
@@ -544,14 +527,14 @@ void MainWindow::updateBreadcrumb() {
 
 void MainWindow::buildDocks() {
     auto mkDock = [this](const QString& key, const QString& title, QWidget* w) {
-        auto* d = new QDockWidget(title, this);
+        auto* d = new ads::CDockWidget(title);
         d->setObjectName("dock." + key);
-        d->setWidget(w);
-        d->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+        d->setWidget(w, ads::CDockWidget::ForceNoScrollArea);
         m_docks[key] = d;
         return d;
     };
     m_layers = new LayerPanel(m_session);
+    mkDock("canvas", tr("Canvas"), m_canvas)->setFeature(ads::CDockWidget::DockWidgetClosable, false);   // there must always be a canvas
     mkDock("options", tr("Tool Options"), new ToolOptionsPanel(m_session));
     mkDock("style", tr("Color & Style"), new StylePanel(m_session));
     mkDock("layers", tr("Layers"), m_layers);
@@ -576,12 +559,9 @@ void MainWindow::buildDocks() {
     mkDock("properties", tr("Properties"), new PropertiesPanel(m_session, m_anim));
     m_scene3dPanel = new Scene3DPanel(m_session, m_scene3dActions);
     m_viewport3d = new Viewport3D(m_session, m_scene3dActions);
-    mkDock("scene3d", tr("3D Scene"), m_scene3dPanel)->hide();
-    mkDock("viewport3d", tr("3D View"), m_viewport3d)->hide();
-    m_workspaces = new WorkspaceManager(this, m_docks, this);
-    connect(m_workspaces, &WorkspaceManager::aboutToChange, this, [this] { rememberCanvasPlacement(); });
-    connect(m_workspaces, &WorkspaceManager::changed, this, [this] { applyCanvasPlacement(); });
-    connect(m_canvasDock, &QDockWidget::topLevelChanged, this, [this] { if (!m_applyingCanvas) rememberCanvasPlacement(); });
+    mkDock("scene3d", tr("3D Scene"), m_scene3dPanel);
+    mkDock("viewport3d", tr("3D View"), m_viewport3d);
+    m_workspaces = new WorkspaceManager(this, m_dockManager, m_docks, this);
     connect(m_workspaces, &WorkspaceManager::changed, this, &MainWindow::rebuildWorkspaceMenu);
 }
 
@@ -679,7 +659,7 @@ void MainWindow::buildMenus() {
         m_workspaces->resetCurrent();
     });
     win->addSeparator();
-    for (auto* d : m_docks) win->addAction(d->toggleViewAction());
+    for (auto it = m_docks.cbegin(); it != m_docks.cend(); ++it) if (it.key() != "canvas") win->addAction(it.value()->toggleViewAction());
     win->addAction(findChild<QToolBar*>("tools")->toggleViewAction());
     rebuildWorkspaceMenu();
 

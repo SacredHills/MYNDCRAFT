@@ -367,40 +367,41 @@ private slots:
 
     void panelsCanBeStackedAndEachWorkspaceRemembersItsArrangement() {
         auto* ws = w->workspaces();
-        QVERIFY(ws->apply("Illustration"));
-        auto* opt = w->findChild<QDockWidget*>("dock.options");
-        auto* lay = w->findChild<QDockWidget*>("dock.layers");
-        auto* sty = w->findChild<QDockWidget*>("dock.style");
-        // Put Tool Options directly above Layers (right-hand column).
-        w->splitDockWidget(lay, opt, Qt::Vertical);
         w->show(); QApplication::processEvents();
-        QCOMPARE(w->dockWidgetArea(opt), w->dockWidgetArea(lay));
-        QVERIFY(opt->geometry().bottom() <= lay->geometry().top() + 4);
-        const Qt::DockWidgetArea optArea = w->dockWidgetArea(opt);
+        QVERIFY(ws->apply("Illustration"));
+        QApplication::processEvents();
+        auto* opt = w->dock("options");
+        auto* lay = w->dock("layers");
+        auto* cvs = w->dock("canvas");
+        auto pos = [&](QWidget* x) { return x->mapTo(w.get(), QPoint(0, 0)); };
+        QVERIFY(pos(opt).x() < pos(cvs).x());                              // factory: options on the left of the canvas
+        // Put Tool Options directly below Layers (right-hand column).
+        w->dockManager()->addDockWidget(ads::BottomDockWidgetArea, opt, lay->dockAreaWidget());
+        QApplication::processEvents();
+        QVERIFY(pos(opt).y() >= pos(lay).y() + lay->height() - 4);
+        QVERIFY(pos(opt).x() > pos(cvs).x());
         // Leave and come back: the arrangement is kept.
         QVERIFY(ws->apply("Drawing"));
         QVERIFY(ws->apply("Illustration"));
         QApplication::processEvents();
-        QCOMPARE(w->dockWidgetArea(opt), optArea);
-        QVERIFY(opt->geometry().bottom() <= lay->geometry().top() + 4);
+        QVERIFY(pos(opt).y() >= pos(lay).y() + lay->height() - 4);
         // Reset restores the factory layout (Tool Options back on the left).
         ws->resetCurrent();
         QApplication::processEvents();
-        QCOMPARE(w->dockWidgetArea(opt), Qt::LeftDockWidgetArea);
-        QVERIFY(sty);
+        QVERIFY(pos(opt).x() < pos(cvs).x());
     }
 
     void workspacesRearrangePanelsAndPersistCustomLayouts() {
         auto* ws = w->workspaces();
         QVERIFY(ws->apply("Illustration"));
-        auto vis = [&](const QString& dock) { return w->findChild<QDockWidget*>("dock." + dock)->isVisible(); };
+        auto vis = [&](const QString& dock) { return !w->dock(dock)->isClosed(); };   // (shown in this workspace; may be a tab behind another)
         QVERIFY(vis("history"));
         QVERIFY(ws->apply("Drawing"));
         QVERIFY(!vis("history"));
         QVERIFY(vis("layers") && vis("options") && vis("style"));
         // The project itself is untouched by workspace changes.
         QCOMPARE(w->document()->layerCount(), 1);
-        w->findChild<QDockWidget*>("dock.history")->show();
+        w->dock("history")->toggleView(true);
         ws->saveCurrentAs("My Layout");
         QVERIFY(ws->customNames().contains("My Layout"));
         ws->apply("Illustration");

@@ -32,7 +32,8 @@ public:
     Document* document() const { return m_doc.get(); }
     EditorSession* session() const { return m_session; }
     CanvasView* canvas() const { return m_canvas; }
-    QDockWidget* canvasDock() const { return m_canvasDock; }
+    ads::CDockWidget* dock(const QString& key) const { return m_docks.value(key); }   // "canvas", "layers", "timeline", ...
+    ads::CDockManager* dockManager() const { return m_dockManager; }
     CanvasView* openCanvasWindow();    // another view of the document in its own movable window (any screen); the main canvas stays in every workspace
     int canvasWindowCount() const { int n = 0; for (const auto& c : m_extraCanvases) if (c) ++n; return n; }
     LayerPanel* layerPanel() const { return m_layers; }
@@ -87,10 +88,7 @@ private:
     std::unique_ptr<Document> m_doc;
     EditorSession* m_session;
     CanvasView* m_canvas;
-    QDockWidget* m_canvasDock = nullptr;      // the canvas is a panel inside the central area: drag its title bar to float it, drag it back to dock it
-    bool m_applyingCanvas = false;
-    void rememberCanvasPlacement();
-    void applyCanvasPlacement();
+    ads::CDockManager* m_dockManager = nullptr;
     QList<QPointer<CanvasView>> m_extraCanvases;
     QAction* aDetachCanvas = nullptr;
     LayerPanel* m_layers;
@@ -106,7 +104,7 @@ private:
     QAction* m_crumbAction = nullptr;
     void updateBreadcrumb();
     Autosaver* m_autosave;
-    QMap<QString, QDockWidget*> m_docks;
+    QMap<QString, ads::CDockWidget*> m_docks;
     QActionGroup* m_toolGroup;
     QMap<ToolId, QAction*> m_toolActions;
     QAction *aNew, *aOpen, *aSave, *aSaveAs, *aExport, *aExportAnim, *aImport, *aPrefs, *aQuit;

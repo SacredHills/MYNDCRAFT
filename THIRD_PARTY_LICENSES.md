@@ -6,6 +6,7 @@ License details below are from the projects' documentation as understood when th
 | Component | Used for | Status | License | Notes |
 |---|---|---|---|---|
 | Qt 6 (Core, Gui, Widgets, Test) | UI, images, painting, tablet input | In use (6.4.2 from Ubuntu) | LGPL-3.0 / GPL-3.0 / commercial | Commercial closed-source distribution requires dynamic linking + LGPL obligations, or a commercial Qt license. Avoid GPL-only Qt add-on modules. |
+| Qt Advanced Docking System (ADS) v5.1.1 | Dockable/floating panels, including the canvas | In use (fetched at build time from github.com/githubuser0xFFFF/Qt-Advanced-Docking-System, built as a shared library) | LGPL-2.1 | Shared library so it can be replaced (LGPL relinking). Ship its license text and a notice with any distribution; verify the exact version's license file before a commercial release. Needs Qt private GUI headers to build on Linux (qt6-base-private-dev). |
 | libzip | `.studio` ZIP container | In use (1.7.3) | BSD-3-Clause | Links zlib (zlib license). |
 | Skia | Future 2D/GPU renderer | Evaluated, not integrated | BSD-3-Clause | See `docs/ARCHITECTURE.md` §Renderer. |
 | Google Filament | Future real-time 3D renderer | Evaluated, not integrated | Apache-2.0 | Supports PBR, glTF loading (gltfio), Vulkan/GL/Metal. |

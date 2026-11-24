@@ -67,14 +67,14 @@ private slots:
     void animationWorkspaceShowsTimelineSheetAndOnionPanels() {
         QVERIFY(timeline() && sheet());
         for (const char* k : {"dock.timeline", "dock.exposure", "dock.onion"}) {
-            auto* d = w->findChild<QDockWidget*>(k);
+            auto* d = w->dock(QString(k).mid(5));
             QVERIFY2(d, k);
-            QVERIFY2(!d->isHidden(), k);
+            QVERIFY2(!d->isClosed(), k);
         }
         w->workspaces()->apply("Drawing");
-        QVERIFY(w->findChild<QDockWidget*>("dock.timeline")->isHidden());
+        QVERIFY(w->dock("timeline")->isClosed());
         w->workspaces()->apply("Animation");
-        QVERIFY(!w->findChild<QDockWidget*>("dock.timeline")->isHidden());
+        QVERIFY(!w->dock("timeline")->isClosed());
         QVERIFY(w->workspaces()->presetNames().contains("Animation"));
     }
 

@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y ninja-build qt6-base-dev libzip-dev libgl1-mesa-dev libxkbcommon-dev
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build qt6-base-dev qt6-base-private-dev libzip-dev libgl1-mesa-dev libxkbcommon-dev
       - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
       - run: cmake --build build
       - run: QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
@@ -52,6 +52,10 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist/MyndCraft | Out-Null
           Copy-Item build/myndcraft.exe dist/MyndCraft/
+          Copy-Item (Get-ChildItem -Recurse build -Filter 'qtadvanceddocking*.dll' | Select-Object -First 1).FullName dist/MyndCraft/
+          New-Item -ItemType Directory -Force dist/MyndCraft/licenses | Out-Null
+          Copy-Item build/_deps/qtads-src/LICENSE dist/MyndCraft/licenses/QtAdvancedDockingSystem-LICENSE.txt
+          Copy-Item build/_deps/qtads-src/gnu-lgpl-v2.1.md dist/MyndCraft/licenses/LGPL-2.1.md
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin/*.dll" dist/MyndCraft/
           windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw dist/MyndCraft/myndcraft.exe
       - name: Smoke-test the packaged exe (renders its own window to a PNG)
@@ -80,7 +84,8 @@ jobs:
       - run: QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
       - name: Bundle
         run: |
-          "$(brew --prefix qt)/bin/macdeployqt" build/myndcraft.app
+          ADS_LIB="$(find build -name 'libqtadvanceddocking-qt6*.dylib' | head -1)"
+          "$(brew --prefix qt)/bin/macdeployqt" build/myndcraft.app -libpath="$(dirname "$ADS_LIB")"
           ditto -c -k --keepParent build/myndcraft.app MyndCraft-macos.zip
       - uses: actions/upload-artifact@v4
         with:

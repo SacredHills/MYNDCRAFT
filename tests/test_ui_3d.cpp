@@ -1,5 +1,4 @@
 #include <QtTest>
-#include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QGroupBox>
@@ -62,10 +61,10 @@ private slots:
         s = w->session(); doc = w->document(); a = w->scene3d(); vp = w->viewport3d();
         doc->undoStack()->clear();
     }
-    void cleanup() { doc->undoStack()->clear(); doc->markSaved(); w->close(); w.reset(); }
+    void cleanup() { doc->undoStack()->clear(); doc->markSaved(); w->activateWindow(); QApplication::processEvents(); w->close(); QApplication::processEvents(); w.reset(); }
 
     void the3DWorkspaceShowsThePanelsAndOtherWorkspacesHideThem() {
-        auto vis = [&](const char* k) { return w->findChild<QDockWidget*>(QString("dock.") + k)->isVisible(); };
+        auto vis = [&](const char* k) { return w->dock(k)->isVisible(); };
         QVERIFY(vis("viewport3d") && vis("scene3d"));
         w->workspaces()->apply("Drawing");
         QVERIFY(!vis("viewport3d") && !vis("scene3d"));
@@ -408,8 +407,12 @@ private slots:
     void workspacesComeBackIdenticallyWhateverWasShownBefore() {
         auto snap = [&] {
             QStringList out;
-            for (QDockWidget* d : w->findChildren<QDockWidget*>())
-                out << QString("%1:%2:%3:%4").arg(d->objectName()).arg(d->isVisible()).arg(d->isVisible() ? int(w->dockWidgetArea(d)) : 0).arg(d->isFloating());
+            const auto docks = w->dockManager()->dockWidgetsMap();
+            for (auto* d : docks) {
+                // where it sits: left / middle / right third of the window (only meaningful when shown)
+                const int x = d->isVisible() ? d->mapTo(w.get(), d->rect().center()).x() * 3 / w->width() : -1;
+                out << QString("%1:%2:%3:%4").arg(d->objectName()).arg(d->isVisible()).arg(x).arg(d->isFloating());
+            }
             out.sort();
             return out;
         };
@@ -522,7 +525,7 @@ private slots:
             w->workspaces()->apply(n);
             QApplication::processEvents();
             QVERIFY2(w->canvas()->isVisible() && w->canvas()->width() > 200, qPrintable(n));
-            QVERIFY(extra->isVisible());
+            QVERIFY2(extra->isVisible(), qPrintable(n));
         }
         // paint through the extra window with real mouse events
         s->setForeground(Qt::black);
@@ -534,49 +537,54 @@ private slots:
         QTest::mouseRelease(extra, Qt::LeftButton, {}, b);
         QVERIFY(doc->undoStack()->count() > 0);
         // closing it leaves everything else alone; a new document is shown in the remaining windows
-        extra->parentWidget()->close();
+        extra->window()->close();
         QApplication::processEvents();
         QTRY_COMPARE(w->canvasWindowCount(), 0);
         QVERIFY(w->canvas()->isVisible());
     }
 
-    void theMainCanvasIsAPanelThatFloatsAndIsRememberedPerWorkspace() {
-        QDockWidget* cd = w->canvasDock();
-        QVERIFY(cd && !cd->isFloating());
-        QVERIFY(w->canvas()->parentWidget() == cd);
-        for (const QString& n : WorkspaceManager::presetNames()) {      // docked in the middle of every workspace, with real room
+    void theMainCanvasIsAPanelThatCanBeDockedOnAnySideAndFloated() {
+        auto* cd = w->dock("canvas");
+        auto* mgr = w->dockManager();
+        QVERIFY(cd && !cd->isFloating() && w->canvas()->isVisible());
+        for (const QString& n : WorkspaceManager::presetNames()) {      // real room in every workspace
             w->workspaces()->apply(n); QApplication::processEvents();
-            QVERIFY2(!cd->isFloating() && w->canvas()->width() > 200 && w->canvas()->height() > 150, qPrintable(n));
+            QVERIFY2(w->canvas()->width() > 300 && w->canvas()->height() > 200, qPrintable(n));
         }
+        // dock the canvas on the far right, next to the layers (what dragging it there does), and then on the left
         w->workspaces()->apply("Drawing"); QApplication::processEvents();
-        cd->setFloating(true);                                          // what dragging the title bar out does
-        cd->setGeometry(QRect(200, 200, 700, 500));
+        auto* lay = w->dock("layers");
+        mgr->addDockWidget(ads::RightDockWidgetArea, cd, lay->dockAreaWidget());
         QApplication::processEvents();
-        QVERIFY(cd->isFloating() && w->canvas()->width() > 200);
-        // the timeline and other panels still resize: the outer layout does not depend on the canvas
-        w->workspaces()->apply("Animation"); QApplication::processEvents();
-        QVERIFY(!cd->isFloating());                                     // Animation never had it floating
-        QVERIFY(w->canvas()->width() > 200);
-        auto* tl = w->findChild<QDockWidget*>("dock.timeline");
-        const int h0 = tl->height();
-        w->resizeDocks({tl}, {h0 + 80}, Qt::Vertical);
+        QVERIFY(!cd->isFloating() && cd->isVisible());
+        QVERIFY(cd->mapTo(w.get(), QPoint(0, 0)).x() > lay->mapTo(w.get(), QPoint(0, 0)).x());      // right of the layers panel
+        QVERIFY(w->canvas()->width() > 100 && w->canvas()->height() > 100);
+        mgr->addDockWidget(ads::LeftDockWidgetArea, cd, w->dock("options")->dockAreaWidget());
         QApplication::processEvents();
-        QVERIFY(tl->height() != h0);
-        w->workspaces()->apply("Drawing"); QApplication::processEvents();
-        QVERIFY(cd->isFloating());                                      // Drawing remembered it
-        // paint through the floating canvas
+        QVERIFY(cd->mapTo(w.get(), QPoint(0, 0)).x() < w->dock("options")->mapTo(w.get(), QPoint(0, 0)).x());   // left of the others
+        QVERIFY(w->canvas()->width() > 100);
+        // it still draws with real mouse events wherever it sits
         const QUuid L = doc->addLayer(LayerType::Raster, "R"); s->setActiveLayer(L);
         s->setForeground(Qt::black); s->setTool(ToolId::Brush);
+        w->canvas()->actualPixels();
         const QPoint a = w->canvas()->docToView().map(QPointF(50, 50)).toPoint(), b = w->canvas()->docToView().map(QPointF(150, 50)).toPoint();
         QTest::mousePress(w->canvas(), Qt::LeftButton, {}, a);
         QTest::mouseMove(w->canvas(), (a + b) / 2);
         QTest::mouseMove(w->canvas(), b);
         QTest::mouseRelease(w->canvas(), Qt::LeftButton, {}, b);
         QVERIFY(doc->undoStack()->count() > 0);
-        cd->setFloating(false);                                         // dock it back
+        // floating works; floating panels are not stored in workspaces (they are docked again when the workspace is left)
+        cd->setFloating();
         QApplication::processEvents();
-        QVERIFY(!cd->isFloating() && w->canvas()->width() > 200);
-        for (const QString& n : WorkspaceManager::presetNames()) settings::setCanvasFloatRect(n, QRect());
+        QVERIFY(cd->isFloating());
+        QVERIFY(w->canvas()->isVisible());
+        w->workspaces()->apply("Animation"); QApplication::processEvents();
+        QVERIFY(!cd->isFloating() && w->canvas()->width() > 300);
+        w->workspaces()->apply("Drawing"); QApplication::processEvents();
+        QVERIFY(!cd->isFloating() && w->canvas()->width() > 300);
+        w->workspaces()->resetCurrent(); QApplication::processEvents();
+        QVERIFY(!cd->isFloating() && w->canvas()->width() > 300);       // factory layout again
+        QTest::qWait(50);
     }
 
     void rotateAndScaleGizmosWork() {

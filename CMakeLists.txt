@@ -21,6 +21,16 @@ else()
   set(MYND_ZIP_TARGET libzip::zip)
 endif()
 
+# Qt Advanced Docking System (LGPL-2.1): free-form docking (any panel, including the canvas, can be docked anywhere). Built as a shared
+# library so the LGPL relinking obligation is met by simply replacing the library. Pinned to a release tag.
+include(FetchContent)
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_STATIC OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(qtads
+  GIT_REPOSITORY https://github.com/githubuser0xFFFF/Qt-Advanced-Docking-System.git
+  GIT_TAG v5.1.1)
+FetchContent_MakeAvailable(qtads)
+
 if(MSVC)
   add_compile_options(/W3 /permissive- /utf-8 /Zc:__cplusplus)
   add_compile_definitions(_USE_MATH_DEFINES NOMINMAX)
@@ -78,10 +88,18 @@ add_library(myndui STATIC
   src/UI/Workspaces.cpp
   src/UI/MainWindow.cpp
 )
-target_link_libraries(myndui PUBLIC myndcore Qt6::Widgets)
+target_link_libraries(myndui PUBLIC myndcore Qt6::Widgets ads::qtadvanceddocking-qt6)
+
+# On Windows the DLL must sit next to every executable that uses it.
+function(mynd_copy_ads target)
+  if(WIN32)
+    add_custom_command(TARGET ${target} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ads::qtadvanceddocking-qt6> $<TARGET_FILE_DIR:${target}>)
+  endif()
+endfunction()
 
 add_executable(myndcraft src/main.cpp)
 target_link_libraries(myndcraft PRIVATE myndui)
+mynd_copy_ads(myndcraft)
 if(WIN32)
   set_target_properties(myndcraft PROPERTIES WIN32_EXECUTABLE ON)  # GUI subsystem: no console window
 elseif(APPLE)
@@ -96,6 +114,7 @@ function(myndcraft_test name)
   endif()
   add_executable(${name} tests/${name}.cpp)
   target_link_libraries(${name} PRIVATE myndui Qt6::Test)
+  mynd_copy_ads(${name})
   add_test(NAME ${name} COMMAND ${name})
   set_tests_properties(${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endfunction()
