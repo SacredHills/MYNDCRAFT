@@ -119,12 +119,12 @@ void MainWindow::adoptDocument(std::unique_ptr<Document> d) {
     m_autosave->detach(true);
     m_session->setDocument(nullptr);
     m_canvas->setDocument(nullptr);
-    for (CanvasView* c : m_extraCanvases) c->setDocument(nullptr);
+    for (auto& c : m_extraCanvases) if (c) c->setDocument(nullptr);
     m_doc = std::move(d);
     Document* doc = m_doc.get();
     m_session->setDocument(doc);
     m_canvas->setDocument(doc);
-    for (CanvasView* c : m_extraCanvases) c->setDocument(doc);
+    for (auto& c : m_extraCanvases) if (c) c->setDocument(doc);
     connect(doc, &Document::modifiedChanged, this, [this](bool) { updateTitle(); });
     m_autosave->attach(doc);
     bindUndo();
@@ -496,7 +496,7 @@ CanvasView* MainWindow::openCanvasWindow() {
     d->show();
     cv->fitToView();
     m_extraCanvases.append(cv);
-    connect(cv, &QObject::destroyed, this, [this](QObject* o) { m_extraCanvases.removeAll(static_cast<CanvasView*>(o)); });
+    connect(cv, &QObject::destroyed, this, [this] { m_extraCanvases.removeIf([](const QPointer<CanvasView>& p) { return p.isNull(); }); });
     return cv;
 }
 

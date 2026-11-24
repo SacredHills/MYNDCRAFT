@@ -4,6 +4,7 @@
 #include <QComboBox>
 #include <QLabel>
 #include <QMainWindow>
+#include <QPointer>
 class QDragEnterEvent;
 class QDropEvent;
 #include <memory>
@@ -33,7 +34,7 @@ public:
     CanvasView* canvas() const { return m_canvas; }
     QDockWidget* canvasDock() const { return m_canvasDock; }
     CanvasView* openCanvasWindow();    // another view of the document in its own movable window (any screen); the main canvas stays in every workspace
-    int canvasWindowCount() const { return int(m_extraCanvases.size()); }
+    int canvasWindowCount() const { int n = 0; for (const auto& c : m_extraCanvases) if (c) ++n; return n; }
     LayerPanel* layerPanel() const { return m_layers; }
     WorkspaceManager* workspaces() const { return m_workspaces; }
     AnimationActions* animation() const { return m_anim; }
@@ -90,7 +91,7 @@ private:
     bool m_applyingCanvas = false;
     void rememberCanvasPlacement();
     void applyCanvasPlacement();
-    QList<CanvasView*> m_extraCanvases;
+    QList<QPointer<CanvasView>> m_extraCanvases;
     QAction* aDetachCanvas = nullptr;
     LayerPanel* m_layers;
     WorkspaceManager* m_workspaces = nullptr;
