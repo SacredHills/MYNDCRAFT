@@ -113,7 +113,7 @@ PropertiesPanel::PropertiesPanel(EditorSession* s, AnimationActions* a, QWidget*
     grid->setColumnStretch(2, 1);
     lay->addLayout(grid);
     auto* hint = new QLabel(tr("Anchor and Position are offsets in pixels from the layer's untransformed place; "
-                               "Scale and Opacity are percentages. Use the Transform Layer tool (W) to drag on the canvas."));
+                               "Scale and Opacity are percentages. Use the Select tool (V) to drag the layer on the canvas."));
     hint->setWordWrap(true);
     hint->setStyleSheet("color: gray");
     lay->addWidget(hint);

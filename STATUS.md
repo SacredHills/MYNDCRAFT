@@ -165,9 +165,22 @@ Limitations (honest list):
 - Transformed layers are rendered through an intermediate buffer; heavy scenes may drop frames on CPU (no cache yet).
 - Copy of a mix of properties from several layers merges frames per property; pasting always targets the active layer.
 
-## Next tasks (Phase 4 — Graph Editor)
-Value/speed graph, Bezier handle and tangent editing, spatial motion paths in the viewport, curve presets. Re-evaluate
-renderer choice (Skia vs. QPainter) and add a frame cache before the GPU/3D work.
+## Phase 4 — Graph Editor (implemented, tested headlessly; visual feel not yet confirmed on Windows)
+- **Graph Editor** tab next to the Timeline (same dock): pick an animated property; value graph draws each component
+  as a curve; keys can be selected (shared with the timeline), dragged in time (integer frames, between neighbours)
+  and value; Bezier handles of selected keys are draggable (shared handle, shown on the component that changes most);
+  Linear/Hold/Ease buttons; Fit, wheel zoom (Shift = vertical), middle-drag pan, ruler click scrubs. All edits are undoable.
+- **Speed graph** (read-out only): speed in units per frame; editing is done in the value graph.
+- **Motion path** on the canvas (Select tool): Position keyframes are drawn as a path with a dot per frame; drag keys
+  to move them; selected keys show spatial tangent handles (Alt = break symmetry). Spatial tangents are new Keyframe
+  data (`spatialIn/Out`, saved in .studio) and curve the Position path; timing still comes from the temporal ease.
+- Limitations: spatial tangents only for Vec2 properties (Position is the one that is evaluated with them); the temporal
+  handle is shared across a Vec2's components (no separate dimensions); speed is not parameterised by arc length;
+  no box-select or multi-key handle edits in the graph; speed graph cannot be edited.
+
+## Next tasks (Phase 5 — Animate-style tweening)
+Motion/classic/shape tweens, symbols and nested symbols, reusable animation assets, independent symbol timelines.
+Also: re-evaluate renderer choice (Skia vs. QPainter) and add a frame cache before the GPU/3D work.
 
 ## Build / CI status
 `.github/workflows/build.yml` builds and runs the tests on Linux, Windows (MSVC, Qt 6.8.3, vcpkg libzip) and

@@ -7,6 +7,7 @@
 #include "Core/Exporter.h"
 #include "Core/Settings.h"
 #include "UI/MainWindow.h"
+#include "UI/GraphEditor.h"
 #include "UI/PropertiesPanel.h"
 #include "UI/TimelinePanel.h"
 #include "UI/Workspaces.h"
@@ -464,6 +465,95 @@ private slots:
         QVERIFY(qAbs(g2 - 127) <= 3);
     }
 
+    // ------------------------------------------------------------ Graph editor
+    GraphEditorPanel* graph() { return w->findChild<GraphEditorPanel*>(); }
+    void showGraph() {
+        auto* tabs = w->findChild<QTabWidget*>("timelineTabs");
+        QVERIFY(tabs);
+        tabs->setCurrentIndex(1);
+        QApplication::processEvents();
+        graph()->canvas()->setProperty("transform.position");
+        graph()->canvas()->fit();
+        QApplication::processEvents();
+    }
+    void graphEditorDragsHandlesAndKeysAndPlaybackFollows() {
+        s->setAutoKey(true);
+        doc->setCurrentFrame(0);   s->setProperties(layerId, {{"transform.position", PropValue::of(0, 0)}});
+        doc->setCurrentFrame(20);  s->setProperties(layerId, {{"transform.position", PropValue::of(200, 0)}});
+        s->setAutoKey(false);
+        s->setActiveLayer(layerId);
+        showGraph();
+        GraphCanvas* g = graph()->canvas();
+        QCOMPARE(graph()->propertyBox()->count(), 1);
+        QCOMPARE(L()->tracks["transform.position"].valueAt(*findPropertyDef("transform.position"), 6).c[0], 60.0);   // linear
+        // select the first key, then drag its outgoing handle to (frame 12, value 0): a strong ease-out... of nothing
+        s->setKeySelection({{layerId, "transform.position", 0}});
+        QPointF hp;
+        QVERIFY(g->handlePoint(0, true, &hp));
+        const QPointF k20 = g->keyPoint(20, 0), k0 = g->keyPoint(0, 0);
+        const QPointF to(k0.x() + (k20.x() - k0.x()) * 0.6, k0.y());        // x = 0.6 of the segment, y = 0 of the change
+        QTest::mousePress(g, Qt::LeftButton, {}, hp.toPoint());
+        QTest::mouseMove(g, ((hp + to) / 2).toPoint());
+        QTest::mouseMove(g, to.toPoint());
+        QTest::mouseRelease(g, Qt::LeftButton, {}, to.toPoint());
+        const Keyframe& a = L()->tracks["transform.position"].keys[0];
+        QCOMPARE(a.out, Interp::Bezier);
+        QVERIFY(qAbs(a.outHandle.x - 0.6) < 0.05);
+        QVERIFY(qAbs(a.outHandle.y) < 0.05);
+        QVERIFY(L()->tracks["transform.position"].valueAt(*findPropertyDef("transform.position"), 6).c[0] < 40.0);   // slower start now
+        // playback shows it: the square is further left at frame 6 than with linear motion
+        const double v6 = L()->tracks["transform.position"].valueAt(*findPropertyDef("transform.position"), 6).c[0];
+        QCOMPARE(px(6, int(100 + v6 + 5), 130), QColor(Qt::red));                // the rendered square sits where the curve says
+        QVERIFY(px(6, int(160 + v6 + 8), 130) != QColor(Qt::red));
+        // dragging the end key later in time retimes the movement
+        const QPointF end = g->keyPoint(20, 0);
+        const QPointF moved(end.x() + 5 * (end.x() - k0.x()) / 20.0, end.y());
+        QTest::mousePress(g, Qt::LeftButton, {}, end.toPoint());
+        QTest::mouseMove(g, moved.toPoint());
+        QTest::mouseRelease(g, Qt::LeftButton, {}, moved.toPoint());
+        QCOMPARE(L()->tracks["transform.position"].keys.last().frame, 25);
+        QVERIFY(qAbs(L()->tracks["transform.position"].keys.last().value.c[0] - 200.0) < 4.0);   // (pointer rounding)
+        // undo reverts the key move, then the handle edit
+        doc->undoStack()->undo();
+        QCOMPARE(L()->tracks["transform.position"].keys.last().frame, 20);
+        doc->undoStack()->undo();
+        QCOMPARE(L()->tracks["transform.position"].keys[0].out, Interp::Linear);
+        // the speed graph reads out speed
+        g->setMode(GraphCanvas::Mode::Speed);
+        g->fit();
+        QVERIFY(L()->tracks["transform.position"].speedAt(*findPropertyDef("transform.position"), 10) > 9.9);
+    }
+
+    void motionPathHandlesBendThePathAndKeysDragOnTheCanvas() {
+        s->setAutoKey(true);
+        doc->setCurrentFrame(0);   s->setProperties(layerId, {{"transform.position", PropValue::of(0, 0)}});
+        doc->setCurrentFrame(20);  s->setProperties(layerId, {{"transform.position", PropValue::of(100, 0)}});
+        s->setAutoKey(false);
+        s->setActiveLayer(layerId);
+        s->setTool(ToolId::Select);
+        doc->setCurrentFrame(10);
+        const PropertyDef& pd = *findPropertyDef("transform.position");
+        QCOMPARE(L()->tracks["transform.position"].valueAt(pd, 10).c[1], 0.0);
+        // select the first key (click its square on the path), then drag its outgoing handle upwards
+        drag({200, 150}, {200, 150});                                      // anchor = canvas centre, position (0,0)
+        QVERIFY(s->isKeySelected(layerId, "transform.position", 0));
+        drag({233, 150}, {233, 50});                                       // default handle sits a third of the way along
+        QVERIFY(!L()->tracks["transform.position"].keys[0].spatialOut.isNull());
+        QVERIFY(L()->tracks["transform.position"].keys[0].spatialOut.y() < -80);
+        QVERIFY(L()->tracks["transform.position"].valueAt(pd, 10).c[1] < -20);       // the path bows up
+        QCOMPARE(L()->tracks["transform.position"].valueAt(pd, 0).c[1], 0.0);        // still starts on the key
+        // dragging the last key on the canvas moves its value
+        drag({300, 150}, {320, 190});
+        QVERIFY(qAbs(L()->tracks["transform.position"].keys.last().value.c[0] - 120) < 3);
+        QVERIFY(qAbs(L()->tracks["transform.position"].keys.last().value.c[1] - 40) < 3);
+        doc->undoStack()->undo();
+        QVERIFY(qAbs(L()->tracks["transform.position"].keys.last().value.c[0] - 100) < 1.5);
+        doc->undoStack()->undo();
+        QVERIFY(L()->tracks["transform.position"].keys[0].spatialOut.isNull());
+        // the whole layer is untouched by all this
+        QCOMPARE(QColor(L()->raster.pixelColor(130, 130)), QColor(Qt::red));
+    }
+
     // Optional: MYND_SHOT=/path/out.png renders the Animation workspace with keyframes for visual review.
     void zzScreenshotForReview() {
         const QString out = qEnvironmentVariable("MYND_SHOT");
@@ -479,10 +569,15 @@ private slots:
         s->setKeySelection({{layerId, "transform.position", 8}});
         s->setActiveLayer(layerId);
         tv()->setExpanded(layerId, true);
-        s->setTool(ToolId::LayerTransform);
+        s->setTool(ToolId::Select);
         doc->setCurrentFrame(12);
         QApplication::processEvents();
         w->grab().save(out);
+        showGraph();
+        s->setKeySelection({{layerId, "transform.position", 8}});
+        graph()->canvas()->fit();
+        QApplication::processEvents();
+        graph()->grab().save(out + ".graph.png");
     }
 };
 

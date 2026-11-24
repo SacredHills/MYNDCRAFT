@@ -128,8 +128,29 @@ PropValue PropertyTrack::valueAt(const PropertyDef& d, double frame) const {
     }
     PropValue r;
     for (int c = 0; c < propComponents(d.type); ++c) r.c[c] = a.value.c[c] + (b.value.c[c] - a.value.c[c]) * e;
+    if (d.type == PropType::Vec2 && (!a.spatialOut.isNull() || !b.spatialIn.isNull())) {
+        // curved path: cubic Bezier through the two keys, travelled according to the temporal ease
+        const QPointF p0(a.value.c[0], a.value.c[1]), p3(b.value.c[0], b.value.c[1]);
+        // a side without a tangent uses the straight-line default (a third of the way to the other key)
+        const QPointF p1 = a.spatialOut.isNull() ? p0 + (p3 - p0) / 3.0 : p0 + a.spatialOut;
+        const QPointF p2 = b.spatialIn.isNull() ? p3 - (p3 - p0) / 3.0 : p3 + b.spatialIn;
+        const double m = 1 - e;
+        const QPointF q = m * m * m * p0 + 3 * m * m * e * p1 + 3 * m * e * e * p2 + e * e * e * p3;
+        r.c[0] = q.x(); r.c[1] = q.y();
+    }
     if (d.type == PropType::Int) for (int c = 0; c < 4; ++c) r.c[c] = std::round(r.c[c]);
     return r;
+}
+
+double PropertyTrack::speedAt(const PropertyDef& d, double frame) const {
+    if (keys.size() < 2) return 0;
+    const double h = 0.01;
+    const double f0 = std::max<double>(keys.first().frame, frame - h), f1 = std::min<double>(keys.last().frame, frame + h);
+    if (f1 <= f0) return 0;
+    const PropValue a = valueAt(d, f0), b = valueAt(d, f1);
+    double sum = 0;
+    for (int c = 0; c < propComponents(d.type); ++c) sum += (b.c[c] - a.c[c]) * (b.c[c] - a.c[c]);
+    return std::sqrt(sum) / (f1 - f0);
 }
 
 void PropertyTrack::setKey(const PropertyDef& d, int frame, PropValue v) {
@@ -263,6 +284,8 @@ QJsonObject tracksToJson(const PropertyTracks& t) {
             ko["in"] = interpKey(k.in); ko["out"] = interpKey(k.out);
             if (k.in == Interp::Bezier) ko["inHandle"] = QJsonArray{k.inHandle.x, k.inHandle.y};
             if (k.out == Interp::Bezier) ko["outHandle"] = QJsonArray{k.outHandle.x, k.outHandle.y};
+            if (!k.spatialIn.isNull()) ko["spatialIn"] = QJsonArray{k.spatialIn.x(), k.spatialIn.y()};
+            if (!k.spatialOut.isNull()) ko["spatialOut"] = QJsonArray{k.spatialOut.x(), k.spatialOut.y()};
             keys.append(ko);
         }
         tr["keys"] = keys;
@@ -320,6 +343,15 @@ bool tracksFromJson(const QJsonObject& o, PropertyTracks& out, QString* err, QSt
             if (!ok1 || !ok2) { if (err) *err = "unknown keyframe interpolation"; return false; }
             if (ko.contains("inHandle") && !readHandle(ko["inHandle"], k.inHandle, err)) return false;
             if (ko.contains("outHandle") && !readHandle(ko["outHandle"], k.outHandle, err)) return false;
+            for (const char* nm : {"spatialIn", "spatialOut"}) {
+                if (!ko.contains(nm)) continue;
+                const QJsonArray sa = ko[nm].toArray();
+                if (sa.size() != 2 || !sa[0].isDouble() || !sa[1].isDouble() || !std::isfinite(sa[0].toDouble()) || !std::isfinite(sa[1].toDouble())) {
+                    if (err) *err = "bad spatial tangent";
+                    return false;
+                }
+                (QString(nm) == "spatialIn" ? k.spatialIn : k.spatialOut) = QPointF(sa[0].toDouble(), sa[1].toDouble());
+            }
             tr.keys.push_back(k);
         }
         std::stable_sort(tr.keys.begin(), tr.keys.end(), [](const Keyframe& a, const Keyframe& b) { return a.frame < b.frame; });

@@ -337,6 +337,31 @@ private slots:
         QCOMPARE(QColor(Compositor::render(*d, d->canvasRect(), o).pixel(85, 5)), QColor(Qt::green));
     }
 
+    void spatialTangentsCurveThePathAndSurviveSaveAndLoad() {
+        PropertyTrack t;
+        t.setKey(D("transform.position"), 0, V(0, 0));
+        t.setKey(D("transform.position"), 10, V(100, 0));
+        QCOMPARE(t.valueAt(D("transform.position"), 5).c[1], 0.0);                 // straight line
+        t.keys[0].spatialOut = QPointF(0, 60);
+        t.keys[1].spatialIn = QPointF(0, 60);
+        const PropValue mid = t.valueAt(D("transform.position"), 5);
+        QVERIFY(qAbs(mid.c[0] - 50) < 1e-9);
+        QVERIFY(qAbs(mid.c[1] - 45) < 1e-9);                                      // 3/4 * 60: the path bows out
+        QCOMPARE(t.valueAt(D("transform.position"), 0).c[1], 0.0);                 // endpoints stay on the keys
+        QCOMPARE(t.valueAt(D("transform.position"), 10).c[1], 0.0);
+        QVERIFY(t.speedAt(D("transform.position"), 5) > 10.0);                     // 100 px over 10 frames at least
+        PropertyTracks tracks; tracks["transform.position"] = t;
+        PropertyTracks back; QString err;
+        QVERIFY(tracksFromJson(tracksToJson(tracks), back, &err));
+        QCOMPARE(back["transform.position"].keys[0].spatialOut, QPointF(0, 60));
+        QCOMPARE(back["transform.position"].keys[1].spatialIn, QPointF(0, 60));
+        QJsonObject bad = tracksToJson(tracks);
+        QJsonObject tr = bad["transform.position"].toObject();
+        QJsonArray ks = tr["keys"].toArray();
+        QJsonObject k0 = ks[0].toObject(); k0["spatialOut"] = QJsonArray{1}; ks[0] = k0; tr["keys"] = ks; bad["transform.position"] = tr;
+        QVERIFY(!tracksFromJson(bad, back, &err));
+    }
+
     void keyframesSurviveSaveAndLoad() {
         auto d = make();
         const QUuid id = square(*d);

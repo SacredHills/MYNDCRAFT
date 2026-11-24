@@ -62,8 +62,12 @@ struct Keyframe {
     Interp in = Interp::Linear;     // how the segment arriving at this key behaves (its end of the curve)
     Interp out = Interp::Linear;    // how the segment leaving this key behaves
     Handle inHandle, outHandle;     // used for the sides that are Bezier
+    // Spatial tangents (Vec2 properties such as Position): offsets, in value units, of the path's control
+    // points from this key. (0,0) on both ends of a segment keeps the path a straight line.
+    QPointF spatialIn, spatialOut;
     bool operator==(const Keyframe& o) const {
-        return frame == o.frame && value == o.value && in == o.in && out == o.out && inHandle == o.inHandle && outHandle == o.outHandle;
+        return frame == o.frame && value == o.value && in == o.in && out == o.out && inHandle == o.inHandle && outHandle == o.outHandle
+            && spatialIn == o.spatialIn && spatialOut == o.spatialOut;
     }
 };
 
@@ -76,6 +80,8 @@ struct PropertyTrack {
     bool animated() const { return !keys.isEmpty(); }
     int indexOfKey(int frame) const;
     PropValue valueAt(const PropertyDef& d, double frame) const;
+    // Rate of change per frame (for Vec2: length of the velocity vector, in value units / frame); used by the speed graph.
+    double speedAt(const PropertyDef& d, double frame) const;
     // Pure edits. All values are validated through clampValue.
     void setKey(const PropertyDef& d, int frame, PropValue v);      // add, or change the value of an existing key
     bool removeKey(int frame);

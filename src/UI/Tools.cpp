@@ -1102,29 +1102,44 @@ public:
     UnifiedSelectTool(EditorSession* s, CanvasView* c)
         : Tool(s, c), m_select(s, c), m_direct(s, c), m_layer(s, c) {}
     ToolId id() const override { return ToolId::Select; }
-    bool busy() const override { return m_active && m_active->busy(); }
+    bool busy() const override { return m_pathDrag != PathNone || (m_active && m_active->busy()); }
     QCursor cursor() const override { return Qt::ArrowCursor; }
 
     void press(const PointerEvent& e) override {
         const Layer* l = m_s->activeLayer();
         const bool shapes = isShapeLayer(l);
         m_mapped = false;
+        if (e.button == Qt::LeftButton && !e.alt() && !e.ctrl() && pathPress(e)) { m_active = nullptr; return; }
         if (!shapes) m_active = &m_layer;
         else if (e.alt()) m_active = &m_layer;
         else if (e.ctrl() && l->type == LayerType::Vector) { m_active = &m_direct; m_mapped = true; selectShapeUnderPoint(e); }
         else { m_active = &m_select; m_mapped = true; }
         m_active->press(m_mapped ? local(e) : e);
     }
-    void move(const PointerEvent& e) override { if (m_active) m_active->move(m_mapped ? local(e) : e); }
-    void release(const PointerEvent& e) override { if (m_active) m_active->release(m_mapped ? local(e) : e); }
+    void move(const PointerEvent& e) override {
+        if (m_pathDrag != PathNone) { pathDrag(e); return; }
+        if (m_active) m_active->move(m_mapped ? local(e) : e);
+    }
+    void release(const PointerEvent& e) override {
+        if (m_pathDrag != PathNone) { pathDrag(e); m_pathDrag = PathNone; m_c->update(); return; }
+        if (m_active) m_active->release(m_mapped ? local(e) : e);
+    }
     void doubleClick(const PointerEvent& e) override {
         const Layer* l = m_s->activeLayer();
         // Double-clicking a path with Select edits its points (same gesture as the old Direct Selection tool).
         Tool* t = (isShapeLayer(l) && l->type == LayerType::Vector) ? static_cast<Tool*>(&m_direct) : m_active;
         if (t) t->doubleClick(t == &m_layer ? e : local(e));
     }
-    void cancel() override { if (m_active) m_active->cancel(); }
+    void cancel() override {
+        if (m_pathDrag != PathNone) {
+            if (m_pathMoved && m_s->doc()) m_s->doc()->undoStack()->undo();
+            m_pathDrag = PathNone;
+            return;
+        }
+        if (m_active) m_active->cancel();
+    }
     bool keyPress(QKeyEvent* k) override {
+        if (k->key() == Qt::Key_Escape && m_pathDrag != PathNone) { cancel(); return true; }
         if (m_active && m_active->busy()) return m_active->keyPress(k);
         const Layer* l = m_s->activeLayer();
         if (!isShapeLayer(l)) return m_layer.keyPress(k);
@@ -1132,6 +1147,7 @@ public:
         return m_select.keyPress(k);
     }
     void paintOverlay(QPainter& p, const QTransform& t) override {
+        paintPath(p, t);
         const Layer* l = m_s->activeLayer();
         if (!isShapeLayer(l)) { m_layer.paintOverlay(p, t); return; }
         const QTransform lt = layerMatrix(l) * t;
@@ -1152,6 +1168,138 @@ public:
     }
 
 private:
+    // ---- motion path: the Position keyframes of the active layer drawn on the canvas ----
+    enum PathDrag { PathNone, PathKey, PathIn, PathOut };
+    struct PathGeo { const Layer* l = nullptr; const PropertyTrack* t = nullptr; QPointF center; };
+    PathGeo pathGeo() const {
+        PathGeo g;
+        const Layer* l = m_s->activeLayer();
+        if (!l || !m_s->doc()) return g;
+        auto it = l->tracks.constFind("transform.position");
+        if (it == l->tracks.constEnd() || it->keys.size() < 2) return g;
+        const QSize cs = m_s->doc()->canvasSize();
+        g.l = l; g.t = &*it; g.center = QPointF(cs.width() / 2.0, cs.height() / 2.0);
+        return g;
+    }
+    QPointF anchorAt(const PathGeo& g, double frame) const {
+        const LayerXform x = g.l->xformAt(frame);
+        return g.center + x.anchor;
+    }
+    QPointF keyPoint(const PathGeo& g, const Keyframe& k) const { return anchorAt(g, k.frame) + QPointF(k.value.c[0], k.value.c[1]); }
+    // Handle positions (doc space) of key i; a side with no tangent shows the straight-line default.
+    bool handlePoint(const PathGeo& g, int i, bool out, QPointF* pt) const {
+        const auto& ks = g.t->keys;
+        const int j = out ? i + 1 : i - 1;
+        if (j < 0 || j >= ks.size()) return false;
+        const QPointF kp = keyPoint(g, ks[i]);
+        const QPointF off = out ? ks[i].spatialOut : ks[i].spatialIn;
+        if (!off.isNull()) { *pt = kp + off; return true; }
+        *pt = kp + (QPointF(ks[j].value.c[0], ks[j].value.c[1]) - QPointF(ks[i].value.c[0], ks[i].value.c[1])) / 3.0;
+        return true;
+    }
+    bool pathPress(const PointerEvent& e) {
+        const PathGeo g = pathGeo();
+        if (!g.l) return false;
+        const double tol = kHitPx / m_c->zoom();
+        const auto& ks = g.t->keys;
+        int hitKey = -1, hitSide = 0;
+        for (int i = 0; i < ks.size() && hitKey < 0; ++i) {      // handles of selected keys sit on top
+            if (!m_s->isKeySelected(g.l->id, "transform.position", ks[i].frame)) continue;
+            for (bool out : {true, false}) {
+                QPointF hp;
+                if (handlePoint(g, i, out, &hp) && QLineF(e.doc, hp).length() <= tol) { hitKey = i; hitSide = out ? 1 : -1; break; }
+            }
+        }
+        if (hitKey < 0)
+            for (int i = 0; i < ks.size(); ++i)
+                if (QLineF(e.doc, keyPoint(g, ks[i])).length() <= tol) { hitKey = i; hitSide = 0; break; }
+        if (hitKey < 0) return false;
+        if (g.l->props.locked) { emit m_s->message(QObject::tr("The active layer is locked.")); return true; }
+        if (hitSide == 0) m_s->setKeySelection({KeyRef{g.l->id, "transform.position", ks[hitKey].frame}});
+        m_pathDrag = hitSide == 0 ? PathKey : hitSide > 0 ? PathOut : PathIn;
+        m_pathFrame = ks[hitKey].frame;
+        m_pathMoved = false;
+        m_pathMerge = "path-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+        m_pathOrig = g.l->tracks;
+        m_pathPress = e.doc;
+        return true;
+    }
+    void pathDrag(const PointerEvent& e) {
+        Layer* l = m_s->activeLayer();
+        if (!l || !m_pathOrig.contains("transform.position")) return;
+        if (!m_pathMoved && QLineF(e.doc, m_pathPress).length() < 3.0 / m_c->zoom()) return;   // a plain click only selects
+        PropertyTracks nt = m_pathOrig;
+        PropertyTrack& t = nt["transform.position"];
+        const int i = t.indexOfKey(m_pathFrame);
+        if (i < 0) return;
+        const QSize cs = m_s->doc()->canvasSize();
+        const QPointF center(cs.width() / 2.0, cs.height() / 2.0);
+        const QPointF anchor = center + l->xformAt(m_pathFrame).anchor;
+        QPointF pt = e.doc;
+        if (m_pathDrag == PathKey) {
+            if (m_s->snapEnabled) pt = m_c->snap(pt);
+            const PropertyDef* d = findPropertyDef("transform.position");
+            t.keys[i].value = clampValue(*d, PropValue::of(pt.x() - anchor.x(), pt.y() - anchor.y()));
+        } else {
+            const QPointF kp = anchor + QPointF(t.keys[i].value.c[0], t.keys[i].value.c[1]);
+            // Moving one handle of a smooth key mirrors the other (Alt breaks the tie).
+            (m_pathDrag == PathOut ? t.keys[i].spatialOut : t.keys[i].spatialIn) = pt - kp;
+            if (!e.alt()) (m_pathDrag == PathOut ? t.keys[i].spatialIn : t.keys[i].spatialOut) = -(pt - kp);
+        }
+        if (nt == l->tracks) return;
+        m_s->doc()->editTracks(l->id, nt, m_pathDrag == PathKey ? QObject::tr("Move Keyframe") : QObject::tr("Edit Motion Path"), m_pathMerge);
+        m_pathMoved = true;
+    }
+    void paintPath(QPainter& p, const QTransform& t) {
+        const PathGeo g = pathGeo();
+        if (!g.l) return;
+        const auto& ks = g.t->keys;
+        const PropertyDef* d = findPropertyDef("transform.position");
+        p.save();
+        p.setRenderHint(QPainter::Antialiasing);
+        QPainterPath path;
+        const int f0 = ks.first().frame, f1 = ks.last().frame;
+        for (int f = f0; f <= f1; ++f) {
+            const PropValue v = g.t->valueAt(*d, f);
+            const QPointF q = t.map(anchorAt(g, f) + QPointF(v.c[0], v.c[1]));
+            if (f == f0) path.moveTo(q); else path.lineTo(q);
+        }
+        p.setPen(QPen(QColor(255, 200, 60, 200), 1.5));
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(path);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(255, 200, 60, 150));
+        for (int f = f0; f <= f1; ++f) {                       // one dot per frame: spacing shows the speed
+            const PropValue v = g.t->valueAt(*d, f);
+            p.drawEllipse(t.map(anchorAt(g, f) + QPointF(v.c[0], v.c[1])), 1.6, 1.6);
+        }
+        for (int i = 0; i < ks.size(); ++i) {
+            const bool sel = m_s->isKeySelected(g.l->id, "transform.position", ks[i].frame);
+            const QPointF kq = t.map(keyPoint(g, ks[i]));
+            if (sel) {
+                for (bool out : {true, false}) {
+                    QPointF hp;
+                    if (!handlePoint(g, i, out, &hp)) continue;
+                    const QPointF hq = t.map(hp);
+                    p.setPen(QPen(QColor(220, 220, 225), 1));
+                    p.drawLine(kq, hq);
+                    p.setBrush(Qt::white);
+                    p.drawEllipse(hq, 4, 4);
+                }
+            }
+            p.setPen(QPen(QColor(20, 20, 20), 1));
+            p.setBrush(sel ? QColor(255, 200, 58) : QColor(240, 150, 40));
+            p.drawRect(QRectF(kq.x() - 4, kq.y() - 4, 8, 8));
+        }
+        p.restore();
+    }
+    PathDrag m_pathDrag = PathNone;
+    QPointF m_pathPress;
+    int m_pathFrame = 0;
+    bool m_pathMoved = false;
+    QString m_pathMerge;
+    PropertyTracks m_pathOrig;
+
     static bool isShapeLayer(const Layer* l) { return l && (l->type == LayerType::Vector || l->type == LayerType::Text); }
     QTransform layerMatrix(const Layer* l) const {
         if (!l || !m_s->doc()) return {};

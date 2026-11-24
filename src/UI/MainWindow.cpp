@@ -1,6 +1,8 @@
 #include <QTimer>
 #include <QShowEvent>
 #include "UI/MainWindow.h"
+#include "UI/GraphEditor.h"
+#include <QTabWidget>
 
 #include <QApplication>
 #include <QCloseEvent>
@@ -445,7 +447,15 @@ void MainWindow::buildDocks() {
     mkDock("layers", tr("Layers"), m_layers);
     mkDock("history", tr("History"), new HistoryPanel(m_session));
     m_anim = new AnimationActions(m_session, this);
-    mkDock("timeline", tr("Timeline"), new TimelinePanel(m_session, m_anim));
+    {
+        // The graph editor lives in a tab next to the timeline (same dock: saved layouts stay valid).
+        auto* tabs = new QTabWidget;
+        tabs->setTabPosition(QTabWidget::South);
+        tabs->setObjectName("timelineTabs");
+        tabs->addTab(new TimelinePanel(m_session, m_anim), tr("Timeline"));
+        tabs->addTab(new GraphEditorPanel(m_session), tr("Graph Editor"));
+        mkDock("timeline", tr("Timeline"), tabs);
+    }
     mkDock("exposure", tr("Exposure Sheet"), new ExposureSheetPanel(m_session, m_anim));
     mkDock("onion", tr("Onion Skin"), new OnionSkinPanel(m_session));
     mkDock("properties", tr("Properties"), new PropertiesPanel(m_session, m_anim));
