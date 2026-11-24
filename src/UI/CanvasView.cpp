@@ -21,6 +21,8 @@ CanvasView::CanvasView(EditorSession* session, QWidget* parent) : QWidget(parent
     connect(session, &EditorSession::selectionChanged, this, [this] { update(); });
     connect(session, &EditorSession::viewTogglesChanged, this, [this] { update(); });
     connect(session, &EditorSession::brushChanged, this, [this] { update(); });
+    // Onion skin is hidden while playing, so the composite must be rebuilt when playback starts/stops.
+    connect(session->playback(), &Playback::playingChanged, this, [this] { if (m_doc) m_doc->emitContentChanged({}); });
     updateCursor();
 }
 CanvasView::~CanvasView() = default;
@@ -56,9 +58,18 @@ void CanvasView::setDocument(Document* d) {
     }
 }
 
+Compositor::Options CanvasView::renderOptions() const {
+    Compositor::Options o;
+    if (!m_session->playback()->isPlaying()) {       // onion skin is an editing aid: hidden while playing
+        o.onion = m_session->onion();
+        o.onion.activeLayer = m_session->activeLayerId();
+    }
+    return o;
+}
+
 void CanvasView::rebuildCache() {
     if (!m_doc) return;
-    m_cache = Compositor::render(*m_doc);
+    m_cache = Compositor::render(*m_doc, m_doc->canvasRect(), renderOptions());
     update();
 }
 
@@ -67,7 +78,7 @@ void CanvasView::onContentChanged(const QRect& r) {
     if (m_cache.size() != m_doc->canvasSize() || r.isEmpty()) { rebuildCache(); return; }
     const QRect rr = r.adjusted(-2, -2, 2, 2).intersected(m_doc->canvasRect());
     if (rr.isEmpty()) return;
-    const QImage part = Compositor::render(*m_doc, rr, {});
+    const QImage part = Compositor::render(*m_doc, rr, renderOptions());
     QPainter p(&m_cache);
     p.setCompositionMode(QPainter::CompositionMode_Source);
     p.drawImage(rr.topLeft(), part);
@@ -163,7 +174,7 @@ QPointF CanvasView::snap(const QPointF& p) const {
 
 QColor CanvasView::sampleColor(const QPoint& p) const {
     if (!m_doc) return {};
-    const QImage px = Compositor::render(*m_doc, QRect(p, QSize(1, 1)), {true});
+    const QImage px = Compositor::render(*m_doc, QRect(p, QSize(1, 1)), Compositor::Options{});
     QColor c = px.pixelColor(0, 0);
     c.setAlpha(255);
     return c;
@@ -291,6 +302,10 @@ void CanvasView::drawRulers(QPainter& p) {
 void CanvasView::pointer(QEvent::Type type, const QPointF& vp, Qt::MouseButton button,
                          Qt::KeyboardModifiers mods, double pressure, double xt, double yt, bool eraserEnd) {
     if (!m_doc) return;
+    if (m_session->playback()->isPlaying()) {        // clicking the canvas stops playback instead of drawing
+        if (type == QEvent::MouseButtonPress) m_session->playback()->pause();
+        return;
+    }
     PointerEvent e;
     e.view = vp;
     e.doc = viewToDoc(vp);

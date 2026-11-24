@@ -66,15 +66,17 @@ bool LayerPropsCommand::mergeWith(const QUndoCommand* other) {
 }
 
 // ---------------- Raster patch ----------------
-RasterPatchCommand::RasterPatchCommand(Document* d, const QUuid& layer, const QRect& rect,
+RasterPatchCommand::RasterPatchCommand(Document* d, const QUuid& layer, const QUuid& drawing, const QRect& rect,
                                        const QImage& before, const QImage& after, const QString& text)
-    : m_doc(d), m_layer(layer), m_rect(rect), m_before(before), m_after(after) {
+    : m_doc(d), m_layer(layer), m_drawing(drawing), m_rect(rect), m_before(before), m_after(after) {
     setText(text);
 }
 void RasterPatchCommand::apply(const QImage& img) {
     Layer* l = m_doc->findLayer(m_layer);
-    if (!l || l->raster.isNull()) return;
-    QPainter p(&l->raster);
+    if (!l) return;
+    QImage* target = l->type == LayerType::Animation ? l->drawingImage(m_drawing) : &l->raster;
+    if (!target || target->isNull()) return;
+    QPainter p(target);
     p.setCompositionMode(QPainter::CompositionMode_Source);
     p.drawImage(m_rect.topLeft(), img);
     p.end();
@@ -85,6 +87,21 @@ void RasterPatchCommand::redo() {
     apply(m_after);
 }
 void RasterPatchCommand::undo() { apply(m_before); }
+
+// ---------------- Animation ----------------
+AnimationStateCommand::AnimationStateCommand(Document* d, const QUuid& layer, const AnimationState& b,
+                                             const AnimationState& a, const QString& text)
+    : m_doc(d), m_layer(layer), m_before(b), m_after(a) { setText(text); }
+void AnimationStateCommand::redo() {
+    if (Layer* l = m_doc->findLayer(m_layer)) { l->anim = m_after; m_doc->emitAnimationChanged(m_layer); }
+}
+void AnimationStateCommand::undo() {
+    if (Layer* l = m_doc->findLayer(m_layer)) { l->anim = m_before; m_doc->emitAnimationChanged(m_layer); }
+}
+TimingCommand::TimingCommand(Document* d, const TimingSettings& b, const TimingSettings& a, const QString& text)
+    : m_doc(d), m_before(b), m_after(a) { setText(text); }
+void TimingCommand::redo() { m_doc->applyTiming(m_after); }
+void TimingCommand::undo() { m_doc->applyTiming(m_before); }
 
 // ---------------- Vector state ----------------
 VectorStateCommand::VectorStateCommand(Document* d, const QUuid& layer, const ShapeList& b,

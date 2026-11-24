@@ -97,6 +97,7 @@ LayerPtr Document::rawRemove(const QUuid& id, QUuid* parentId, int* index, bool 
 void Document::emitTreeChanged() { emit layerTreeChanged(); }
 void Document::emitContentChanged(const QRect& r) { emit contentChanged(r); }
 void Document::emitPropsChanged(const QUuid& id) { emit layerPropsChanged(id); }
+void Document::emitAnimationChanged(const QUuid& id) { emit animationChanged(id); emitContentChanged({}); }
 
 // ---------------- undoable edits ----------------
 QUuid Document::addLayer(LayerType type, const QString& name, QUuid parentId, int index) {
@@ -213,15 +214,101 @@ void Document::setShapes(const QUuid& layerId, const ShapeList& after, const QSt
     m_undo.push(new VectorStateCommand(this, layerId, b, after, text));
 }
 
+void Document::setCurrentFrame(int frame) {
+    frame = qBound(0, frame, std::max(0, m_comp.durationFrames - 1));
+    if (frame == m_frame) return;
+    m_frame = frame;
+    emit frameChanged(frame);
+    emitContentChanged({});
+}
+
+int Document::rangeStart() const { return m_comp.workEnabled ? qBound(0, m_comp.workIn, m_comp.durationFrames - 1) : 0; }
+int Document::rangeEnd() const {
+    return m_comp.workEnabled ? qBound(rangeStart(), m_comp.workOut, m_comp.durationFrames - 1) : m_comp.durationFrames - 1;
+}
+
+static TimingSettings timingOf(const CompositionSettings& c) {
+    TimingSettings t; t.fps = c.fps; t.durationFrames = c.durationFrames;
+    t.workEnabled = c.workEnabled; t.workIn = c.workIn; t.workOut = c.workOut;
+    return t;
+}
+void Document::applyTiming(const TimingSettings& t) {
+    m_comp.fps = t.fps; m_comp.durationFrames = t.durationFrames;
+    m_comp.workEnabled = t.workEnabled; m_comp.workIn = t.workIn; m_comp.workOut = t.workOut;
+    if (m_frame >= m_comp.durationFrames) { m_frame = m_comp.durationFrames - 1; emit frameChanged(m_frame); }
+    emit timingChanged();
+    emitContentChanged({});
+}
+void Document::setDuration(int frames) {
+    frames = qBound(1, frames, kMaxDurationFrames);
+    TimingSettings a = timingOf(m_comp), b = a;
+    b.durationFrames = frames;
+    b.workOut = std::min(b.workOut, frames - 1);
+    b.workIn = std::min(b.workIn, b.workOut);
+    if (a == b) return;
+    m_undo.push(new TimingCommand(this, a, b, tr("Set Duration")));
+}
+void Document::setFrameRate(FrameRate fps) {
+    if (!fps.isValid() || fps == m_comp.fps) return;
+    TimingSettings a = timingOf(m_comp), b = a;
+    b.fps = fps;
+    m_undo.push(new TimingCommand(this, a, b, tr("Set Frame Rate")));
+}
+void Document::setWorkArea(bool enabled, int in, int out) {
+    out = qBound(0, out, m_comp.durationFrames - 1);
+    in = qBound(0, in, out);
+    TimingSettings a = timingOf(m_comp), b = a;
+    b.workEnabled = enabled; b.workIn = in; b.workOut = out;
+    if (a == b) return;
+    m_undo.push(new TimingCommand(this, a, b, tr("Set Work Area")));
+}
+
+QUuid Document::addAnimationLayer(const QString& name, QUuid parentId, int index) {
+    auto l = std::make_shared<Layer>(LayerType::Animation, name);
+    const QUuid id = l->id;
+    m_undo.push(new AddLayerCommand(this, parentId, index, l));
+    return id;
+}
+
+void Document::editAnimation(const QUuid& layerId, const AnimationState& after, const QString& text) {
+    Layer* l = findLayer(layerId);
+    if (!l || l->type != LayerType::Animation || l->anim == after) return;
+    const bool grow = after.endFrame() > m_comp.durationFrames;
+    if (grow) m_undo.beginMacro(text);
+    if (grow) setDuration(after.endFrame());
+    m_undo.push(new AnimationStateCommand(this, layerId, l->anim, after, text));
+    if (grow) m_undo.endMacro();
+}
+
+QUuid Document::createDrawing(const QUuid& layerId, int frame, bool copyFromVisible, int sourceFrame, const QString& name) {
+    Layer* l = findLayer(layerId);
+    if (!l || l->type != LayerType::Animation || frame < 0 || frame >= kMaxDurationFrames) return {};
+    QImage img = newRasterImage();
+    if (copyFromVisible) if (const QImage* src = l->imageAt(sourceFrame >= 0 ? sourceFrame : frame)) img = src->copy();
+    const QUuid id = QUuid::createUuid();
+    AnimationState after = l->anim;
+    after.drawings.push_back({id, name.isEmpty() ? after.nextDrawingName() : name});
+    after.setRange(frame, 1, id);
+    l->drawingImages[id] = img;     // inert until an exposure refers to it; kept for redo/undo
+    editAnimation(layerId, after, copyFromVisible ? tr("Duplicate Drawing") : tr("New Drawing"));
+    return id;
+}
+
 void Document::commitRasterPatch(const QUuid& layerId, const QRect& rect, const QImage& before,
                                  const QString& text) {
     Layer* l = findLayer(layerId);
-    if (!l || l->raster.isNull() || rect.isEmpty()) return;
-    const QRect r = rect.intersected(l->raster.rect());
+    if (!l || rect.isEmpty()) return;
+    const QImage* cur = l->type == LayerType::Animation ? l->imageAt(m_frame) : &l->raster;
+    if (!cur || cur->isNull()) return;
+    const QRect r = rect.intersected(cur->rect());
     if (r.isEmpty()) return;
     // `before` is a full-layer snapshot or already the cropped patch.
     QImage b = before.size() == r.size() ? before : before.copy(r);
-    m_undo.push(new RasterPatchCommand(this, layerId, r, b, l->raster.copy(r), text));
+    QUuid drawing;
+    const QImage* src = &l->raster;
+    if (l->type == LayerType::Animation) { drawing = l->anim.drawingAt(m_frame); src = l->imageAt(m_frame); }
+    if (!src) return;
+    m_undo.push(new RasterPatchCommand(this, layerId, drawing, r, b, src->copy(r), text));
 }
 
 }  // namespace mynd

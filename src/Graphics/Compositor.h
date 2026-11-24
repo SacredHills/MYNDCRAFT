@@ -12,9 +12,25 @@ class Renderer2D;
 // pixel coordinates; `region` selects the sub-rectangle to produce (used for incremental redraw).
 class Compositor {
 public:
+    // Onion skin: faint tinted copies of neighbouring drawings under the current one (editor aid only;
+    // export never enables it). Steps count distinct drawings unless includeHeld is set, in which
+    // case every frame is a step.
+    struct OnionSkin {
+        bool enabled = false;
+        int before = 2, after = 1;
+        double opacity = 0.5;
+        QColor beforeColor{255, 70, 70};
+        QColor afterColor{60, 200, 90};
+        bool includeHeld = false;
+        bool activeLayerOnly = true;
+        QUuid activeLayer;
+    };
     struct Options {
         bool includeBackground = true;
+        int frame = -1;          // -1 = the document's current frame
+        OnionSkin onion;
     };
+    struct Ctx { int frame; const OnionSkin* onion; };
     static QImage render(const Document& doc, const QRect& region, const Options& opt);
     static QImage render(const Document& doc) { return render(doc, doc.canvasRect(), Options{}); }
 
@@ -23,8 +39,9 @@ public:
     static QPainter::CompositionMode mode(BlendMode m);
 
 private:
-    static void drawGroup(QPainter& p, const Layer& group, const QRect& region, const QSize& canvas);
-    static void drawLayer(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas);
+    static void drawGroup(QPainter& p, const Layer& group, const QRect& region, const QSize& canvas, const Ctx& ctx);
+    static void drawLayer(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx);
+    static void drawAnimationLayer(QPainter& p, const Layer& l, const QRect& region, const Ctx& ctx);
 };
 
 }  // namespace mynd

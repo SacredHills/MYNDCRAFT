@@ -19,7 +19,10 @@
 
 #include "Core/Settings.h"
 #include "Graphics/Compositor.h"
+#include "UI/ExposureSheet.h"
 #include "UI/Icons.h"
+#include "UI/OnionSkinPanel.h"
+#include "UI/TimelinePanel.h"
 
 namespace mynd {
 
@@ -430,6 +433,10 @@ void MainWindow::buildDocks() {
     mkDock("style", tr("Color & Style"), new StylePanel(m_session));
     mkDock("layers", tr("Layers"), m_layers);
     mkDock("history", tr("History"), new HistoryPanel(m_session));
+    m_anim = new AnimationActions(m_session, this);
+    mkDock("timeline", tr("Timeline"), new TimelinePanel(m_session, m_anim));
+    mkDock("exposure", tr("Exposure Sheet"), new ExposureSheetPanel(m_session, m_anim));
+    mkDock("onion", tr("Onion Skin"), new OnionSkinPanel(m_session));
     m_workspaces = new WorkspaceManager(this, m_docks, this);
     connect(m_workspaces, &WorkspaceManager::changed, this, &MainWindow::rebuildWorkspaceMenu);
 }
@@ -483,6 +490,9 @@ void MainWindow::buildMenus() {
     layer->addActions({aGroupLayer, aUngroupLayer});
     layer->addSeparator();
     layer->addActions({aUp, aDown, aToggleVis, aToggleLock});
+
+    QMenu* anim = menuBar()->addMenu(tr("&Animation"));
+    m_anim->fillMenu(anim);
 
     QMenu* win = menuBar()->addMenu(tr("&Window"));
     m_workspaceMenu = win->addMenu(tr("&Workspace"));

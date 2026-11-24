@@ -19,6 +19,10 @@ QString rasterAssetName(const QUuid& id) {
     return "assets/raster/" + id.toString(QUuid::WithoutBraces) + ".png";
 }
 
+QString drawingAssetName(const QUuid& layer, const QUuid& drawing) {
+    return "assets/drawings/" + layer.toString(QUuid::WithoutBraces) + "/" + drawing.toString(QUuid::WithoutBraces) + ".png";
+}
+
 QJsonObject layerToJson(const Layer& l) {
     QJsonObject o;
     o["id"] = l.id.toString(QUuid::WithoutBraces);
@@ -31,6 +35,7 @@ QJsonObject layerToJson(const Layer& l) {
     if (l.type == LayerType::Raster) o["asset"] = rasterAssetName(l.id);
     if (l.type == LayerType::Vector) o["shapes"] = shapesToJson(l.shapes);
     if (l.type == LayerType::Text) o["text"] = l.textContent.toJson();
+    if (l.type == LayerType::Animation) o["animation"] = l.anim.toJson();
     if (l.type == LayerType::Group) {
         QJsonArray ch;
         for (const auto& c : l.children) ch.append(layerToJson(*c));
@@ -41,7 +46,7 @@ QJsonObject layerToJson(const Layer& l) {
 
 void collectRaster(const Layer& g, QVector<const Layer*>& out) {
     for (const auto& c : g.children) {
-        if (c->type == LayerType::Raster) out.append(c.get());
+        if (c->type == LayerType::Raster || c->type == LayerType::Animation) out.append(c.get());
         collectRaster(*c, out);
     }
 }
@@ -85,6 +90,10 @@ bool writeZip(const Document& doc, const QString& path, QString* error) {
     comp["fpsDen"] = c.fps.den;
     comp["background"] = c.background.name(QColor::HexArgb);
     comp["gridSize"] = c.gridSize;
+    comp["durationFrames"] = c.durationFrames;
+    comp["workEnabled"] = c.workEnabled;
+    comp["workIn"] = c.workIn;
+    comp["workOut"] = c.workOut;
     QJsonArray guides;
     for (const auto& g : c.guides)
         guides.append(QJsonObject{{"horizontal", g.orientation == Qt::Horizontal}, {"pos", g.pos}});
@@ -99,6 +108,17 @@ bool writeZip(const Document& doc, const QString& path, QString* error) {
     collectRaster(*doc.root(), rasters);
     for (const Layer* l : rasters) {
         if (!ok) break;
+        if (l->type == LayerType::Animation) {
+            for (const auto& dm : l->anim.drawings) {   // only drawings the layer still lists; undo-orphans are dropped
+                auto it = l->drawingImages.find(dm.id);
+                if (it == l->drawingImages.end()) { ok = false; break; }
+                QByteArray png; QBuffer buf(&png); buf.open(QIODevice::WriteOnly);
+                if (!it->second.save(&buf, "PNG")) { ok = false; break; }
+                ok = w.add(drawingAssetName(l->id, dm.id), png, false);
+                if (!ok) break;
+            }
+            continue;
+        }
         QByteArray png;
         QBuffer buf(&png);
         buf.open(QIODevice::WriteOnly);
@@ -153,8 +173,8 @@ bool ProjectIO::save(Document& doc, const QString& path, QString* error, bool ke
 }
 
 bool ProjectIO::migrate(QJsonObject&, int fromVersion, QString* error) {
-    // Version 1 is the first released schema, so there are no migration steps yet. Each future
-    // schema change adds a step here: `if (v == 1) { ...transform...; v = 2; }`.
+    // v1 -> v2 added animation layers, drawings and timeline settings. Every new field is optional with
+    // a default, so a v1 document needs no transformation. Each future breaking change adds a step here.
     if (fromVersion < 1 || fromVersion > kProjectFormatVersion) {
         if (error) *error = QString("Unsupported project version %1").arg(fromVersion);
         return false;
@@ -221,6 +241,27 @@ LayerPtr layerFromJson(const QJsonObject& o, zip_t* z, const Document& doc, QStr
         if (!shapesFromJson(o["shapes"].toArray(), l->shapes, err)) return nullptr;
     } else if (t == LayerType::Text) {
         if (!TextContent::fromJson(o["text"].toObject(), l->textContent, err)) return nullptr;
+    } else if (t == LayerType::Animation) {
+        if (!AnimationState::fromJson(o["animation"].toObject(), l->anim, err)) return nullptr;
+        for (const auto& dm : l->anim.drawings) {
+            bool found = false;
+            const QByteArray name = drawingAssetName(l->id, dm.id).toUtf8();
+            QByteArray data = readEntry(z, name.constData(), &found);
+            QImage img;
+            if (found && img.loadFromData(data, "PNG") && !img.isNull()) {
+                img = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+                if (img.size() != doc.canvasSize()) {
+                    warnings << QString("Layer '%1' drawing '%2': size differs from canvas, cropped/padded").arg(l->props.name, dm.name);
+                    QImage fixed = doc.newRasterImage();
+                    QPainter p(&fixed); p.drawImage(0, 0, img); p.end();
+                    img = fixed;
+                }
+            } else {
+                warnings << QString("Layer '%1' drawing '%2': missing or unreadable image; drawing is blank").arg(l->props.name, dm.name);
+                img = doc.newRasterImage();
+            }
+            l->drawingImages[dm.id] = img;
+        }
     } else {
         for (const auto& v : o["children"].toArray()) {
             LayerPtr c = layerFromJson(v.toObject(), z, doc, warnings, err, depth + 1);
@@ -272,6 +313,10 @@ LoadResult ProjectIO::load(const QString& path) {
         r.error = QString("Invalid canvas size %1x%2.").arg(cs.width).arg(cs.height);
         return r;
     }
+    cs.durationFrames = qBound(1, comp["durationFrames"].toInt(48), kMaxDurationFrames);
+    cs.workEnabled = comp["workEnabled"].toBool(false);
+    cs.workOut = qBound(0, comp["workOut"].toInt(cs.durationFrames - 1), cs.durationFrames - 1);
+    cs.workIn = qBound(0, comp["workIn"].toInt(0), cs.workOut);
     cs.fps = {comp["fpsNum"].toInt(24), comp["fpsDen"].toInt(1)};
     if (!cs.fps.isValid()) { r.warnings << "Invalid frame rate; using 24 fps"; cs.fps = {24, 1}; }
     QColor bg(comp["background"].toString());

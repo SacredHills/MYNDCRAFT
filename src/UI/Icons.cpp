@@ -109,6 +109,10 @@ QIcon layerType(LayerType t) {
             p.setBrush(c); p.drawRect(QRectF(2.5, 16.5, 3, 3)); p.drawRect(QRectF(18.5, 16.5, 3, 3));
         } else if (t == LayerType::Text) {
             p.drawLine(6, 6, 18, 6); p.drawLine(12, 6, 12, 19); p.drawLine(9, 19, 15, 19);
+        } else if (t == LayerType::Animation) {   // a strip of film frames
+            p.drawRect(QRectF(3.5, 6.5, 17, 11));
+            p.drawLine(9, 6.5, 9, 17.5); p.drawLine(15, 6.5, 15, 17.5);
+            p.setBrush(c); p.drawRect(QRectF(10.5, 9.5, 3, 5));
         } else {
             QPainterPath f; f.moveTo(3.5, 7); f.lineTo(9, 7); f.lineTo(11, 9); f.lineTo(20.5, 9);
             f.lineTo(20.5, 19.5); f.lineTo(3.5, 19.5); f.closeSubpath(); p.drawPath(f);

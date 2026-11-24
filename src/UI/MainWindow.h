@@ -11,6 +11,7 @@ class QDropEvent;
 #include "Core/Autosave.h"
 #include "Core/ProjectIO.h"
 #include "UI/CanvasView.h"
+#include "UI/AnimationActions.h"
 #include "UI/EditorSession.h"
 #include "UI/Panels.h"
 #include "UI/Workspaces.h"
@@ -28,6 +29,7 @@ public:
     CanvasView* canvas() const { return m_canvas; }
     LayerPanel* layerPanel() const { return m_layers; }
     WorkspaceManager* workspaces() const { return m_workspaces; }
+    AnimationActions* animation() const { return m_anim; }
     Autosaver* autosaver() const { return m_autosave; }
 
     // Non-interactive API (used by menu handlers after dialogs, by tests and by command line).
@@ -72,6 +74,7 @@ private:
     CanvasView* m_canvas;
     LayerPanel* m_layers;
     WorkspaceManager* m_workspaces = nullptr;
+    AnimationActions* m_anim = nullptr;
     Autosaver* m_autosave;
     QMap<QString, QDockWidget*> m_docks;
     QActionGroup* m_toolGroup;

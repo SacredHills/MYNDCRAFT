@@ -7,7 +7,7 @@
 
 namespace mynd {
 
-constexpr int kProjectFormatVersion = 1;
+constexpr int kProjectFormatVersion = 2;
 constexpr const char* kProjectFormatName = "myndcraft-studio";
 
 struct LoadResult {

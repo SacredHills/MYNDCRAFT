@@ -3,7 +3,11 @@
 #include <QObject>
 #include <QSet>
 
+#include <functional>
+
 #include "Drawing/BrushEngine.h"
+#include "Graphics/Compositor.h"
+#include "Scene/Playback.h"
 #include "Scene/Document.h"
 #include "Scene/TextContent.h"
 
@@ -74,6 +78,23 @@ public:
     const TextContent& textStyle() const { return m_textStyle; }
     void applyTextStyle(const TextContent& style);
 
+    // ---- Animation ----
+    Playback* playback() const { return m_playback; }
+    const Compositor::OnionSkin& onion() const { return m_onion; }
+    void setOnion(const Compositor::OnionSkin& o);   // persisted in the user settings
+    Layer* activeAnimationLayer() const;
+    // Applies `fn` to a copy of the active animation layer's timing data and records the result as one
+    // undo step if it changed anything. Returns false when there is no editable animation layer or fn
+    // reported nothing to do.
+    bool editActiveAnimation(const QString& undoText, const std::function<bool(AnimationState&)>& fn);
+    // Creates a drawing at the current frame (blank or a copy of the visible one), making an animation
+    // layer first when the active layer is not one.
+    QUuid newDrawing(bool copyVisible);
+    // Straight-ahead workflow: step to the next frame and start a fresh drawing there.
+    QUuid newDrawingOnNextFrame(bool copyVisible);
+    // Jump to the previous/next exposure that shows a drawing on the active animation layer.
+    bool gotoDrawing(int direction);
+
     int polygonSides = 5;
     int bucketTolerance = 24;
 
@@ -90,6 +111,7 @@ signals:
     void textStyleChanged();
     void brushChanged();
     void viewTogglesChanged();
+    void onionChanged();
     void message(const QString& text);
 
 private:
@@ -101,6 +123,8 @@ private:
     BrushSettings m_brush, m_pencil, m_eraser, m_smudge;
     TextContent m_textStyle;
     VectorStyle m_style;
+    Playback* m_playback = nullptr;
+    Compositor::OnionSkin m_onion;
 };
 
 }  // namespace mynd

@@ -27,10 +27,13 @@ public:
         Layer* l = m_s->editableLayer(LayerType::Raster, true);
         if (!l) return;
         m_layer = l->id;
+        QImage* target = m_s->doc()->editImage(l);
+        if (!target) return;
+        m_drawing = l->type == LayerType::Animation ? l->anim.drawingAt(m_s->doc()->currentFrame()) : QUuid();
         BrushSettings b = m_s->brush(m_id);
         const bool erase = m_id == ToolId::Eraser || e.eraserEnd;
         const BrushMode mode = m_id == ToolId::Smudge ? BrushMode::Smudge : erase ? BrushMode::Erase : BrushMode::Paint;
-        m_stroke = std::make_unique<BrushStroke>(&l->raster, b, m_s->foreground(), mode);
+        m_stroke = std::make_unique<BrushStroke>(target, b, m_s->foreground(), mode);
         m_erase = erase;
         m_stroke->begin(e.doc, e.pressure);
         m_s->doc()->emitContentChanged(m_stroke->lastUpdateRect());
@@ -53,7 +56,10 @@ public:
     void cancel() override {
         if (!m_stroke) return;
         // Restore the layer to its pre-stroke state.
-        if (Layer* l = m_s->doc()->findLayer(m_layer)) l->raster = m_stroke->original().copy();
+        if (Layer* l = m_s->doc()->findLayer(m_layer)) {
+            QImage* img = l->type == LayerType::Animation ? l->drawingImage(m_drawing) : &l->raster;
+            if (img) *img = m_stroke->original().copy();
+        }
         m_stroke.reset();
         m_s->doc()->emitContentChanged({});
     }
@@ -74,7 +80,7 @@ public:
 private:
     ToolId m_id;
     std::unique_ptr<BrushStroke> m_stroke;
-    QUuid m_layer;
+    QUuid m_layer, m_drawing;
     bool m_erase = false;
 };
 
@@ -133,10 +139,12 @@ public:
         Layer* l = m_s->activeLayer();
         if (!l || l->isGroup() || l->type == LayerType::Text) { emit_msg(QObject::tr("Select a raster or vector layer.")); return; }
         if (l->props.locked || !l->props.visible) { emit_msg(QObject::tr("The active layer is locked or hidden.")); return; }
-        if (l->type == LayerType::Raster) {
+        if (l->isPixelLayer()) {
+            QImage* img = m_s->doc()->editImage(l);
+            if (!img) { emit_msg(QObject::tr("There is no drawing at this frame yet. Draw something first.")); return; }
             const QPoint p = e.doc.toPoint();
-            const QImage before = l->raster.copy();
-            const QRect r = floodFill(l->raster, p, m_s->foreground(), m_s->bucketTolerance);
+            const QImage before = img->copy();
+            const QRect r = floodFill(*img, p, m_s->foreground(), m_s->bucketTolerance);
             if (r.isEmpty()) return;
             m_s->doc()->commitRasterPatch(l->id, r, before, QObject::tr("Paint Bucket"));
             m_s->doc()->emitContentChanged(r);
@@ -177,15 +185,17 @@ public:
         m_b = e.doc;
         Layer* l = m_s->activeLayer();
         if (!l || QLineF(m_a, m_b).length() < 2) { m_c->update(); return; }
-        if (l->type == LayerType::Raster) {
-            const QImage before = l->raster.copy();
+        if (l->isPixelLayer()) {
+            QImage* img = m_s->doc()->editImage(l);
+            if (!img) { emit m_s->message(QObject::tr("There is no drawing at this frame yet. Draw something first.")); m_c->update(); return; }
+            const QImage before = img->copy();
             QLinearGradient g(m_a, m_b);
             g.setColorAt(0, m_s->foreground());
             g.setColorAt(1, m_s->background());
-            QPainter p(&l->raster);
-            p.fillRect(l->raster.rect(), g);
+            QPainter p(img);
+            p.fillRect(img->rect(), g);
             p.end();
-            m_s->doc()->commitRasterPatch(l->id, l->raster.rect(), before, QObject::tr("Gradient Fill"));
+            m_s->doc()->commitRasterPatch(l->id, img->rect(), before, QObject::tr("Gradient Fill"));
             m_s->doc()->emitContentChanged({});
         } else {
             ShapeList after = l->shapes;
@@ -749,7 +759,8 @@ public:
         if (m_h == None) return;
         m_box0 = box; m_start = e.doc;
         if (l->type == LayerType::Vector) m_before = l->shapes;
-        else m_orig = l->raster.copy();
+        else if (QImage* img = m_s->doc()->editImage(l)) m_orig = img->copy();
+        else { m_h = None; return; }
     }
     void move(const PointerEvent& e) override {
         if (m_h == None) return;
@@ -768,8 +779,8 @@ public:
             if (l->type == LayerType::Vector) {
                 const ShapeList after = l->shapes;
                 if (after != m_before) m_s->doc()->setShapes(l->id, after, QObject::tr("Transform Shapes"), &m_before);
-            } else if (!m_t.isIdentity()) {
-                m_s->doc()->commitRasterPatch(l->id, l->raster.rect(), m_orig, QObject::tr("Transform Layer"));
+            } else if (!m_t.isIdentity() && !m_orig.isNull()) {
+                m_s->doc()->commitRasterPatch(l->id, m_orig.rect(), m_orig, QObject::tr("Transform Layer"));
             }
         }
         m_h = None; m_orig = QImage(); m_cacheIndex = -2;
@@ -858,8 +869,10 @@ private:
             for (auto& sh : s) if (m_s->selectedShapes().contains(sh.id)) sh.transform(m_t);
             l->shapes = s;
         } else {
-            l->raster.fill(Qt::transparent);
-            QPainter p(&l->raster);
+            QImage* img = m_s->doc()->editImage(l);
+            if (!img || m_orig.isNull()) return;
+            img->fill(Qt::transparent);
+            QPainter p(img);
             p.setRenderHint(QPainter::SmoothPixmapTransform);
             p.setTransform(m_t);
             p.drawImage(0, 0, m_orig);
@@ -874,9 +887,14 @@ private:
             for (const auto& s : l->shapes) if (m_s->selectedShapes().contains(s.id)) r = r.united(s.path().boundingRect());
             return r;
         }
-        if (l->type == LayerType::Raster && !l->raster.isNull()) {
+        if (l->isPixelLayer()) {
+            const QImage* img = m_s->doc()->editImage(l);
+            if (!img || img->isNull()) return {};
             const int idx = m_s->doc()->undoStack()->index();
-            if (m_cacheLayer != l->id || m_cacheIndex != idx) { m_cacheBox = contentBounds(l->raster); m_cacheLayer = l->id; m_cacheIndex = idx; }
+            const int frame = m_s->doc()->currentFrame();
+            if (m_cacheLayer != l->id || m_cacheIndex != idx || m_cacheFrame != frame) {
+                m_cacheBox = contentBounds(*img); m_cacheLayer = l->id; m_cacheIndex = idx; m_cacheFrame = frame;
+            }
             return QRectF(m_cacheBox);
         }
         return {};
@@ -887,7 +905,7 @@ private:
     QTransform m_t;
     ShapeList m_before;
     QImage m_orig;
-    QRect m_cacheBox; QUuid m_cacheLayer; int m_cacheIndex = -2;
+    QRect m_cacheBox; QUuid m_cacheLayer; int m_cacheIndex = -2, m_cacheFrame = -1;
 };
 
 // ============================================================ Text

@@ -22,7 +22,14 @@ struct CompositionSettings {
     QColor background = Qt::white;  // alpha 0 = transparent
     double gridSize = 50;
     QVector<Guide> guides;
+    // Timeline
+    int durationFrames = 48;
+    bool workEnabled = false;   // loop/play only [workIn, workOut] when enabled
+    int workIn = 0;
+    int workOut = 47;           // inclusive
 };
+
+constexpr int kMaxDurationFrames = 1'000'000;
 
 constexpr int kMaxCanvasDim = 16384;
 
@@ -72,6 +79,28 @@ public:
     void setLayerProps(const QUuid& id, const LayerProps& p, const QString& mergeKey = {});
     void setShapes(const QUuid& layerId, const ShapeList& after, const QString& text,
                    const ShapeList* before = nullptr);
+    // ---- Timeline / traditional animation ----
+    int currentFrame() const { return m_frame; }
+    void setCurrentFrame(int frame);                 // clamps to [0, duration-1]; not an undoable edit
+    int durationFrames() const { return m_comp.durationFrames; }
+    void setDuration(int frames);
+    void setFrameRate(FrameRate fps);
+    void setWorkArea(bool enabled, int in, int out);
+    // First/last frame of the playback range (work area when enabled, else the whole duration).
+    int rangeStart() const;
+    int rangeEnd() const;
+    QUuid addAnimationLayer(const QString& name, QUuid parentId = {}, int index = -1);
+    // Replace the timing data of an animation layer; the duration grows if exposures reach past it.
+    void editAnimation(const QUuid& layerId, const AnimationState& after, const QString& text);
+    // Create a drawing exposed for one frame at `frame` (replacing whatever was exposed there).
+    // copyFromVisible duplicates the pixels of the drawing shown at `sourceFrame` (default: `frame` itself).
+    QUuid createDrawing(const QUuid& layerId, int frame, bool copyFromVisible, int sourceFrame = -1,
+                       const QString& name = {});
+    // The bitmap that tools should edit for this layer at the current frame (null = nothing to edit).
+    QImage* editImage(Layer* l) { return l ? l->imageForEdit(m_frame) : nullptr; }
+    void applyTiming(const struct TimingSettings& t);   // used by TimingCommand
+    void emitAnimationChanged(const QUuid& layerId);
+
     QUuid addTextLayer(const TextContent& content, const QString& name, QUuid parentId = {}, int index = -1);
     // Replaces the content of a text layer. Edits with the same non-empty mergeKey collapse into one undo step.
     void setTextContent(const QUuid& layerId, const TextContent& after, const QString& text,
@@ -97,6 +126,9 @@ signals:
     void layerPropsChanged(const QUuid& id);
     void contentChanged(const QRect& docRect);
     void modifiedChanged(bool modified);
+    void frameChanged(int frame);
+    void animationChanged(const QUuid& layerId);
+    void timingChanged();
 
 private:
     QUuid m_docId = QUuid::createUuid();
@@ -105,6 +137,7 @@ private:
     QUndoStack m_undo;
     QString m_filePath;
     bool m_extraDirty = false;
+    int m_frame = 0;
 };
 
 }  // namespace mynd

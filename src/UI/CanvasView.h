@@ -1,6 +1,8 @@
 #pragma once
 #include <QImage>
 #include <QPlainTextEdit>
+
+#include "Graphics/Compositor.h"
 #include <QWidget>
 #include <memory>
 
@@ -41,6 +43,7 @@ public:
     // Rendered composite at document resolution (cache). Used by tests and the eyedropper.
     QImage compositeImage() const { return m_cache; }
     void rebuildCache();
+    Compositor::Options renderOptions() const;
 
     // Inline text editing (used by the Text tool). layerId null = create a new text layer at docPos.
     void beginTextEdit(const QUuid& layerId, const QPointF& docPos);

@@ -1,8 +1,8 @@
 # Development status
 
-**Current phase:** 1 — Foundation and Drawing (complete for the scope below; see limitations)
+**Current phase:** 2 — Traditional animation (implemented and tested, see below); Phase 1 complete before it
 **Build:** Linux x86-64, GCC 13.3, Qt 6.4.2, CMake 3.28 — builds with no warnings.
-**Tests:** 5 CTest suites, 77 test cases, all passing (also clean under AddressSanitizer + UBSan).
+**Tests:** 8 CTest suites, 121 test cases, all passing (also clean under AddressSanitizer + UBSan).
 **Other platforms:** Windows and macOS are built and tested in CI on every push (see bottom). The Windows portable build was run by hand by the project owner; the macOS build has not been run by a person. No installers.
 
 ## Phase 1 acceptance check
@@ -62,8 +62,8 @@ shapes are still editable. Interactive use on a real display with a real tablet 
 ## Not implemented (Phase 1 scope items deliberately left out)
 Colour-mixing (wet) brushes · boolean path operations · text-to-outlines · SVG import (needs QtSvg, not
 available in the current dev environment) · custom shortcuts · multi-document tabs ·
-the other five workspaces (they are added in the phase that introduces their panels) ·
-everything in Phases 2–11 (animation, timeline, graph editor, 3D, effects, audio, video export, packaging).
+the other four workspaces (they are added in the phase that introduces their panels) ·
+everything in Phases 3–11 (property animation, graph editor, 3D, effects, audio, video export, packaging).
 
 ## Known bugs / limitations
 - Max canvas 16384 px per side on load; New dialog refuses > 100 megapixels. Each raster layer is a
@@ -76,12 +76,59 @@ everything in Phases 2–11 (animation, timeline, graph editor, 3D, effects, aud
 - Raster free-transform bounds ignore partially transparent noise only by alpha > 0; a faint stray pixel enlarges the box.
 - Text rendering depends on installed fonts; a project opened on a machine without the font falls back to a
   substitute (the family name is kept in the file).
-- The "fps" setting is stored and saved but nothing consumes it yet.
 
-## Next tasks (Phase 2 — Traditional animation)
-Drawing/exposure data model separate from property keyframes; exposure sheet panel; timeline panel
-with playback clock; onion skin renderer; drawing substitution; then re-evaluate renderer choice
-(Skia vs. QPainter) before the GPU/3D work in Phase 6.
+## Phase 2 — Traditional animation
+**Acceptance:** *a user can create a frame-by-frame animation, edit its drawings, change exposure timing, use onion
+skinning, and play the animation.* Covered by `tests/test_ui_animation.cpp` (real `MainWindow`, synthesized mouse/keys),
+`test_animation.cpp` (timing model), `test_playback.cpp` (clock), plus animation cases in the document, compositor and
+project-file suites.
+
+What exists:
+- **Animation layers** (new layer type, Layer panel button / Animation menu). Each owns *drawings* (persistent id +
+  name, raster bitmap each) and *exposures* (start, length, drawing, pose marker). One drawing can be exposed any
+  number of times without copying pixels; editing it changes every frame that shows it. Frames with no exposure are
+  empty; an *explicit blank exposure* is also supported.
+- **Drawing**: all raster tools (brush, pencil, eraser, smudge, bucket, gradient, free transform) edit the drawing at
+  the current frame; painting on an empty frame creates a drawing there (its own undo step). Undo/redo targets the
+  drawing that was edited, not whatever frame the playhead is on.
+- **Exposure sheet** (dock): frames × animation layers; shows drawing names, hold bars, blanks, pose colors. Typing a
+  name exposes that drawing on that frame (new names create the drawing); empty clears; `x` = blank. Click = sets
+  playhead + active layer; stays in sync with the timeline.
+- **Timeline** (dock): ruler with frame numbers and seconds ticks, playhead, per-layer rows with exposure spans,
+  scrub by dragging the ruler, click a cell, drag the end of an exposure to retime it, zoom (Ctrl+wheel), work area
+  shading, transport buttons, frame/time/length/fps/speed controls. Frame numbers in the UI start at 1.
+- **Timing commands** (Animation menu + context menus, all undoable): extend/shorten exposure, insert blank exposure,
+  delete frame (ripple), make blank, repeat exposure, loop a frame range N times, substitute a drawing for a whole
+  exposure or one frame, new drawing, duplicate drawing, "next frame with new drawing" (straight-ahead), previous/
+  next drawing, key / breakdown / in-between markers (pose-to-pose). Edits affect the active layer only.
+- **Onion skin**: N previous / N next drawings, opacity falloff, previous/next tint colors, count-held-frames option,
+  active-layer-only option; persisted in user settings. Editor aid only — hidden during playback, never in exports.
+- **Playback**: real-time clock using exact rational frame rates (23.976 / 29.97 / 59.94 supported, no drift), loop,
+  work area, speed 25–200 %, frame skipping instead of slowing down; clicking the canvas pauses.
+- **Project files**: format version 2 (version-1 files still open); drawings stored as PNGs under
+  `assets/drawings/<layer>/<drawing>.png`; duration, frame rate, work area saved.
+- **Animation workspace** preset (timeline bottom, exposure sheet right, onion skin + options left).
+- Shortcuts: `,` `.` previous/next frame · `Home` `End` · `Alt+,` `Alt+.` previous/next drawing · `Shift+Enter` play/pause ·
+  `Alt+Enter` stop · `Alt+O` onion skin · `Ctrl+Shift+N` new drawing · `Ctrl+Shift+D` duplicate drawing ·
+  `Ctrl+Alt+N` next frame + new drawing · `Ctrl+=` / `Ctrl+-` extend/shorten · `Ins` blank exposure · `Ctrl+Del` delete frame ·
+  `Alt+[` `Alt+]` work area in/out.
+
+Known limitations (Phase 2):
+- Drawings are **raster only**; there are no vector drawings inside animation layers yet.
+- Playback composites on the CPU every frame. At 1920×1080 with many layers it may not reach the frame rate; frames
+  are then skipped (counted in `Playback::skippedFrames`) — it does not slow the clock. No frame cache yet.
+- No audio (so no audio sync), no image-sequence/video export yet (Export PNG saves the current frame), no
+  multi-cell selection or drag-and-drop of exposures, no cross-layer ripple edits, no lip-sync/camera/peg features.
+- Onion skin applies to animation layers only.
+- Changing the frame rate keeps frame numbers (it retimes the animation; it does not resample).
+- The exposure-sheet toolbar overflows into a ">>" menu at narrow widths.
+- Timeline/exposure sheet were exercised through automated input and screenshots of the offscreen renderer; they have
+  not been tried by a person on Windows or macOS yet.
+
+## Next tasks (Phase 3 — Property animation engine)
+Typed animatable properties, keyframes and interpolation, auto/manual keyframing, transform animation, property
+tracks on the timeline, then the Graph Editor (Phases 3–4 in the roadmap). Re-evaluate renderer choice (Skia vs.
+QPainter) and add a frame cache before the GPU/3D work.
 
 ## Build / CI status
 `.github/workflows/build.yml` builds and runs the tests on Linux, Windows (MSVC, Qt 6.8.3, vcpkg libzip) and

@@ -1,5 +1,7 @@
 #include "UI/EditorSession.h"
 
+#include <QSettings>
+
 namespace mynd {
 
 QString toolName(ToolId t) {
@@ -33,11 +35,25 @@ EditorSession::EditorSession(QObject* parent) : QObject(parent) {
     m_pencil.pressureSize = false; m_pencil.spacing = 0.2;
     m_eraser = BrushSettings{};
     m_eraser.size = 40; m_eraser.hardness = 0.9;
+    m_playback = new Playback(this);
+    {   // onion skin preferences persist between runs
+        QSettings st(QSettings::NativeFormat, QSettings::UserScope, "MyndCraft", "MyndCraft");
+        m_onion.enabled = st.value("onion/enabled", false).toBool();
+        m_onion.before = qBound(0, st.value("onion/before", 2).toInt(), 10);
+        m_onion.after = qBound(0, st.value("onion/after", 1).toInt(), 10);
+        m_onion.opacity = qBound(0.05, st.value("onion/opacity", 0.5).toDouble(), 1.0);
+        const QColor b(st.value("onion/beforeColor", "#ff4646").toString()), a(st.value("onion/afterColor", "#3cc85a").toString());
+        if (b.isValid()) m_onion.beforeColor = b;
+        if (a.isValid()) m_onion.afterColor = a;
+        m_onion.includeHeld = st.value("onion/includeHeld", false).toBool();
+        m_onion.activeLayerOnly = st.value("onion/activeLayerOnly", true).toBool();
+    }
     m_smudge.size = 30; m_smudge.hardness = 0.6; m_smudge.flow = 0.6; m_smudge.spacing = 0.08; m_smudge.pressureSize = false;
 }
 
 void EditorSession::setDocument(Document* d) {
     m_doc = d;
+    m_playback->setDocument(d);
     m_selected.clear();
     m_activeLayer = {};
     if (d) {
@@ -125,12 +141,83 @@ void EditorSession::applyTextStyle(const TextContent& style) {
     emit textStyleChanged();
 }
 
+void EditorSession::setOnion(const Compositor::OnionSkin& o) {
+    m_onion = o;
+    m_onion.activeLayer = {};
+    QSettings st(QSettings::NativeFormat, QSettings::UserScope, "MyndCraft", "MyndCraft");
+    st.setValue("onion/enabled", o.enabled);
+    st.setValue("onion/before", o.before);
+    st.setValue("onion/after", o.after);
+    st.setValue("onion/opacity", o.opacity);
+    st.setValue("onion/beforeColor", o.beforeColor.name());
+    st.setValue("onion/afterColor", o.afterColor.name());
+    st.setValue("onion/includeHeld", o.includeHeld);
+    st.setValue("onion/activeLayerOnly", o.activeLayerOnly);
+    emit onionChanged();
+    if (m_doc) m_doc->emitContentChanged({});
+}
+
+Layer* EditorSession::activeAnimationLayer() const {
+    Layer* l = activeLayer();
+    return l && l->type == LayerType::Animation ? l : nullptr;
+}
+
+bool EditorSession::editActiveAnimation(const QString& undoText, const std::function<bool(AnimationState&)>& fn) {
+    Layer* l = activeAnimationLayer();
+    if (!m_doc || !l) { emit message(tr("Select an animation layer first.")); return false; }
+    if (l->props.locked) { emit message(tr("The active layer is locked.")); return false; }
+    AnimationState s = l->anim;
+    if (!fn(s)) return false;
+    s.normalize();
+    if (s == l->anim) return false;
+    m_doc->editAnimation(l->id, s, undoText);
+    return true;
+}
+
+QUuid EditorSession::newDrawing(bool copyVisible) {
+    if (!m_doc) return {};
+    Layer* l = activeAnimationLayer();
+    if (!l) {
+        addLayerAboveActive(LayerType::Animation, tr("Animation Layer"));
+        l = activeAnimationLayer();
+    }
+    if (!l || l->props.locked) { emit message(tr("The active layer is locked.")); return {}; }
+    return m_doc->createDrawing(l->id, m_doc->currentFrame(), copyVisible);
+}
+
+QUuid EditorSession::newDrawingOnNextFrame(bool copyVisible) {
+    if (!m_doc) return {};
+    Layer* l = activeAnimationLayer();
+    if (!l) { emit message(tr("Select an animation layer first.")); return {}; }
+    if (l->props.locked) { emit message(tr("The active layer is locked.")); return {}; }
+    const int next = m_doc->currentFrame() + 1;
+    if (next >= m_doc->durationFrames()) m_doc->setDuration(next + 1);   // straight-ahead work grows the scene
+    const int cur = m_doc->currentFrame();
+    m_doc->setCurrentFrame(next);
+    return m_doc->createDrawing(l->id, next, copyVisible, cur);   // optionally start from the drawing we just left
+}
+
+bool EditorSession::gotoDrawing(int direction) {
+    Layer* l = activeAnimationLayer();
+    if (!m_doc || !l) return false;
+    const int f = l->anim.neighborStart(m_doc->currentFrame(), direction);
+    if (f < 0) return false;
+    m_doc->setCurrentFrame(f);
+    return true;
+}
+
 Layer* EditorSession::editableLayer(LayerType t, bool autoCreate) {
     if (!m_doc) return nullptr;
     Layer* l = activeLayer();
-    if (l && l->type == t) {
+    // An animation layer is a pixel layer whose bitmap depends on the frame.
+    if (l && (l->type == t || (t == LayerType::Raster && l->type == LayerType::Animation))) {
         if (l->props.locked) { emit message(tr("The active layer is locked.")); return nullptr; }
         if (!l->props.visible) { emit message(tr("The active layer is hidden.")); return nullptr; }
+        if (l->type == LayerType::Animation && !m_doc->editImage(l)) {
+            // Drawing on a frame with no drawing creates one there (undoable).
+            if (!autoCreate) { emit message(tr("There is no drawing at this frame.")); return nullptr; }
+            if (m_doc->createDrawing(l->id, m_doc->currentFrame(), false).isNull()) return nullptr;
+        }
         return l;
     }
     if (!autoCreate) {

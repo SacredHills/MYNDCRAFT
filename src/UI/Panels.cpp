@@ -78,6 +78,8 @@ LayerPanel::LayerPanel(EditorSession* s, QWidget* parent) : QWidget(parent), m_s
     bR->setIcon(icons::layerType(LayerType::Raster));
     auto* bV = addBtn("", tr("New vector layer"), [this] { m_s->addLayerAboveActive(LayerType::Vector, tr("Vector Layer")); });
     bV->setIcon(icons::layerType(LayerType::Vector));
+    auto* bA = addBtn("", tr("New animation layer (frame-by-frame)"), [this] { m_s->addLayerAboveActive(LayerType::Animation, tr("Animation Layer")); });
+    bA->setIcon(icons::layerType(LayerType::Animation));
     auto* bG = addBtn("", tr("New group"), [this] { m_s->addLayerAboveActive(LayerType::Group, tr("Group")); });
     bG->setIcon(icons::layerType(LayerType::Group));
     addBtn("⧉", tr("Duplicate layer"), [this] { duplicateActive(); });

@@ -219,6 +219,76 @@ private slots:
         QVERIFY(l->textContent == c);
         QCOMPARE(l->props.name, QString("My text"));
     }
+
+    void animationLayersRoundTripWithDrawingsAndTiming() {
+        CompositionSettings cs; cs.width = 32; cs.height = 24; cs.fps = {25, 1};
+        Document d(cs);
+        const QUuid lid = d.addAnimationLayer("Walk");
+        Layer* l = d.findLayer(lid);
+        const QUuid a = d.createDrawing(lid, 0, false);
+        const QUuid b = d.createDrawing(lid, 3, false);
+        l->drawingImages[a].fill(QColor(200, 0, 0));
+        l->drawingImages[b].fill(QColor(0, 0, 200));
+        AnimationState s = l->anim;
+        s.setRange(0, 3, a, PoseMarker::Key); s.setRange(3, 2, b, PoseMarker::Breakdown); s.setRange(5, 1, QUuid());
+        d.editAnimation(lid, s, "t");
+        d.setDuration(30); d.setWorkArea(true, 2, 12);
+        QString err;
+        QVERIFY2(ProjectIO::save(d, path("anim.studio"), &err), qPrintable(err));
+        LoadResult r = ProjectIO::load(path("anim.studio"));
+        QVERIFY2(r.doc, qPrintable(r.error));
+        QVERIFY2(r.warnings.isEmpty(), qPrintable(r.warnings.join(";")));
+        const Layer* rl = r.doc->findLayer(lid);
+        QVERIFY(rl);
+        QCOMPARE(rl->type, LayerType::Animation);
+        QVERIFY(rl->anim == l->anim);
+        QCOMPARE(QColor(rl->drawingImages.at(a).pixel(3, 3)), QColor(200, 0, 0));
+        QCOMPARE(QColor(rl->drawingImages.at(b).pixel(3, 3)), QColor(0, 0, 200));
+        QCOMPARE(r.doc->durationFrames(), 30);
+        QVERIFY(r.doc->comp().workEnabled);
+        QCOMPARE(r.doc->comp().workIn, 2); QCOMPARE(r.doc->comp().workOut, 12);
+        QCOMPARE(r.doc->comp().fps.num, 25);
+    }
+    void missingDrawingAssetIsReportedAndLoadsBlank() {
+        CompositionSettings cs; cs.width = 16; cs.height = 16;
+        Document d(cs);
+        const QUuid lid = d.addAnimationLayer("A");
+        const QUuid a = d.createDrawing(lid, 0, false);
+        QString err;
+        QVERIFY(ProjectIO::save(d, path("miss.studio"), &err));
+        // Rewrite the archive without the drawing PNG.
+        int ze = 0;
+        zip_t* z = zip_open(QFile::encodeName(path("miss.studio")).constData(), 0, &ze);
+        QVERIFY(z);
+        const QByteArray nm = ("assets/drawings/" + lid.toString(QUuid::WithoutBraces) + "/" + a.toString(QUuid::WithoutBraces) + ".png").toUtf8();
+        const zip_int64_t idx = zip_name_locate(z, nm.constData(), 0);
+        QVERIFY(idx >= 0);
+        QCOMPARE(zip_delete(z, idx), 0);
+        QCOMPARE(zip_close(z), 0);
+        LoadResult r = ProjectIO::load(path("miss.studio"));
+        QVERIFY2(r.doc, qPrintable(r.error));
+        QVERIFY(!r.warnings.isEmpty());
+        QVERIFY(r.warnings.first().contains("blank"));
+        QVERIFY(r.doc->findLayer(lid)->imageAt(0));
+    }
+    void versionOneProjectsStillOpen() {
+        CompositionSettings cs; cs.width = 16; cs.height = 16;
+        Document d(cs); d.addLayer(LayerType::Raster, "R");
+        QString err;
+        QVERIFY(ProjectIO::save(d, path("v1.studio"), &err));
+        int ze = 0;
+        zip_t* z = zip_open(QFile::encodeName(path("v1.studio")).constData(), 0, &ze);
+        QVERIFY(z);
+        QJsonObject m{{"format", kProjectFormatName}, {"version", 1}, {"composition", "composition.json"}, {"docId", d.docId().toString(QUuid::WithoutBraces)}};
+        static QByteArray mj; mj = QJsonDocument(m).toJson();
+        zip_source_t* src = zip_source_buffer(z, mj.constData(), mj.size(), 0);
+        QVERIFY(zip_file_add(z, "manifest.json", src, ZIP_FL_OVERWRITE) >= 0);
+        QCOMPARE(zip_close(z), 0);
+        LoadResult r = ProjectIO::load(path("v1.studio"));
+        QVERIFY2(r.doc, qPrintable(r.error));
+        QCOMPARE(r.doc->durationFrames(), 48);                          // default for files without a timeline
+        QCOMPARE(r.doc->layerCount(), 1);
+    }
 };
 
 QTEST_MAIN(TestProjectIO)

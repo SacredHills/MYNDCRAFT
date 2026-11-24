@@ -9,7 +9,7 @@ namespace mynd {
 WorkspaceManager::WorkspaceManager(QMainWindow* w, const QMap<QString, QDockWidget*>& docks, QObject* parent)
     : QObject(parent), m_win(w), m_docks(docks) {}
 
-QStringList WorkspaceManager::presetNames() { return {"Drawing", "Illustration"}; }
+QStringList WorkspaceManager::presetNames() { return {"Drawing", "Illustration", "Animation"}; }
 QStringList WorkspaceManager::customNames() const { return settings::workspaceNames(); }
 
 bool WorkspaceManager::apply(const QString& name) {
@@ -32,7 +32,11 @@ void WorkspaceManager::applyPreset(const QString& name) {
     QDockWidget* sty = m_docks["style"];
     QDockWidget* lay = m_docks["layers"];
     QDockWidget* his = m_docks["history"];
-    for (QDockWidget* d : {opt, sty, lay, his}) { m_win->removeDockWidget(d); }
+    QDockWidget* tim = m_docks["timeline"];
+    QDockWidget* exs = m_docks["exposure"];
+    QDockWidget* oni = m_docks["onion"];
+    for (QDockWidget* d : {opt, sty, lay, his, tim, exs, oni}) { if (d) m_win->removeDockWidget(d); }
+    if (name != "Animation") for (QDockWidget* d : {tim, exs, oni}) if (d) d->hide();   // still available from the Window menu
     if (QToolBar* tb = m_win->findChild<QToolBar*>("tools")) { tb->show(); m_win->addToolBar(Qt::LeftToolBarArea, tb); }
 
     if (name == "Drawing") {
@@ -44,6 +48,24 @@ void WorkspaceManager::applyPreset(const QString& name) {
         m_win->resizeDocks({sty, opt, lay}, {110, 230, 380}, Qt::Vertical);
         m_win->resizeDocks({sty}, {300}, Qt::Horizontal);
         his->hide();
+    } else if (name == "Animation") {
+        // Options + onion skin (tabbed) and colors on the left; exposure sheet over layers on the right; timeline below.
+        m_win->addDockWidget(Qt::LeftDockWidgetArea, opt);
+        m_win->addDockWidget(Qt::LeftDockWidgetArea, oni);
+        m_win->tabifyDockWidget(opt, oni);
+        m_win->addDockWidget(Qt::LeftDockWidgetArea, sty);
+        m_win->splitDockWidget(opt, sty, Qt::Vertical);
+        m_win->addDockWidget(Qt::RightDockWidgetArea, exs);
+        m_win->addDockWidget(Qt::RightDockWidgetArea, lay);
+        m_win->splitDockWidget(exs, lay, Qt::Vertical);
+        m_win->addDockWidget(Qt::RightDockWidgetArea, his);
+        m_win->tabifyDockWidget(lay, his);
+        m_win->addDockWidget(Qt::BottomDockWidgetArea, tim);
+        for (auto* d : {opt, oni, sty, exs, lay, his, tim}) d->show();
+        opt->raise(); lay->raise();
+        m_win->resizeDocks({tim}, {210}, Qt::Vertical);
+        m_win->resizeDocks({opt, exs}, {250, 270}, Qt::Horizontal);
+        m_win->resizeDocks({exs, lay}, {330, 220}, Qt::Vertical);
     } else {  // Illustration: options on the left, layers + history (tabbed) on the right
         m_win->addDockWidget(Qt::LeftDockWidgetArea, opt);
         m_win->addDockWidget(Qt::LeftDockWidgetArea, sty);

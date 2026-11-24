@@ -16,6 +16,7 @@ QUuid solid(Document& d, const QString& name, QColor c, const QUuid& parent = {}
     d.findLayer(id)->raster.fill(c);
     return id;
 }
+const Compositor::Options noBg = [] { Compositor::Options o; o.includeBackground = false; return o; }();
 QColor px(const QImage& i, int x, int y) { return i.pixelColor(x, y); }
 bool near(const QColor& a, const QColor& b, int tol = 2) {
     return qAbs(a.red() - b.red()) <= tol && qAbs(a.green() - b.green()) <= tol && qAbs(a.blue() - b.blue()) <= tol && qAbs(a.alpha() - b.alpha()) <= tol;
@@ -56,7 +57,7 @@ private slots:
         QImage out = Compositor::render(*d);
         QCOMPARE(px(out, 2, 2).alpha(), 0);
         auto d2 = doc(Qt::white);
-        QCOMPARE(px(Compositor::render(*d2, d2->canvasRect(), {false}), 2, 2).alpha(), 0);
+        QCOMPARE(px(Compositor::render(*d2, d2->canvasRect(), noBg), 2, 2).alpha(), 0);
     }
     void groupOpacityIsAppliedToTheGroupAsAUnit() {
         auto d = doc(Qt::white);
@@ -112,6 +113,70 @@ private slots:
         bool anyGrey = false;
         for (int y = 0; y < half.height() && !anyGrey; ++y) for (int x = 0; x < half.width(); ++x) { const int l = half.pixelColor(x, y).lightness(); if (l > 100 && l < 180) { anyGrey = true; break; } }
         QVERIFY(anyGrey);
+    }
+
+    void animationLayerShowsTheDrawingExposedAtEachFrame() {
+        auto d = doc(Qt::white);
+        const QUuid lid = d->addAnimationLayer("anim");
+        const QUuid red = d->createDrawing(lid, 0, false);
+        d->findLayer(lid)->drawingImages[red].fill(Qt::red);
+        const QUuid blue = d->createDrawing(lid, 1, false);
+        d->findLayer(lid)->drawingImages[blue].fill(Qt::blue);
+        Compositor::Options o;
+        o.frame = 0; QVERIFY(near(px(Compositor::render(*d, d->canvasRect(), o), 5, 5), Qt::red));
+        o.frame = 1; QVERIFY(near(px(Compositor::render(*d, d->canvasRect(), o), 5, 5), Qt::blue));
+        o.frame = 2; QVERIFY(near(px(Compositor::render(*d, d->canvasRect(), o), 5, 5), Qt::white));   // nothing exposed
+        d->setCurrentFrame(1);                                                                       // default = current frame
+        QVERIFY(near(px(Compositor::render(*d), 5, 5), Qt::blue));
+        LayerProps p = d->findLayer(lid)->props; p.opacity = 0.5; d->setLayerProps(lid, p);
+        QVERIFY(near(px(Compositor::render(*d), 5, 5), QColor(128, 128, 255), 3));
+    }
+    void onionSkinTintsNeighboursUnderTheCurrentDrawing() {
+        auto d = doc(Qt::white);
+        const QUuid lid = d->addAnimationLayer("anim");
+        Layer* l = d->findLayer(lid);
+        // three drawings: a dot at x=5 (frame 0), x=15 (frame 1), x=25 (frame 2)
+        for (int f = 0; f < 3; ++f) {
+            const QUuid id = d->createDrawing(lid, f, false);
+            QPainter p(&l->drawingImages[id]); p.fillRect(5 + f * 10, 10, 4, 4, Qt::black);
+        }
+        Compositor::Options o; o.frame = 1;
+        const QColor plain = px(Compositor::render(*d, d->canvasRect(), o), 6, 11);
+        QVERIFY(near(plain, Qt::white));                                        // no onion by default
+        o.onion.enabled = true; o.onion.activeLayerOnly = false; o.onion.opacity = 1.0;
+        o.onion.before = 1; o.onion.after = 1;
+        const QImage img = Compositor::render(*d, d->canvasRect(), o);
+        const QColor prev = px(img, 6, 11), next = px(img, 26, 11), cur = px(img, 16, 11);
+        QVERIFY(prev.red() > 200 && prev.green() < 100);                         // previous drawing = red tint
+        QVERIFY(next.green() > 150 && next.red() < 100);                        // next drawing = green tint
+        QVERIFY(near(cur, Qt::black));                                          // current drawing untinted, on top
+        o.onion.before = 0; o.onion.after = 0;
+        QVERIFY(near(px(Compositor::render(*d, d->canvasRect(), o), 6, 11), Qt::white));
+        o.onion.before = 1; o.onion.activeLayerOnly = true; o.onion.activeLayer = QUuid::createUuid();
+        QVERIFY(near(px(Compositor::render(*d, d->canvasRect(), o), 6, 11), Qt::white));   // other layer is active
+    }
+    void onionSkinStepsCountDistinctDrawingsUnlessHeldIncluded() {
+        auto d = doc(Qt::white);
+        const QUuid lid = d->addAnimationLayer("anim");
+        Layer* l = d->findLayer(lid);
+        const QUuid a = d->createDrawing(lid, 0, false);
+        QPainter(&l->drawingImages[a]).fillRect(2, 2, 4, 4, Qt::black);
+        AnimationState s = l->anim; s.setRange(0, 3, a); d->editAnimation(lid, s, "hold");   // A held on frames 0..2
+        const QUuid b = d->createDrawing(lid, 3, false);
+        QPainter(&l->drawingImages[b]).fillRect(30, 2, 4, 4, Qt::black);
+        const QUuid c = d->createDrawing(lid, 4, false);
+        QPainter(&l->drawingImages[c]).fillRect(30, 20, 4, 4, Qt::black);
+        Compositor::Options o; o.frame = 4;
+        o.onion.enabled = true; o.onion.activeLayerOnly = false; o.onion.opacity = 1.0; o.onion.before = 2; o.onion.after = 0;
+        const QImage img = Compositor::render(*d, d->canvasRect(), o);
+        QVERIFY(px(img, 31, 3).red() > 200);                                    // step 1: drawing B
+        QVERIFY(px(img, 3, 3).red() > 200);                                     // step 2: drawing A (the 3-frame hold counts once)
+        o.onion.before = 1;
+        QVERIFY(near(px(Compositor::render(*d, d->canvasRect(), o), 3, 3), Qt::white));   // only one step
+        o.onion.before = 2; o.onion.includeHeld = true; o.frame = 3;                      // from frame 3: per-frame steps over A
+        o.onion.opacity = 0.5;
+        const QImage held = Compositor::render(*d, d->canvasRect(), o);
+        QVERIFY(px(held, 3, 3).red() > 200 && px(held, 3, 3).green() > 100);   // drawn twice => stronger than a single 50% pass
     }
 };
 

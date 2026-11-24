@@ -2,15 +2,17 @@
 #include <QImage>
 #include <QString>
 #include <QUuid>
+#include <map>
 #include <memory>
 #include <vector>
 
+#include "Scene/Animation.h"
 #include "Scene/TextContent.h"
 #include "Scene/VectorShape.h"
 
 namespace mynd {
 
-enum class LayerType { Raster, Vector, Group, Text };
+enum class LayerType { Raster, Vector, Group, Text, Animation };
 enum class BlendMode { Normal, Multiply, Screen, Overlay, Darken, Lighten, Add, Difference };
 
 QString blendModeName(BlendMode m);
@@ -46,11 +48,21 @@ public:
     QImage raster;          // Raster layers: canvas-sized ARGB32_Premultiplied
     ShapeList shapes;       // Vector layers: bottom -> top
     TextContent textContent; // Text layers
+    // Animation layers: exposure timing plus the pixels of every drawing (canvas-sized ARGB32_Premultiplied).
+    // Images stay in the map even when no exposure references them, so undo can bring them back.
+    AnimationState anim;
+    std::map<QUuid, QImage> drawingImages;
     std::vector<LayerPtr> children;  // Group layers
     Layer* parent = nullptr;         // maintained by Document
 
     LayerProps properties() const { return props; }
     bool isGroup() const { return type == LayerType::Group; }
+    // Pixel layers hold a bitmap per frame: one fixed bitmap (Raster) or one per exposed drawing (Animation).
+    bool isPixelLayer() const { return type == LayerType::Raster || type == LayerType::Animation; }
+    // The bitmap shown at `frame`; null for non-pixel layers and for blank frames of animation layers.
+    const QImage* imageAt(int frame) const;
+    QImage* imageForEdit(int frame);
+    QImage* drawingImage(const QUuid& id);
     // Deep copy with fresh ids (for duplicate).
     LayerPtr cloneWithNewIds() const;
     // Deep copy keeping ids (for undo snapshots).

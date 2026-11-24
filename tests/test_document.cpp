@@ -150,6 +150,91 @@ private slots:
         QVERIFY(!d->findLayer(b));
         QCOMPARE(d->undoStack()->undoText(), QString("Import Image"));
     }
+
+    void animationLayerEditsAreUndoableAndGrowTheDuration() {
+        auto d = make();                                               // duration 48
+        const QUuid lid = d->addAnimationLayer("anim");
+        Layer* l = d->findLayer(lid);
+        QCOMPARE(l->type, LayerType::Animation);
+        const QUuid a = d->createDrawing(lid, 0, false);
+        QCOMPARE(l->anim.drawingAt(0), a);
+        QCOMPARE(l->anim.drawings.size(), 1);
+        QCOMPARE(l->anim.drawings[0].name, QString("1"));
+        QVERIFY(l->imageForEdit(0));
+        QVERIFY(!l->imageForEdit(1));
+        const int base = d->undoStack()->count();
+        AnimationState s = l->anim; s.setRange(0, 60, a);              // hold past the end of the composition
+        d->editAnimation(lid, s, "Hold");
+        QCOMPARE(d->durationFrames(), 60);
+        QCOMPARE(d->undoStack()->count(), base + 1);                   // duration + timing = one undo step
+        d->undoStack()->undo();
+        QCOMPARE(d->durationFrames(), 48);
+        QCOMPARE(l->anim.endFrame(), 1);
+        d->undoStack()->redo();
+        QCOMPARE(d->durationFrames(), 60);
+        QCOMPARE(l->anim.endFrame(), 60);
+    }
+    void drawingPixelsAreSharedByEveryExposureAndEditsUndoPerDrawing() {
+        auto d = make();
+        const QUuid lid = d->addAnimationLayer("anim");
+        Layer* l = d->findLayer(lid);
+        const QUuid a = d->createDrawing(lid, 0, false);
+        AnimationState s = l->anim; s.setRange(0, 2, a); s.setRange(4, 2, a); d->editAnimation(lid, s, "Reuse");
+        d->setCurrentFrame(4);
+        QImage* img = d->editImage(l);
+        QVERIFY(img);
+        QImage before = img->copy();
+        QPainter p(img); p.fillRect(3, 3, 5, 5, Qt::red); p.end();
+        d->commitRasterPatch(lid, QRect(0, 0, 10, 10), before, "stroke");
+        d->setCurrentFrame(1);                                         // the other exposure of the same drawing
+        QCOMPARE(qAlpha(d->editImage(l)->pixel(4, 4)), 255);
+        d->setCurrentFrame(10);                                        // elsewhere: undo must still hit the drawing, not the frame
+        d->undoStack()->undo();
+        d->setCurrentFrame(0);
+        QCOMPARE(qAlpha(d->editImage(l)->pixel(4, 4)), 0);
+        d->undoStack()->redo();
+        QCOMPARE(qAlpha(d->editImage(l)->pixel(4, 4)), 255);
+    }
+    void duplicateDrawingCopiesPixelsAndSplitsAHold() {
+        auto d = make();
+        const QUuid lid = d->addAnimationLayer("anim");
+        Layer* l = d->findLayer(lid);
+        const QUuid a = d->createDrawing(lid, 0, false);
+        l->drawingImages[a].fill(Qt::green);
+        AnimationState s = l->anim; s.setRange(0, 5, a); d->editAnimation(lid, s, "Hold");
+        const QUuid b = d->createDrawing(lid, 2, true);                // substitute frame 2 with a copy
+        QCOMPARE(l->anim.drawingAt(1), a);
+        QCOMPARE(l->anim.drawingAt(2), b);
+        QCOMPARE(l->anim.drawingAt(3), a);
+        QCOMPARE(l->anim.drawings[1].name, QString("2"));
+        QCOMPARE(QColor(l->drawingImages[b].pixel(1, 1)), QColor(Qt::green));
+        l->drawingImages[b].fill(Qt::blue);
+        QCOMPARE(QColor(l->drawingImages[a].pixel(1, 1)), QColor(Qt::green));   // independent pixels
+        d->undoStack()->undo();
+        QCOMPARE(l->anim.drawingAt(2), a);
+        QCOMPARE(l->anim.drawings.size(), 1);
+    }
+    void timingEditsAreUndoableAndClampThePlayhead() {
+        auto d = make();
+        d->setDuration(100);
+        d->setCurrentFrame(80);
+        QCOMPARE(d->currentFrame(), 80);
+        d->setWorkArea(true, 10, 20);
+        QCOMPARE(d->rangeStart(), 10); QCOMPARE(d->rangeEnd(), 20);
+        d->setFrameRate({30000, 1001});
+        QVERIFY(!d->comp().fps.isValid() == false);
+        d->setFrameRate({0, 1});                                       // rejected
+        QCOMPARE(d->comp().fps.num, 30000);
+        d->setDuration(30);
+        QCOMPARE(d->currentFrame(), 29);                               // playhead pulled back inside
+        QCOMPARE(d->rangeEnd(), 20);
+        d->undoStack()->undo();
+        QCOMPARE(d->durationFrames(), 100);
+        d->setCurrentFrame(1000);
+        QCOMPARE(d->currentFrame(), 99);
+        d->setCurrentFrame(-5);
+        QCOMPARE(d->currentFrame(), 0);
+    }
 };
 
 QTEST_MAIN(TestDocument)

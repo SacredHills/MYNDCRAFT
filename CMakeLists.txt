@@ -36,6 +36,8 @@ add_library(myndcore STATIC
   src/Core/Autosave.cpp
   src/Scene/VectorShape.cpp
   src/Scene/TextContent.cpp
+  src/Scene/Animation.cpp
+  src/Scene/Playback.cpp
   src/Scene/Layer.cpp
   src/Scene/Document.cpp
   src/Drawing/BrushEngine.cpp
@@ -52,6 +54,10 @@ add_library(myndui STATIC
   src/UI/CanvasView.cpp
   src/UI/Panels.cpp
   src/UI/Icons.cpp
+  src/UI/AnimationActions.cpp
+  src/UI/TimelinePanel.cpp
+  src/UI/ExposureSheet.cpp
+  src/UI/OnionSkinPanel.cpp
   src/UI/Workspaces.cpp
   src/UI/MainWindow.cpp
 )
@@ -76,8 +82,11 @@ function(myndcraft_test name)
   add_test(NAME ${name} COMMAND ${name})
   set_tests_properties(${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endfunction()
+myndcraft_test(test_animation)
+myndcraft_test(test_playback)
 myndcraft_test(test_document)
 myndcraft_test(test_projectio)
 myndcraft_test(test_drawing)
 myndcraft_test(test_compositor)
 myndcraft_test(test_ui_workflow)
+myndcraft_test(test_ui_animation)
