@@ -35,41 +35,54 @@ public:
     }
 
 protected:
+    // Mouse events arrive either on the spin box itself (its border) or on the line edit inside it: both do the same.
+    void mousePressEvent(QMouseEvent* e) override { if (!press(e)) QDoubleSpinBox::mousePressEvent(e); }
+    void mouseMoveEvent(QMouseEvent* e) override { if (!move(e)) QDoubleSpinBox::mouseMoveEvent(e); }
+    void mouseReleaseEvent(QMouseEvent* e) override { if (!release(e)) QDoubleSpinBox::mouseReleaseEvent(e); }
     bool eventFilter(QObject* o, QEvent* e) override {
-        if (o != lineEdit() || lineEdit()->hasFocus() || !isEnabled() || isReadOnly())
-            return QDoubleSpinBox::eventFilter(o, e);
-        switch (e->type()) {
-        case QEvent::MouseButtonPress: {
-            auto* m = static_cast<QMouseEvent*>(e);
-            if (m->button() != Qt::LeftButton) break;
-            m_pressX = m->globalPosition().x();
-            m_startValue = value();
-            m_pressed = true; m_dragging = false;
-            return true;  // not focused yet: focus (and the text cursor) only on a click without a drag
-        }
-        case QEvent::MouseMove: {
-            if (!m_pressed) break;
-            auto* m = static_cast<QMouseEvent*>(e);
-            const double dx = m->globalPosition().x() - m_pressX;
-            if (!m_dragging && std::abs(dx) < 3) return true;
-            m_dragging = true;
-            scrubBy(dx, m->modifiers());
-            return true;
-        }
-        case QEvent::MouseButtonRelease: {
-            if (!m_pressed) break;
-            m_pressed = false;
-            if (!m_dragging) { lineEdit()->setFocus(Qt::MouseFocusReason); selectAll(); }
-            m_dragging = false;
-            return true;
-        }
-        default: break;
+        if (o == lineEdit() && isEnabled() && !isReadOnly()) {
+            switch (e->type()) {
+            case QEvent::MouseButtonPress: if (press(static_cast<QMouseEvent*>(e))) return true; break;
+            case QEvent::MouseMove: if (move(static_cast<QMouseEvent*>(e))) return true; break;
+            case QEvent::MouseButtonRelease: if (release(static_cast<QMouseEvent*>(e))) return true; break;
+            default: break;
+            }
         }
         return QDoubleSpinBox::eventFilter(o, e);
     }
 
 private:
+    bool press(QMouseEvent* m) {
+        if (m->button() != Qt::LeftButton || !isEnabled() || isReadOnly()) return false;
+        // On the up/down buttons (when shown) the normal spin box behaviour stays.
+        if (buttonSymbols() != NoButtons && !lineEdit()->geometry().contains(mapFromGlobal(m->globalPosition().toPoint()))) return false;
+        m_pressX = m->globalPosition().x();
+        m_startValue = value();
+        m_pressed = true; m_dragging = false;
+        m_clickPos = lineEdit()->mapFromGlobal(m->globalPosition().toPoint());
+        return true;       // a plain click is replayed on release; a drag never reaches the text editor
+    }
+    bool move(QMouseEvent* m) {
+        if (!m_pressed) return false;
+        const double dx = m->globalPosition().x() - m_pressX;
+        if (!m_dragging && std::abs(dx) < 3) return true;
+        if (!m_dragging) { m_dragging = true; lineEdit()->deselect(); }
+        scrubBy(dx, m->modifiers());
+        return true;
+    }
+    bool release(QMouseEvent*) {
+        if (!m_pressed) return false;
+        m_pressed = false;
+        if (!m_dragging) {                               // a click: edit the text, cursor where it was clicked
+            const bool had = lineEdit()->hasFocus();
+            lineEdit()->setFocus(Qt::MouseFocusReason);
+            if (had) lineEdit()->setCursorPosition(lineEdit()->cursorPositionAt(m_clickPos)); else selectAll();
+        }
+        m_dragging = false;
+        return true;
+    }
     bool m_pressed = false, m_dragging = false;
+    QPoint m_clickPos;
     double m_pressX = 0, m_startValue = 0, m_pxPerStep = 1;
 };
 

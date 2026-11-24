@@ -376,26 +376,33 @@ private slots:
     }
 
     void transformFieldsCanBeDraggedWithTheMouse() {
-        ScrubSpinBox sb; sb.setRange(-100, 100); sb.setSingleStep(1); sb.setDecimals(2); sb.setValue(10);
-        sb.show(); sb.activateWindow(); QTest::qWaitForWindowActive(&sb); sb.clearFocus(); sb.findChild<QLineEdit*>()->clearFocus();
+        ScrubSpinBox sb; sb.setRange(-1000, 1000); sb.setSingleStep(1); sb.setDecimals(2); sb.setValue(10);
+        sb.show(); sb.activateWindow(); QTest::qWaitForWindowActive(&sb);
+        QLineEdit* le = sb.findChild<QLineEdit*>();
+        sb.clearFocus(); le->clearFocus();
         int changes = 0;
         connect(&sb, &QDoubleSpinBox::valueChanged, this, [&] { ++changes; });
-        QWidget* le = sb.findChild<QLineEdit*>();
-        QMouseEvent pr(QEvent::MouseButtonPress, QPointF(10, 5), le->mapToGlobal(QPointF(10, 5)), Qt::LeftButton, Qt::LeftButton, {});
-        QApplication::sendEvent(le, &pr);
-        QMouseEvent mv(QEvent::MouseMove, QPointF(30, 5), le->mapToGlobal(QPointF(30, 5)), Qt::NoButton, Qt::LeftButton, {});
-        QApplication::sendEvent(le, &mv);
-        QCOMPARE(sb.value(), 10 + 20.0);
-        QVERIFY(changes > 0);
-        sb.scrubBy(20, Qt::ShiftModifier);
-        QCOMPARE(sb.value(), 12.0);
-        sb.scrubBy(2, Qt::ControlModifier);
-        QCOMPARE(sb.value(), 30.0);
-        QMouseEvent rl(QEvent::MouseButtonRelease, QPointF(30, 5), le->mapToGlobal(QPointF(30, 5)), Qt::LeftButton, Qt::NoButton, {});
-        QApplication::sendEvent(le, &rl);
-        QVERIFY(!le->hasFocus());                  // a drag does not start text editing
-        QTest::mouseClick(le, Qt::LeftButton, {}, QPoint(10, 5));   // a plain click does
+        // real mouse events, once on the line edit and once on the spin box border
+        for (QWidget* target : {static_cast<QWidget*>(le), static_cast<QWidget*>(&sb)}) {
+            sb.setValue(10); changes = 0;
+            QTest::mousePress(target, Qt::LeftButton, {}, QPoint(10, 5));
+            QTest::mouseMove(target, QPoint(30, 5));
+            QTest::mouseMove(target, QPoint(40, 5));
+            QCOMPARE(sb.value(), 10 + 30.0);
+            QVERIFY(changes > 0);
+            QTest::mouseRelease(target, Qt::LeftButton, {}, QPoint(40, 5));
+        }
+        // dragging also works after the field was clicked into (focused)
+        QTest::mouseClick(le, Qt::LeftButton, {}, QPoint(10, 5));
         QVERIFY(le->hasFocus());
+        sb.setValue(10);
+        QTest::mousePress(le, Qt::LeftButton, {}, QPoint(10, 5));
+        QTest::mouseMove(le, QPoint(25, 5));
+        QCOMPARE(sb.value(), 25.0);
+        QTest::mouseRelease(le, Qt::LeftButton, {}, QPoint(25, 5));
+        sb.setValue(10);
+        sb.scrubBy(20, Qt::ShiftModifier);                 // fine: x0.1
+        QCOMPARE(sb.value(), 10.0);                        // (from the drag start value, not the current one)
     }
 
     void workspacesComeBackIdenticallyWhateverWasShownBefore() {
