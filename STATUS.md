@@ -281,6 +281,13 @@ Limitations (honest list):
   on this CPU renderer). If the canvas size changes after a card was made, the card keeps its old shape. Cards of layers inside symbols are untested.
   Text/vector layers with effects that depend on the 2D transform will not show them. Not hand-tested on Windows.
 
+## Layer panel: context menu, clipboard, 3D column, scrubbable values (implemented, headless-tested; not yet hand-tested on Windows)
+- Right-click a layer in the Layers panel: copy / cut / paste, duplicate, rename (F2), delete, group, order, 3D Layer and its settings. Works for every layer type; paste goes above the active layer, with new ids (groups keep children). Undoable.
+- "3D" checkbox column right of Lock: turns a 2D layer into a 3D card and back (not shown for 3D scene layers). Stays in sync when toggled from the inspector.
+- Fix: unchecking a 3D layer crashed (use-after-free on a reference into a deleted card node). Ids are now passed by value; regression test run under ASAN.
+- Transform/inspector number fields can be dragged horizontally (Shift fine, Ctrl coarse; click to type). Covers 3D inspector fields and 2D property fields. Tested with synthetic mouse events only.
+- Not done: context menu on timeline layer rows.
+
 ## Next tasks
 1. Phase 8: unified 2D/3D composition (awaiting go-ahead).
 2. Visual tween spans in the timeline, swapping an instance's symbol, per-instance Movie Clip play/stop; FBX animation; clip blocks on the timeline.

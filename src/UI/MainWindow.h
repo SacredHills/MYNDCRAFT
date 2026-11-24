@@ -65,6 +65,7 @@ private:
     void bindUndo();
     void updateTitle();
     void updateActionStates();
+    void showLayerContextMenu(const QPoint& globalPos);
     void actNew();
     void actOpen();
     bool actSave();
@@ -102,7 +103,7 @@ private:
     QAction *aUndo, *aRedo, *aSelAll, *aDeselect, *aDeleteSel;
     QAction *aZoomIn, *aZoomOut, *aFit, *aActual, *aRotL, *aRotR, *aRotReset, *aGrid, *aRulers, *aGuides, *aSnap, *aClearGuides;
     QAction *aGroupShapes, *aUngroupShapes, *aFront, *aForward, *aBackward, *aBack;
-    QAction *aNewRaster, *aNewVector, *aNewGroup, *aDup, *aDelLayer, *aGroupLayer, *aUngroupLayer, *aUp, *aDown, *aToggleVis, *aToggleLock;
+    QAction *aNewRaster, *aNewVector, *aNewGroup, *aDup, *aDelLayer, *aGroupLayer, *aUngroupLayer, *aUp, *aDown, *aToggleVis, *aToggleLock, *aCopyLayer, *aCutLayer, *aPasteLayer, *aRenameLayer, *aTopLayer, *aBottomLayer;
     QMenu *m_recentMenu, *m_workspaceMenu;
     QComboBox* m_wsCombo;
     QLabel *m_zoomLabel, *m_posLabel, *m_layerLabel;

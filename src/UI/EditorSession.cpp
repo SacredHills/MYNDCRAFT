@@ -54,6 +54,7 @@ EditorSession::EditorSession(QObject* parent) : QObject(parent) {
 
 void EditorSession::setDocument(Document* d) {
     m_doc = d;
+    m_layerClip.reset();
     m_playback->setDocument(d);
     clearFrameSelection();
     if (d) connect(d, &Document::frameChanged, this, [this] { if (!m_selInternal) clearFrameSelection(); });
@@ -760,6 +761,34 @@ bool EditorSession::pasteKeys() {
     m_doc->editTracks(l->id, t, tr("Paste Keyframes"));
     setKeySelection(sel);
     return true;
+}
+
+bool EditorSession::copyLayer(const QUuid& id) {
+    if (!m_doc) return false;
+    LayerPtr c = m_doc->copyOfLayer(id);
+    if (!c) return false;
+    m_layerClip = c;
+    return true;
+}
+
+bool EditorSession::cutLayer(const QUuid& id) {
+    if (!copyLayer(id)) return false;
+    m_doc->removeLayer(id);
+    return true;
+}
+
+QUuid EditorSession::pasteLayer() {
+    if (!canPasteLayer()) return {};
+    Layer* at = activeLayer();
+    QUuid parentId;
+    int index = -1;
+    if (at && at->parent) {
+        parentId = at->parent == m_doc->root() ? QUuid() : at->parent->id;
+        index = m_doc->indexInParent(at) + 1;
+    }
+    const QUuid id = m_doc->pasteLayer(m_layerClip, parentId, index, QObject::tr("Paste Layer"));
+    if (!id.isNull()) setActiveLayer(id);
+    return id;
 }
 
 }  // namespace mynd

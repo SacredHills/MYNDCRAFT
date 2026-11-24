@@ -286,6 +286,21 @@ QUuid Document::duplicateLayer(const QUuid& id) {
     return c->id;
 }
 
+QUuid Document::pasteLayer(const LayerPtr& layer, QUuid parentId, int index, const QString& undoText) {
+    if (!layer) return {};
+    LayerPtr c = layer->cloneWithNewIds();
+    c->parent = nullptr;
+    auto* cmd = new AddLayerCommand(this, parentId, index, c);
+    cmd->setText(undoText);
+    m_undo.push(cmd);
+    return c->id;
+}
+
+LayerPtr Document::copyOfLayer(const QUuid& id) const {
+    LayerPtr src = const_cast<Document*>(this)->findLayerPtr(id);
+    return src ? src->cloneWithNewIds() : nullptr;
+}
+
 void Document::moveLayer(const QUuid& id, const QUuid& newParent, int newIndex) {
     Layer* l = findLayer(id);
     if (!l) return;

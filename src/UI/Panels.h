@@ -19,6 +19,7 @@
 #include "UI/EditorSession.h"
 
 namespace mynd {
+class Scene3DActions;
 
 class LayerTree : public QTreeWidget {
     Q_OBJECT
@@ -40,14 +41,21 @@ public:
     void groupActive();
     void ungroupActive();
     LayerTree* tree() const { return m_tree; }
+    void renameActive();                 // starts editing the active layer's name in the list
+    void setScene3DActions(Scene3DActions* a);   // enables the "3D" column
+signals:
+    // Right click in the list: the layer under the cursor was made active (none when the click was on empty space).
+    void contextMenuRequested(const QPoint& globalPos);
 private:
     void rebuild();
     void syncSelection();
     void refreshControls();
+    void refresh3DColumn();
     void onItemChanged(QTreeWidgetItem* it, int col);
     void onDrop(const QUuid& dragged, const QUuid& target, int indicator);
     QTreeWidgetItem* makeItem(const Layer& l);
     EditorSession* m_s;
+    Scene3DActions* m_3d = nullptr;
     LayerTree* m_tree;
     QSlider* m_opacity;
     QLabel* m_opacityLabel;

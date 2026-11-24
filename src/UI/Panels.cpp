@@ -6,10 +6,12 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QPushButton>
+#include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
 #include <functional>
 
 #include "UI/Icons.h"
+#include "UI/Scene3DActions.h"
 
 namespace mynd {
 
@@ -36,12 +38,14 @@ LayerPanel::LayerPanel(EditorSession* s, QWidget* parent) : QWidget(parent), m_s
     lay->setContentsMargins(4, 4, 4, 4);
 
     m_tree = new LayerTree(this);
-    m_tree->setColumnCount(2);
-    m_tree->setHeaderLabels({tr("Layer"), tr("Lock")});
+    m_tree->setColumnCount(3);
+    m_tree->setHeaderLabels({tr("Layer"), tr("Lock"), tr("3D")});
     m_tree->header()->setStretchLastSection(false);
     m_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_tree->header()->setSectionResizeMode(1, QHeaderView::Fixed);
     m_tree->setColumnWidth(1, 44);
+    m_tree->header()->setSectionResizeMode(2, QHeaderView::Fixed);
+    m_tree->setColumnWidth(2, 36);
     m_tree->setRootIsDecorated(true);
     m_tree->setIconSize(QSize(16, 16));
     m_tree->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -49,6 +53,11 @@ LayerPanel::LayerPanel(EditorSession* s, QWidget* parent) : QWidget(parent), m_s
     m_tree->setDefaultDropAction(Qt::MoveAction);
     m_tree->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
     lay->addWidget(m_tree, 1);
+    m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_tree, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+        if (QTreeWidgetItem* it = m_tree->itemAt(pos)) m_s->setActiveLayer(QUuid(it->data(0, kIdRole).toString()));
+        emit contextMenuRequested(m_tree->viewport()->mapToGlobal(pos));
+    });
 
     auto* row = new QHBoxLayout;
     m_blend = new QComboBox;
@@ -101,7 +110,8 @@ LayerPanel::LayerPanel(EditorSession* s, QWidget* parent) : QWidget(parent), m_s
         m_docConns.clear();
         if (m_s->doc()) {
             m_docConns << connect(m_s->doc(), &Document::layerTreeChanged, this, &LayerPanel::rebuild)
-                       << connect(m_s->doc(), &Document::layerPropsChanged, this, [this] { rebuild(); });
+                       << connect(m_s->doc(), &Document::layerPropsChanged, this, [this] { rebuild(); })
+                       << connect(m_s->doc(), &Document::scene3DChanged, this, [this] { refresh3DColumn(); });
         }
         rebuild();
     });
@@ -137,6 +147,10 @@ QTreeWidgetItem* LayerPanel::makeItem(const Layer& l) {
     it->setCheckState(1, l.props.locked ? Qt::Checked : Qt::Unchecked);
     it->setToolTip(0, tr("Checkbox: visibility. Double-click to rename. Drag to reorder."));
     it->setToolTip(1, tr("Checked = locked"));
+    if (l.type != LayerType::Scene3D) {
+        it->setCheckState(2, m_3d && m_3d->isLayer3D(l.id) ? Qt::Checked : Qt::Unchecked);
+        it->setToolTip(2, tr("Checked = shown in 3D space (as a card in a 3D scene layer)"));
+    }
     if (!l.props.visible) it->setForeground(0, QColor(130, 130, 130));
     // Top-most layer first.
     for (auto itc = l.children.rbegin(); itc != l.children.rend(); ++itc) it->addChild(makeItem(**itc));
@@ -172,6 +186,26 @@ void LayerPanel::rebuild() {
     refreshControls();
 }
 
+void LayerPanel::setScene3DActions(Scene3DActions* a) {
+    m_3d = a;
+    rebuild();
+}
+
+void LayerPanel::refresh3DColumn() {
+    if (m_busy || !m_3d) return;
+    const bool was = m_busy;
+    m_busy = true;
+    QTreeWidgetItemIterator it(m_tree);
+    while (*it) {
+        if ((*it)->data(2, Qt::CheckStateRole).isValid()) {
+            const bool on = m_3d->isLayer3D(QUuid((*it)->data(0, kIdRole).toString()));
+            (*it)->setCheckState(2, on ? Qt::Checked : Qt::Unchecked);
+        }
+        ++it;
+    }
+    m_busy = was;
+}
+
 void LayerPanel::syncSelection() {
     const QString id = m_s->activeLayerId().toString();
     const bool was = m_busy;
@@ -205,6 +239,17 @@ void LayerPanel::onItemChanged(QTreeWidgetItem* it, int col) {
     if (m_busy || !m_s->doc()) return;
     Layer* l = m_s->doc()->findLayer(QUuid(it->data(0, kIdRole).toString()));
     if (!l) return;
+    if (col == 2) {
+        if (!m_3d || l->type == LayerType::Scene3D) return;
+        const QUuid id = l->id;
+        const bool want = it->checkState(2) == Qt::Checked;
+        m_inItemEdit = true;
+        QString err;
+        if (want) { if (m_3d->makeLayer3D(id, &err).isNull()) { m_busy = true; it->setCheckState(2, Qt::Unchecked); m_busy = false; } }
+        else m_3d->removeLayer3D(id);
+        m_inItemEdit = false;
+        return;
+    }
     LayerProps p = l->props;
     if (col == 0) {
         p.visible = it->checkState(0) == Qt::Checked;
@@ -251,6 +296,11 @@ void LayerPanel::moveActive(int delta) {
     if (ni < 0 || ni >= n) return;
     const QUuid parent = l->parent == d->root() ? QUuid() : l->parent->id;
     d->moveLayer(l->id, parent, ni);
+}
+void LayerPanel::renameActive() {
+    const QString id = m_s->activeLayerId().toString();
+    for (QTreeWidgetItemIterator it(m_tree); *it; ++it)
+        if ((*it)->data(0, kIdRole).toString() == id) { m_tree->editItem(*it, 0); return; }
 }
 void LayerPanel::deleteActive() { if (m_s->doc() && m_s->activeLayer()) m_s->doc()->removeLayer(m_s->activeLayerId()); }
 void LayerPanel::duplicateActive() {

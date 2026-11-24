@@ -11,6 +11,8 @@
 #include "Core/Settings.h"
 #include "UI/GraphEditor.h"
 #include "UI/MainWindow.h"
+#include "UI/Panels.h"
+#include "UI/ScrubSpinBox.h"
 #include "UI/TimelinePanel.h"
 #include "Scene3D/Anim3D.h"
 #include "UI/Workspaces.h"
@@ -279,6 +281,120 @@ private slots:
         const QUuid sc2 = doc->addScene3DLayer();
         s->setActiveLayer(sc2);
         QVERIFY(a->makeLayer3D(sc2, &err).isNull() && !err.isEmpty());
+    }
+
+    void makingALayer2DAgainFromTheCardInspectorDoesNotUseFreedMemory() {
+        const QUuid art = doc->addLayer(LayerType::Vector, "Art");
+        VectorShape r = VectorShape::makeRect(QRectF(100, 75, 200, 150)); r.fill.color = Qt::red; r.stroke.enabled = false;
+        doc->setShapes(art, {r}, "rect");
+        const QUuid card = a->makeLayer3D(art);
+        QVERIFY(!card.isNull());
+        s->setSelectedNode(card);
+        QApplication::processEvents();
+        QPushButton* back = nullptr;
+        for (QPushButton* b : w->scene3dPanel()->cardGroup()->findChildren<QPushButton*>()) back = b;
+        QVERIFY(back);
+        back->click();                                          // the node (and the id it holds) is deleted inside this click
+        QApplication::processEvents();
+        QVERIFY(!a->isLayer3D(art));
+        QCOMPARE(px(200, 150), QColor(Qt::red));
+        // unchecking from the menu action with the source layer active does the same
+        a->makeLayer3D(art);
+        s->setActiveLayer(art);
+        QApplication::processEvents();
+        QVERIFY(a->make3D->isChecked());
+        a->make3D->trigger();
+        QApplication::processEvents();
+        QVERIFY(!a->isLayer3D(art));
+        QCOMPARE(px(200, 150), QColor(Qt::red));
+    }
+
+    void layersCanBeCopiedCutAndPastedOfAnyType() {
+        const QUuid scene3 = doc->addScene3DLayer("Scene");
+        const QUuid vec = doc->addLayer(LayerType::Vector, "Vec");
+        const QUuid grp = doc->addLayer(LayerType::Group, "Grp");
+        doc->addLayer(LayerType::Raster, "Ras", grp);
+        const int before = int(doc->root()->children.size());
+        for (const QUuid& id : {scene3, vec, grp}) {
+            s->setActiveLayer(id);
+            QVERIFY(s->copyLayer(id));
+            const QUuid pasted = s->pasteLayer();
+            QVERIFY(!pasted.isNull() && pasted != id);
+            QCOMPARE(doc->findLayer(pasted)->type, doc->findLayer(id)->type);
+            QCOMPARE(doc->indexInParent(doc->findLayer(pasted)), doc->indexInParent(doc->findLayer(id)) + 1);   // right above the original
+        }
+        QCOMPARE(int(doc->root()->children.size()), before + 3);
+        // pasting twice gives two independent layers; a pasted group keeps its children (with new ids)
+        s->setActiveLayer(grp);
+        s->copyLayer(grp);
+        const QUuid g1 = s->pasteLayer(), g2 = s->pasteLayer();
+        QVERIFY(g1 != g2);
+        QCOMPARE(doc->findLayer(g1)->children.size(), size_t(1));
+        QVERIFY(doc->findLayer(g1)->children[0]->id != doc->findLayer(grp)->children[0]->id);
+        // cut removes the original and the paste restores it; everything is undoable
+        const int n = int(doc->root()->children.size());
+        QVERIFY(s->cutLayer(vec));
+        QCOMPARE(int(doc->root()->children.size()), n - 1);
+        QVERIFY(!s->pasteLayer().isNull());
+        QCOMPARE(int(doc->root()->children.size()), n);
+        doc->undoStack()->undo();
+        QCOMPARE(int(doc->root()->children.size()), n - 1);
+        // the clipboard is per document
+        s->setDocument(nullptr);
+        QVERIFY(!s->canPasteLayer());
+    }
+
+    void layerPanelHas3DColumnThatTogglesCardMode() {
+        const QUuid vec = doc->addLayer(LayerType::Vector, "Vec");
+        auto* lp = w->findChild<LayerPanel*>();
+        QVERIFY(lp);
+        auto* tree = lp->tree();
+        QCOMPARE(tree->columnCount(), 3);
+        auto find = [&](const QUuid& id) -> QTreeWidgetItem* {
+            QTreeWidgetItemIterator it(tree);
+            while (*it) { if (QUuid((*it)->data(0, Qt::UserRole + 1).toString()) == id) return *it; ++it; }
+            return nullptr;
+        };
+        QTreeWidgetItem* it = find(vec);
+        QVERIFY(it);
+        QCOMPARE(it->checkState(2), Qt::Unchecked);
+        it->setCheckState(2, Qt::Checked);
+        QVERIFY(a->isLayer3D(vec));
+        QVERIFY(find(vec)->checkState(2) == Qt::Checked);
+        find(vec)->setCheckState(2, Qt::Unchecked);       // unchecking must not crash and must restore the layer
+        QVERIFY(!a->isLayer3D(vec));
+        QApplication::processEvents();
+        QVERIFY(find(vec)->checkState(2) == Qt::Unchecked);
+        // turning it off from the inspector keeps the column in sync
+        a->makeLayer3D(vec);
+        QApplication::processEvents();
+        QVERIFY(find(vec)->checkState(2) == Qt::Checked);
+        a->removeLayer3D(vec);
+        QApplication::processEvents();
+        QVERIFY(find(vec)->checkState(2) == Qt::Unchecked);
+    }
+
+    void transformFieldsCanBeDraggedWithTheMouse() {
+        ScrubSpinBox sb; sb.setRange(-100, 100); sb.setSingleStep(1); sb.setDecimals(2); sb.setValue(10);
+        sb.show(); sb.activateWindow(); QTest::qWaitForWindowActive(&sb); sb.clearFocus(); sb.findChild<QLineEdit*>()->clearFocus();
+        int changes = 0;
+        connect(&sb, &QDoubleSpinBox::valueChanged, this, [&] { ++changes; });
+        QWidget* le = sb.findChild<QLineEdit*>();
+        QMouseEvent pr(QEvent::MouseButtonPress, QPointF(10, 5), le->mapToGlobal(QPointF(10, 5)), Qt::LeftButton, Qt::LeftButton, {});
+        QApplication::sendEvent(le, &pr);
+        QMouseEvent mv(QEvent::MouseMove, QPointF(30, 5), le->mapToGlobal(QPointF(30, 5)), Qt::NoButton, Qt::LeftButton, {});
+        QApplication::sendEvent(le, &mv);
+        QCOMPARE(sb.value(), 10 + 20.0);
+        QVERIFY(changes > 0);
+        sb.scrubBy(20, Qt::ShiftModifier);
+        QCOMPARE(sb.value(), 12.0);
+        sb.scrubBy(2, Qt::ControlModifier);
+        QCOMPARE(sb.value(), 30.0);
+        QMouseEvent rl(QEvent::MouseButtonRelease, QPointF(30, 5), le->mapToGlobal(QPointF(30, 5)), Qt::LeftButton, Qt::NoButton, {});
+        QApplication::sendEvent(le, &rl);
+        QVERIFY(!le->hasFocus());                  // a drag does not start text editing
+        QTest::mouseClick(le, Qt::LeftButton, {}, QPoint(10, 5));   // a plain click does
+        QVERIFY(le->hasFocus());
     }
 
     void rotateAndScaleGizmosWork() {

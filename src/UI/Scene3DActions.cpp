@@ -118,7 +118,7 @@ bool Scene3DActions::isLayer3D(const QUuid& layer, QUuid* sceneLayer, QUuid* nod
     return found;
 }
 
-QUuid Scene3DActions::makeLayer3D(const QUuid& layerId, QString* error) {
+QUuid Scene3DActions::makeLayer3D(const QUuid layerId, QString* error) {
     Document* d = m_s->doc();
     Layer* src = d ? d->findLayer(layerId) : nullptr;
     if (!src) { if (error) *error = tr("There is no layer to make 3D."); return {}; }
@@ -157,7 +157,7 @@ QUuid Scene3DActions::makeLayer3D(const QUuid& layerId, QString* error) {
     return made;
 }
 
-bool Scene3DActions::removeLayer3D(const QUuid& layerId) {
+bool Scene3DActions::removeLayer3D(const QUuid layerId) {
     Document* d = m_s->doc();
     if (!d) return false;
     QVector<QUuid> scenes;

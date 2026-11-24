@@ -4,6 +4,7 @@
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include "UI/ScrubSpinBox.h"
 #include <QDropEvent>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -54,7 +55,7 @@ QString glyph(NodeKind k, LightType lt) {
 }
 
 QDoubleSpinBox* spin(double lo, double hi, double step, int dec, QWidget* parent) {
-    auto* s = new QDoubleSpinBox(parent);
+    auto* s = new ScrubSpinBox(parent);
     s->setRange(lo, hi); s->setSingleStep(step); s->setDecimals(dec);
     s->setKeyboardTracking(false);
     s->setMinimumWidth(48);
@@ -139,7 +140,7 @@ Scene3DPanel::Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent)
     connect(cardBack, &QPushButton::clicked, this, [this] {
         const Layer* l = m_s->active3DLayer();
         const Node3D* n = l ? l->scene3d->node(m_s->selectedNode()) : nullptr;
-        if (n && !n->cardLayer.isNull()) m_a->removeLayer3D(n->cardLayer);
+        if (n && !n->cardLayer.isNull()) { const QUuid src = n->cardLayer; m_a->removeLayer3D(src); }      // by value: the node is deleted
     });
 
     m_gMat = new QGroupBox(tr("Material"));

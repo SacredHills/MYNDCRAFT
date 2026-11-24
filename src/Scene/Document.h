@@ -76,6 +76,9 @@ public:
     QUuid addLayer(LayerType type, const QString& name, QUuid parentId = {}, int index = -1);
     void removeLayer(const QUuid& id);
     QUuid duplicateLayer(const QUuid& id);
+    // Inserts a copy (fresh ids) of `layer`, e.g. from the layer clipboard, into `parentId` (null = root) at `index` (-1 = top). Returns its id.
+    QUuid pasteLayer(const LayerPtr& layer, QUuid parentId, int index, const QString& undoText);
+    LayerPtr copyOfLayer(const QUuid& id) const;       // detached deep copy (same ids), for the clipboard
     void moveLayer(const QUuid& id, const QUuid& newParent, int newIndex);
     QUuid groupLayer(const QUuid& id);   // wraps layer in a new group
     void ungroupLayer(const QUuid& groupId);

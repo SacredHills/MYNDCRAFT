@@ -190,6 +190,11 @@ public:
     // View toggles (persisted by MainWindow)
     bool gridVisible = false, rulersVisible = true, guidesVisible = true, snapEnabled = false;
 
+    // Layer clipboard (within the open document): copies are detached snapshots, so later edits to the original do not change what gets pasted.
+    bool copyLayer(const QUuid& id);
+    bool cutLayer(const QUuid& id);
+    QUuid pasteLayer();                      // above the active layer, same parent; returns the new layer
+    bool canPasteLayer() const { return m_doc && m_layerClip; }
 signals:
     void documentChanged();
     void activeLayerChanged(const QUuid& id);
@@ -213,6 +218,7 @@ private:
     Document* m_doc = nullptr;
     QUuid m_activeLayer;
     QUuid m_node;
+    LayerPtr m_layerClip;
     QSet<QUuid> m_selected;
     ToolId m_tool = ToolId::Brush;
     QColor m_fg = Qt::black, m_bg = Qt::white;

@@ -1,6 +1,8 @@
 #include <QTimer>
 #include <QShowEvent>
 #include "UI/MainWindow.h"
+
+#include <QShortcut>
 #include "UI/GraphEditor.h"
 #include "UI/SymbolPanel.h"
 #include "UI/Scene3DActions.h"
@@ -360,6 +362,9 @@ void MainWindow::buildActions() {
     aDown = mk(tr("Move Layer &Down"), QKeySequence("Ctrl+Alt+["));
     aToggleVis = mk(tr("Toggle &Visibility"));
     aToggleLock = mk(tr("Toggle &Lock"));
+    aCopyLayer = mk(tr("&Copy Layer")); aCutLayer = mk(tr("Cu&t Layer")); aPasteLayer = mk(tr("&Paste Layer"));
+    aRenameLayer = mk(tr("&Rename Layer…"), QKeySequence(Qt::Key_F2));
+    aTopLayer = mk(tr("Bring Layer to &Front")); aBottomLayer = mk(tr("Send Layer to &Back"));
     // (LayerPanel exists after buildDocks; connect later in buildMenus)
 
     // Tools
@@ -493,6 +498,7 @@ void MainWindow::buildDocks() {
     m_symbolActions = new SymbolActions(m_session, this);
     m_scene3dActions = new Scene3DActions(m_session, this);
     connect(m_scene3dActions, &Scene3DActions::sceneLayerActivated, this, &MainWindow::show3DPanels);
+    m_layers->setScene3DActions(m_scene3dActions);
     {
         // The graph editor lives in a tab next to the timeline (same dock: saved layouts stay valid).
         auto* tabs = new QTabWidget;
@@ -555,14 +561,28 @@ void MainWindow::buildMenus() {
     connect(aToggleLock, &QAction::triggered, this, [this] {
         if (Layer* l = m_session->activeLayer()) { LayerProps p = l->props; p.locked = !p.locked; m_doc->setLayerProps(l->id, p); }
     });
+    connect(aCopyLayer, &QAction::triggered, this, [this] { m_session->copyLayer(m_session->activeLayerId()); updateActionStates(); });
+    connect(aCutLayer, &QAction::triggered, this, [this] { m_session->cutLayer(m_session->activeLayerId()); updateActionStates(); });
+    connect(aPasteLayer, &QAction::triggered, this, [this] { m_session->pasteLayer(); updateActionStates(); });
+    connect(aRenameLayer, &QAction::triggered, m_layers, &LayerPanel::renameActive);
+    connect(aTopLayer, &QAction::triggered, this, [this] { if (Layer* l = m_session->activeLayer()) if (l->parent) m_layers->moveActive(int(l->parent->children.size())); });
+    connect(aBottomLayer, &QAction::triggered, this, [this] { if (Layer* l = m_session->activeLayer()) if (l->parent) m_layers->moveActive(-int(l->parent->children.size())); });
+    // Layer shortcuts that only apply while the layer list has focus (Ctrl+C/V elsewhere keep copying pixels, shapes, ...)
+    for (auto [key, act] : {std::pair{QKeySequence::Copy, aCopyLayer}, std::pair{QKeySequence::Cut, aCutLayer}, std::pair{QKeySequence::Paste, aPasteLayer},
+                            std::pair{QKeySequence::Delete, aDelLayer}}) {
+        auto* sc = new QShortcut(QKeySequence(key), m_layers->tree());
+        sc->setContext(Qt::WidgetShortcut);
+        connect(sc, &QShortcut::activated, act, &QAction::trigger);
+    }
+    connect(m_layers, &LayerPanel::contextMenuRequested, this, &MainWindow::showLayerContextMenu);
     QMenu* layer = menuBar()->addMenu(tr("&Layer"));
     layer->addActions({aNewRaster, aNewVector, aNewGroup});
     layer->addSeparator();
-    layer->addActions({aDup, aDelLayer});
+    layer->addActions({aCopyLayer, aCutLayer, aPasteLayer, aDup, aDelLayer, aRenameLayer});
     layer->addSeparator();
     layer->addActions({aGroupLayer, aUngroupLayer});
     layer->addSeparator();
-    layer->addActions({aUp, aDown, aToggleVis, aToggleLock});
+    layer->addActions({aTopLayer, aUp, aDown, aBottomLayer, aToggleVis, aToggleLock});
     layer->addSeparator();
     layer->addAction(m_scene3dActions->make3D);
 
@@ -645,6 +665,26 @@ void MainWindow::updateActionStates() {
     const bool has = l != nullptr;
     for (QAction* a : {aDup, aDelLayer, aGroupLayer, aUp, aDown, aToggleVis, aToggleLock}) a->setEnabled(has);
     aUngroupLayer->setEnabled(l && l->isGroup());
+    for (QAction* a : {aCopyLayer, aCutLayer, aRenameLayer, aTopLayer, aBottomLayer}) a->setEnabled(has);
+    aPasteLayer->setEnabled(m_session->canPasteLayer());
+}
+
+void MainWindow::showLayerContextMenu(const QPoint& pos) {
+    updateActionStates();
+    m_scene3dActions->refresh();
+    Layer* l = m_session->activeLayer();
+    QMenu m(this);
+    if (QMenu* nw = m.addMenu(tr("New Layer"))) nw->addActions({aNewRaster, aNewVector, aNewGroup});
+    m.addSeparator();
+    m.addActions({aCopyLayer, aCutLayer, aPasteLayer, aDup, aDelLayer, aRenameLayer});
+    m.addSeparator();
+    m.addActions({aGroupLayer, aUngroupLayer});
+    m.addSeparator();
+    if (QMenu* ord = m.addMenu(tr("Arrange"))) ord->addActions({aTopLayer, aUp, aDown, aBottomLayer});
+    m.addActions({aToggleVis, aToggleLock});
+    if (l && (l->type != LayerType::Scene3D || m_scene3dActions->make3D->isChecked())) { m.addSeparator(); m.addAction(m_scene3dActions->make3D); }
+    if (l && l->type == LayerType::Scene3D) { m.addSeparator(); m.addAction(tr("Show 3D Editor"), this, [this] { show3DPanels(); }); }
+    m.exec(pos);
 }
 
 void MainWindow::updateTitle() {

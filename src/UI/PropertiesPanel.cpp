@@ -1,4 +1,5 @@
 #include "UI/PropertiesPanel.h"
+#include "UI/ScrubSpinBox.h"
 
 #include <QFormLayout>
 
@@ -85,7 +86,7 @@ PropertiesPanel::PropertiesPanel(EditorSession* s, AnimationActions* a, QWidget*
         const int n = propComponents(d.type);
         auto* vals = new QHBoxLayout;
         for (int c = 0; c < n; ++c) {
-            auto* sp = new QDoubleSpinBox;
+            auto* sp = new ScrubSpinBox;
             sp->setRange(d.minV.c[c], d.maxV.c[c]);
             sp->setDecimals(d.decimals);
             sp->setSingleStep(d.type == PropType::Rotation ? 1.0 : 1.0);
