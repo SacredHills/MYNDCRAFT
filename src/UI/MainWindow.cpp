@@ -38,7 +38,7 @@ const char* kFilter = "MyndCraft Project (*.studio)";
 
 MainWindow::MainWindow() {
     setObjectName("MainWindow");
-    setMinimumSize(900, 600);   // below this the docked panels cannot fit and start overlapping the toolbars
+    setMinimumSize(1000, 650);   // below this the docked panels cannot fit and start overlapping the toolbars
     setAcceptDrops(true);
     resize(1500, 900);
     m_session = new EditorSession(this);
