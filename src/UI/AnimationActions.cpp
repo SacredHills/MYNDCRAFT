@@ -80,6 +80,27 @@ AnimationActions::AnimationActions(EditorSession* s, QWidget* dialogParent) : QO
         if (!m_s->editActiveAnimation(tr("Extend Exposure"), [&](AnimationState& s) { return s.extendExposure(f, 1); }))
             emit m_s->message(tr("There is no exposure at this frame to extend."));
     });
+    holdDrawing = mk("holdDrawing", tr("Hold Drawing Until Next Drawing / End"));
+    connect(holdDrawing, &QAction::triggered, this, [=, this] {
+        const int f = frame();
+        const int total = m_s->doc() ? m_s->doc()->durationFrames() : 0;
+        const bool ok = m_s->editActiveAnimation(tr("Hold Drawing"), [&](AnimationState& s) {
+            int start = -1;
+            QUuid dr;
+            if (const Exposure* e = s.at(f); e && !e->drawing.isNull()) { start = e->start; dr = e->drawing; }
+            else if (int ps = s.neighborStart(f, -1); ps >= 0) { if (const Exposure* pe = s.at(ps)) { start = pe->start; dr = pe->drawing; } }
+            if (start < 0 || dr.isNull()) return false;
+            int stop = total;
+            for (const Exposure& e : s.exposures)
+                if (e.start > start && !e.drawing.isNull()) { stop = std::min(stop, e.start); break; }
+            if (stop <= start) return false;
+            const Exposure* cur = s.at(start);
+            const PoseMarker mk2 = cur ? cur->marker : PoseMarker::None;
+            s.setRange(start, stop - start, dr, mk2);
+            return true;
+        });
+        if (!ok) emit m_s->message(tr("There is no drawing to hold here."));
+    });
     shorten = mk("shorten", tr("Shorten Exposure by 1 Frame"), QKeySequence("Ctrl+-"));
     connect(shorten, &QAction::triggered, this, [=, this] {
         const int f = frame();
@@ -213,7 +234,7 @@ AnimationActions::AnimationActions(EditorSession* s, QWidget* dialogParent) : QO
 
 void AnimationActions::refresh() {
     const bool anim = onAnimLayer();
-    for (QAction* a : {newDrawing, duplicateDrawing, newDrawingNextFrame, insertBlank, deleteFrame, loopExposures}) a->setEnabled(anim);
+    for (QAction* a : {newDrawing, duplicateDrawing, newDrawingNextFrame, insertBlank, deleteFrame, loopExposures, holdDrawing}) a->setEnabled(anim);
     bool exposed = false;
     PoseMarker marker = PoseMarker::None;
     if (const Layer* l = m_s->activeAnimationLayer(); l && m_s->doc()) {
@@ -243,7 +264,7 @@ void AnimationActions::fillMenu(QMenu* m) {
     m->addSeparator();
     m->addActions({copyFrames, cutFrames, pasteFrames, pasteLinked});
     m->addSeparator();
-    m->addActions({extend, shorten, insertBlank, deleteFrame, makeBlank, duplicateExposure, loopExposures});
+    m->addActions({extend, holdDrawing, shorten, insertBlank, deleteFrame, makeBlank, duplicateExposure, loopExposures});
     m->addSeparator();
     QMenu* pose = m->addMenu(tr("Pose Marker"));
     pose->addActions({markKey, markBreakdown, markInbetween, markClear});
@@ -278,7 +299,7 @@ void AnimationActions::fillContextMenu(QMenu* m) {
     m->addSeparator();
     m->addActions({newDrawing, duplicateDrawing});
     m->addSeparator();
-    m->addActions({extend, shorten, insertBlank, deleteFrame, makeBlank, duplicateExposure, loopExposures});
+    m->addActions({extend, holdDrawing, shorten, insertBlank, deleteFrame, makeBlank, duplicateExposure, loopExposures});
     m->addSeparator();
     QMenu* pose = m->addMenu(tr("Pose Marker"));
     pose->addActions({markKey, markBreakdown, markInbetween, markClear});

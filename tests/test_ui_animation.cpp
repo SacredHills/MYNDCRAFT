@@ -581,6 +581,22 @@ private slots:
         QVERIFY(!s->hasFrameSelection());
     }
 
+    void holdDrawingFillsBlankFramesUntilTheNextDrawing() {
+        s->newDrawing(false);                                   // "1" at 0
+        doc->setCurrentFrame(10); s->newDrawing(false);         // "2" at 10
+        const QUuid first = L()->anim.drawings[0].id;
+        doc->setCurrentFrame(5);                                // blank frame after "1"
+        w->animation()->holdDrawing->trigger();
+        QCOMPARE(L()->anim.drawingAt(5), first);
+        QCOMPARE(L()->anim.drawingAt(9), first);
+        QCOMPARE(L()->anim.drawingAt(10), L()->anim.drawings[1].id);
+        doc->undoStack()->undo();
+        QVERIFY(L()->anim.drawingAt(5).isNull());
+        doc->setCurrentFrame(10);                               // last drawing holds to the end
+        w->animation()->holdDrawing->trigger();
+        QCOMPARE(L()->anim.drawingAt(doc->durationFrames() - 1), L()->anim.drawings[1].id);
+    }
+
     void exportAnimationIsOnTheFileMenu() {
         bool found = false;
         for (QAction* m : w->menuBar()->actions()) {
