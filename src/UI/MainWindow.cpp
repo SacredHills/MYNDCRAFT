@@ -27,6 +27,7 @@
 #include "UI/ExposureSheet.h"
 #include "UI/Icons.h"
 #include "UI/OnionSkinPanel.h"
+#include "UI/PropertiesPanel.h"
 #include "UI/TimelinePanel.h"
 
 namespace mynd {
@@ -357,7 +358,7 @@ void MainWindow::buildActions() {
                        {ToolId::Eraser, "E"}, {ToolId::Pen, "P"}, {ToolId::Line, "L"}, {ToolId::Rectangle, "M"},
                        {ToolId::Ellipse, "O"}, {ToolId::Polygon, "Y"}, {ToolId::Bucket, "K"}, {ToolId::Gradient, "G"},
                        {ToolId::Eyedropper, "I"}, {ToolId::Hand, "H"}, {ToolId::Zoom, "Z"},
-                       {ToolId::Smudge, "S"}, {ToolId::FreeTransform, "Q"}, {ToolId::Text, "T"}};
+                       {ToolId::Smudge, "S"}, {ToolId::FreeTransform, "Q"}, {ToolId::Text, "T"}, {ToolId::LayerTransform, "W"}};
     for (const T& t : tools) {
         auto* a = new QAction(icons::tool(t.id), toolName(t.id), this);
         a->setCheckable(true);
@@ -411,7 +412,7 @@ void MainWindow::buildToolbars() {
     for (auto it = m_toolActions.begin(); it != m_toolActions.end(); ++it, ++i) {}
     const ToolId order[] = {ToolId::Select, ToolId::DirectSelect, ToolId::Hand, ToolId::Zoom, ToolId::Brush, ToolId::Pencil,
                             ToolId::Eraser, ToolId::Smudge, ToolId::Bucket, ToolId::Gradient, ToolId::Eyedropper, ToolId::Pen, ToolId::Line,
-                            ToolId::Rectangle, ToolId::Ellipse, ToolId::Polygon, ToolId::Text, ToolId::FreeTransform};
+                            ToolId::Rectangle, ToolId::Ellipse, ToolId::Polygon, ToolId::Text, ToolId::FreeTransform, ToolId::LayerTransform};
     for (ToolId id : order) {
         tb->addAction(m_toolActions[id]);
         if (id == ToolId::Zoom || id == ToolId::Eyedropper) tb->addSeparator();
@@ -444,6 +445,7 @@ void MainWindow::buildDocks() {
     mkDock("timeline", tr("Timeline"), new TimelinePanel(m_session, m_anim));
     mkDock("exposure", tr("Exposure Sheet"), new ExposureSheetPanel(m_session, m_anim));
     mkDock("onion", tr("Onion Skin"), new OnionSkinPanel(m_session));
+    mkDock("properties", tr("Properties"), new PropertiesPanel(m_session, m_anim));
     m_workspaces = new WorkspaceManager(this, m_docks, this);
     connect(m_workspaces, &WorkspaceManager::changed, this, &MainWindow::rebuildWorkspaceMenu);
 }

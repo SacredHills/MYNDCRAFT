@@ -2,7 +2,7 @@
 
 **Current phase:** 2 — Traditional animation (implemented and tested, see below); Phase 1 complete before it
 **Build:** Linux x86-64, GCC 13.3, Qt 6.4.2, CMake 3.28 — builds with no warnings.
-**Tests:** 8 CTest suites, 130 test cases, all passing (also clean under AddressSanitizer + UBSan).
+**Tests:** 11 CTest suites, 170 test cases, all passing (also clean under AddressSanitizer + UBSan). UI behaviour is verified with simulated mouse/keyboard input in an offscreen Qt session, not by a person on Windows/macOS yet.
 **Other platforms:** Windows and macOS are built and tested in CI on every push (see bottom). The Windows portable build was run by hand by the project owner; the macOS build has not been run by a person. No installers.
 
 ## Phase 1 acceptance check
@@ -117,18 +117,57 @@ Known limitations (Phase 2):
 - Drawings are **raster only**; there are no vector drawings inside animation layers yet.
 - Playback composites on the CPU every frame. At 1920×1080 with many layers it may not reach the frame rate; frames
   are then skipped (counted in `Playback::skippedFrames`) — it does not slow the clock. No frame cache yet.
-- No audio (so no audio sync), no image-sequence/video export yet (Export PNG saves the current frame), no
-  multi-cell selection or drag-and-drop of exposures, no cross-layer ripple edits, no lip-sync/camera/peg features.
+- No audio (so no audio sync), no video export (see Export below), no drag-and-drop of exposures,
+  no cross-layer ripple edits, no lip-sync/camera/peg features.
 - Onion skin applies to animation layers only.
 - Changing the frame rate keeps frame numbers (it retimes the animation; it does not resample).
 - The exposure-sheet toolbar overflows into a ">>" menu at narrow widths.
 - Timeline/exposure sheet were exercised through automated input and screenshots of the offscreen renderer; they have
   not been tried by a person on Windows or macOS yet.
 
-## Next tasks (Phase 3 — Property animation engine)
-Typed animatable properties, keyframes and interpolation, auto/manual keyframing, transform animation, property
-tracks on the timeline, then the Graph Editor (Phases 3–4 in the roadmap). Re-evaluate renderer choice (Skia vs.
-QPainter) and add a frame cache before the GPU/3D work.
+## Phase 2 completion: export and exposure-sheet selection
+- **File > Export Animation… (Ctrl+Shift+E):** animated **GIF** (own encoder: median-cut palette per frame, LZW, loop count,
+  optional 1-bit transparency, frame delays rounded with carried error so total length is exact) or a **PNG sequence**
+  (`name_0001.png`…). Frame range defaults to the work area. Onion skin/overlays are never exported.
+  Verified by decoding the GIF with an independent decoder in the tests, and by opening a generated file with ffmpeg/ImageMagick.
+- **No video encoder** is built in (no MP4/MOV/WebM, no audio). Use the PNG sequence with ffmpeg. GIF is 256 colours per frame,
+  1-bit transparency, and browsers play delays under 2 cs (above ~50 fps) slower than specified.
+- **Exposure sheet** now supports selecting several frames of one layer (drag / Shift+click); the selection is shared with the
+  timeline, so Copy / Cut / Paste / Delete work from either.
+
+## Phase 3 — Property animation engine
+Implemented:
+- **Typed property model** (`Scene/Property.*`): persistent property ids, types (Float, Int, Bool, Vec2, Vec3, Vec4, Color,
+  Rotation, Enum), defaults, validation ranges, sparse per-layer track map, keyframes (sorted, one per frame), serialisation.
+  Only the 2D transform + opacity properties are *registered* so far: Anchor Point, Position, Scale (X/Y), Rotation, Opacity.
+  The engine itself is generic: other types interpolate/validate and are covered by tests, but no UI or layer feature uses them yet.
+- **Interpolation:** linear, hold, and temporal Bezier with per-key in/out type and handles (Ease In, Ease Out, Easy Ease presets);
+  overshoot supported; Bool/Enum never blend; Int rounds.
+- **Evaluation in the compositor:** every layer type, including groups and animation layers, is drawn through its matrix
+  (anchor/position/scale/rotation about the anchor) and opacity at the current frame; identity transforms take the unchanged
+  fast path. Used for the canvas, playback and exports alike.
+- **Editing:** Properties dock (stopwatch, values, add/remove key, previous/next key, keep-proportions scale, Auto-Key);
+  **Transform Layer tool (W)** (move, rotate with Shift snap, scale handles, draggable anchor that keeps the picture still);
+  **Auto-Key** (Ctrl+Shift+K): off = editing a non-animated property changes its static value; on = it creates a keyframe at
+  the playhead; an already animated property always keys.
+- **Timeline integration:** expand a layer (arrow) to get a row per property with keyframe markers (diamond = linear, circle =
+  eased, square = hold); click / Ctrl-click / marquee to select, drag to retime, Delete, Copy/Cut/Paste keyframes (to any layer),
+  right-click presets, `F9` Easy Ease, `Ctrl+,` / `Ctrl+.` previous/next keyframe. Collapsed layers show a keyframe summary.
+- **Undo:** every edit is a single undo step (a drag is one step); **save/load:** project format version 3 (v1/v2 open).
+Limitations (honest list):
+- Not animatable yet: Z / 3D properties, visibility, path geometry, stroke width, fill/stroke colour, text, effects, camera,
+  light, material, audio. Their types exist in the engine but nothing is wired to them.
+- No graph editor, speed graph, tangent dragging, or motion paths on the canvas (Phase 4). Easing can only be picked from presets.
+- Keyframes sit on whole frames (the value can be evaluated between frames; keys cannot be placed there).
+- Transform is not parented (no layer-to-layer parenting); a group transforms its children as a unit.
+- The Transform Layer tool's box is the layer's opaque-pixel/shape bounds on the current frame; the rotate handle is the area
+  just outside the box.
+- Transformed layers are rendered through an intermediate buffer; heavy scenes may drop frames on CPU (no cache yet).
+- Copy of a mix of properties from several layers merges frames per property; pasting always targets the active layer.
+
+## Next tasks (Phase 4 — Graph Editor)
+Value/speed graph, Bezier handle and tangent editing, spatial motion paths in the viewport, curve presets. Re-evaluate
+renderer choice (Skia vs. QPainter) and add a frame cache before the GPU/3D work.
 
 ## Build / CI status
 `.github/workflows/build.yml` builds and runs the tests on Linux, Windows (MSVC, Qt 6.8.3, vcpkg libzip) and

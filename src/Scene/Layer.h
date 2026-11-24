@@ -68,6 +68,9 @@ public:
     QImage* drawingImage(const QUuid& id);
     // Transform/opacity evaluated at `frame` (identity when nothing is set).
     LayerXform xformAt(double frame) const { return evaluateTransform(tracks, frame); }
+    // Bounds of what the layer draws at `frame`, in its own (untransformed) space: opaque pixels, shapes, text,
+    // or the union of a group's children (each mapped through its own transform). Empty when there is nothing.
+    QRectF contentBounds(int frame, const QSize& canvas) const;
     // Deep copy with fresh ids (for duplicate).
     LayerPtr cloneWithNewIds() const;
     // Deep copy keeping ids (for undo snapshots).

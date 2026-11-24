@@ -60,6 +60,7 @@ add_library(myndui STATIC
   src/UI/TimelinePanel.cpp
   src/UI/ExposureSheet.cpp
   src/UI/OnionSkinPanel.cpp
+  src/UI/PropertiesPanel.cpp
   src/UI/Workspaces.cpp
   src/UI/MainWindow.cpp
 )
@@ -94,3 +95,4 @@ myndcraft_test(test_drawing)
 myndcraft_test(test_compositor)
 myndcraft_test(test_ui_workflow)
 myndcraft_test(test_ui_animation)
+myndcraft_test(test_ui_keyframes)

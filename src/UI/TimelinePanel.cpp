@@ -31,18 +31,21 @@ TimelineView::TimelineView(EditorSession* s, AnimationActions* a, QWidget* paren
     horizontalScrollBar()->setSingleStep(16);
     auto refresh = [this] { rebuildRows(); viewport()->update(); };
     connect(s, &EditorSession::documentChanged, this, [this, refresh] {
-        for (auto* c : {&m_c1, &m_c2, &m_c3, &m_c4, &m_c5}) disconnect(*c);
+        for (auto* c : {&m_c1, &m_c2, &m_c3, &m_c4, &m_c5, &m_c6}) disconnect(*c);
         if (Document* d = m_s->doc()) {
             m_c1 = connect(d, &Document::layerTreeChanged, this, refresh);
             m_c2 = connect(d, &Document::layerPropsChanged, this, [refresh] { refresh(); });
             m_c3 = connect(d, &Document::animationChanged, this, [refresh] { refresh(); });
             m_c4 = connect(d, &Document::timingChanged, this, refresh);
+            m_c6 = connect(d, &Document::tracksChanged, this, [this] { viewport()->update(); });
             m_c5 = connect(d, &Document::frameChanged, this, [this](int f) { ensureFrameVisible(f); viewport()->update(); });
         }
         refresh();
     });
     connect(s, &EditorSession::activeLayerChanged, this, [this] { viewport()->update(); });
     connect(s, &EditorSession::frameSelectionChanged, this, [this] { viewport()->update(); });
+    connect(s, &EditorSession::keySelectionChanged, this, [this] { viewport()->update(); });
+    setFocusPolicy(Qt::StrongFocus);
     rebuildRows();
 }
 
@@ -59,7 +62,8 @@ void TimelineView::rebuildRows() {
         std::function<void(Layer*, int)> walk = [&](Layer* g, int depth) {
             for (int i = int(g->children.size()) - 1; i >= 0; --i) {     // top of the stack first
                 Layer* c = g->children[i].get();
-                m_rows.append({c, depth});
+                m_rows.append({c, depth, QString()});
+                if (m_expanded.contains(c->id)) for (const PropertyDef& pd : layerPropertyDefs()) m_rows.append({c, depth + 1, pd.id});
                 if (c->isGroup()) walk(c, depth + 1);
             }
         };
@@ -95,8 +99,34 @@ int TimelineView::rowAtY(int y) const {
     return r >= 0 && r < m_rows.size() ? r : -1;
 }
 int TimelineView::rowOfLayer(const QUuid& id) const {
-    for (int i = 0; i < m_rows.size(); ++i) if (m_rows[i].layer->id == id) return i;
+    for (int i = 0; i < m_rows.size(); ++i) if (m_rows[i].layer->id == id && m_rows[i].prop.isEmpty()) return i;
     return -1;
+}
+int TimelineView::rowOfProperty(const QUuid& id, const QString& prop) const {
+    for (int i = 0; i < m_rows.size(); ++i) if (m_rows[i].layer->id == id && m_rows[i].prop == prop) return i;
+    return -1;
+}
+void TimelineView::setExpanded(const QUuid& id, bool on) {
+    if (on == m_expanded.contains(id)) return;
+    if (on) m_expanded.insert(id); else m_expanded.remove(id);
+    rebuildRows();
+    viewport()->update();
+}
+QPoint TimelineView::twirlPoint(int row) const {
+    return {6 + (row >= 0 && row < m_rows.size() ? m_rows[row].depth * 12 : 0) + 4, kRulerH + row * kRowH - verticalScrollBar()->value() + kRowH / 2};
+}
+bool TimelineView::keyAt(const QPoint& pt, KeyRef* out) const {
+    const int r = rowAtY(pt.y());
+    if (r < 0 || m_rows[r].prop.isEmpty() || pt.x() < kNameW) return false;
+    const Layer* l = m_rows[r].layer;
+    auto it = l->tracks.constFind(m_rows[r].prop);
+    if (it == l->tracks.constEnd()) return false;
+    const int half = keyHalf() + 1;
+    for (const Keyframe& k : it->keys) {
+        const int cx = xOfFrame(k.frame) + m_cellW / 2;
+        if (std::abs(pt.x() - cx) <= half) { *out = {l->id, m_rows[r].prop, k.frame}; return true; }
+    }
+    return false;
 }
 QPoint TimelineView::cellCenter(int frame, int row) const {
     return {xOfFrame(frame) + m_cellW / 2, kRulerH + row * kRowH - verticalScrollBar()->value() + kRowH / 2};
@@ -143,6 +173,36 @@ void TimelineView::paintEvent(QPaintEvent*) {
             p.setPen((f % fpsN) == 0 ? strong : grid);
             p.drawLine(x, y, x, y + kRowH);
         }
+        if (!m_rows[r].prop.isEmpty()) {
+            // Property row: one marker per keyframe (diamond = linear, circle = eased, square = hold).
+            auto it = l->tracks.constFind(m_rows[r].prop);
+            if (it == l->tracks.constEnd()) continue;
+            const int half = keyHalf();
+            const int cy = y + kRowH / 2;
+            for (int i = 0; i + 1 < it->keys.size(); ++i) {      // faint span between neighbouring keys
+                const Keyframe &a = it->keys[i], &b = it->keys[i + 1];
+                if (b.frame < firstF || a.frame > lastF) continue;
+                p.fillRect(QRect(xOfFrame(a.frame) + m_cellW / 2, cy - 1, (b.frame - a.frame) * m_cellW, 2), QColor(255, 140, 0, 70));
+            }
+            for (const Keyframe& k : it->keys) {
+                if (k.frame < firstF - 1 || k.frame > lastF + 1) continue;
+                const QPoint c(xOfFrame(k.frame) + m_cellW / 2, cy);
+                const bool sel = m_s->isKeySelected(l->id, it.key(), k.frame);
+                p.setPen(QPen(sel ? QColor(255, 255, 255) : QColor(40, 40, 40), 1.5));
+                p.setBrush(sel ? QColor(255, 200, 60) : QColor(255, 140, 0));
+                if (k.out == Interp::Hold) p.drawRect(QRect(c.x() - half + 1, cy - half + 1, 2 * half - 2, 2 * half - 2));
+                else if (k.in == Interp::Bezier || k.out == Interp::Bezier) p.drawEllipse(c, half, half);
+                else p.drawPolygon(QPolygon({{c.x(), cy - half - 1}, {c.x() + half + 1, cy}, {c.x(), cy + half + 1}, {c.x() - half - 1, cy}}));
+            }
+            if (m_drag == KeyMove && m_keyDelta != 0) {           // ghosts of the keys being dragged
+                p.setBrush(Qt::NoBrush);
+                p.setPen(QPen(QColor(255, 255, 255, 200), 1, Qt::DashLine));
+                for (const KeyRef& kr : m_s->selectedKeys())
+                    if (kr.layer == l->id && kr.prop == it.key())
+                        p.drawEllipse(QPoint(xOfFrame(std::max(0, kr.frame + m_keyDelta)) + m_cellW / 2, cy), half, half);
+            }
+            continue;
+        }
         if (l->type == LayerType::Animation) {
             for (const Exposure& e : l->anim.exposures) {
                 if (e.end() <= firstF || e.start > lastF) continue;
@@ -178,6 +238,18 @@ void TimelineView::paintEvent(QPaintEvent*) {
         } else if (!l->isGroup()) {
             p.fillRect(QRect(xOfFrame(0), y + 8, frames * m_cellW, kRowH - 16), l->props.visible ? QColor(110, 110, 110, 150) : QColor(70, 70, 70, 80));
         }
+        // Summary of the layer's keyframes along the bottom of its row.
+        if (!l->tracks.isEmpty()) {
+            QSet<int> keyFrames;
+            for (auto it = l->tracks.begin(); it != l->tracks.end(); ++it) for (const Keyframe& k : it->keys) keyFrames.insert(k.frame);
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(255, 140, 0, 200));
+            for (int f : keyFrames) {
+                if (f < firstF - 1 || f > lastF + 1) continue;
+                const QPoint c(xOfFrame(f) + m_cellW / 2, y + kRowH - 5);
+                p.drawPolygon(QPolygon({{c.x(), c.y() - 4}, {c.x() + 4, c.y()}, {c.x(), c.y() + 4}, {c.x() - 4, c.y()}}));
+            }
+        }
     }
     p.restore();
 
@@ -207,10 +279,22 @@ void TimelineView::paintEvent(QPaintEvent*) {
         if (y + kRowH < kRulerH || y > viewport()->height()) continue;
         const Layer* l = m_rows[r].layer;
         const bool active = l->id == m_s->activeLayerId();
-        if (active) p.fillRect(QRect(0, y, kNameW, kRowH), QColor(60, 90, 130));
+        if (active) p.fillRect(QRect(0, y, kNameW, kRowH), m_rows[r].prop.isEmpty() ? QColor(60, 90, 130) : QColor(60, 90, 130, 60));
         p.setPen(l->props.visible ? palette().color(QPalette::Text) : palette().color(QPalette::Disabled, QPalette::Text));
-        QString t = l->props.name + (l->props.locked ? "  🔒" : "");
-        p.drawText(QRect(6 + m_rows[r].depth * 12, y, kNameW - 10, kRowH), Qt::AlignVCenter | Qt::AlignLeft, t);
+        if (!m_rows[r].prop.isEmpty()) {
+            const PropertyDef* pd = findPropertyDef(m_rows[r].prop);
+            const bool animated = l->tracks.contains(m_rows[r].prop) && l->tracks[m_rows[r].prop].animated();
+            p.setPen(animated ? QColor(255, 170, 60) : palette().color(QPalette::Text));
+            p.drawText(QRect(6 + m_rows[r].depth * 12 + 10, y, kNameW - 20, kRowH), Qt::AlignVCenter | Qt::AlignLeft, pd ? pd->label : m_rows[r].prop);
+        } else {
+            const QPoint tw = twirlPoint(r);                  // disclosure arrow
+            const bool open = m_expanded.contains(l->id);
+            QPolygon arrow = open ? QPolygon({{tw.x() - 4, tw.y() - 2}, {tw.x() + 4, tw.y() - 2}, {tw.x(), tw.y() + 3}})
+                                  : QPolygon({{tw.x() - 2, tw.y() - 4}, {tw.x() - 2, tw.y() + 4}, {tw.x() + 3, tw.y()}});
+            p.save(); p.setBrush(p.pen().color()); p.drawPolygon(arrow); p.restore();
+            QString t = l->props.name + (l->props.locked ? "  🔒" : "");
+            p.drawText(QRect(6 + m_rows[r].depth * 12 + 12, y, kNameW - 22, kRowH), Qt::AlignVCenter | Qt::AlignLeft, t);
+        }
         p.setPen(QColor(255, 255, 255, 25));
         p.drawLine(0, y + kRowH - 1, kNameW, y + kRowH - 1);
     }
@@ -236,6 +320,12 @@ void TimelineView::paintEvent(QPaintEvent*) {
     p.restore();
     p.setPen(QColor(255, 255, 255, 70));
     p.drawLine(0, kRulerH - 1, viewport()->width(), kRulerH - 1);
+
+    if (m_drag == Marquee) {
+        p.setPen(QPen(QColor(255, 255, 255, 220), 1, Qt::DashLine));
+        p.setBrush(QColor(255, 255, 255, 30));
+        p.drawRect(QRect(m_marqueeStart, m_marqueeNow).normalized());
+    }
 
     // ---- end of composition ----
     p.setPen(QColor(255, 255, 255, 90));
@@ -276,7 +366,32 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
         return;
     }
     const int r = rowAtY(pt.y());
+    setFocus();
     if (r >= 0) m_s->setActiveLayer(m_rows[r].layer->id);
+    if (r >= 0 && pt.x() < kNameW && m_rows[r].prop.isEmpty() && std::abs(pt.x() - twirlPoint(r).x()) <= 8) {
+        setExpanded(m_rows[r].layer->id, !m_expanded.contains(m_rows[r].layer->id));    // twirl
+        return;
+    }
+    if (r >= 0 && pt.x() >= kNameW && !m_rows[r].prop.isEmpty()) {
+        m_s->playback()->pause();
+        KeyRef kr;
+        if (keyAt(pt, &kr)) {
+            const bool multi = e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier);
+            QVector<KeyRef> sel = m_s->selectedKeys();
+            if (multi) { if (sel.contains(kr)) sel.removeAll(kr); else sel.push_back(kr); }
+            else if (!sel.contains(kr)) sel = {kr};
+            m_s->setKeySelection(sel);
+            d->setCurrentFrame(kr.frame);
+            if (m_s->isKeySelected(kr.layer, kr.prop, kr.frame)) { m_drag = KeyMove; m_keyGrabFrame = kr.frame; m_keyDelta = 0; }
+            return;
+        }
+        // empty cell: drag a marquee; a plain click also moves the playhead
+        m_drag = Marquee; m_marqueeStart = m_marqueeNow = pt;
+        m_marqueeAdd = e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier);
+        if (!m_marqueeAdd) m_s->clearKeySelection();
+        d->setCurrentFrame(std::clamp(frameAtX(pt.x()), 0, d->durationFrames() - 1));
+        return;
+    }
     int er, ei;
     if (pt.x() >= kNameW && hitExposureEdge(pt, &er, &ei)) {
         const Layer* l = m_rows[er].layer;
@@ -314,6 +429,16 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
 void TimelineView::mouseMoveEvent(QMouseEvent* e) {
     const QPoint pt = e->position().toPoint();
     if (m_drag == Scrub) { scrubTo(pt.x()); return; }
+    if (m_drag == KeyMove) {
+        m_keyDelta = std::max(-m_keyGrabFrame, frameAtX(pt.x()) - m_keyGrabFrame);   // (clamped again when applied)
+        viewport()->update();
+        return;
+    }
+    if (m_drag == Marquee) {
+        m_marqueeNow = pt;
+        viewport()->update();
+        return;
+    }
     if (m_drag == SelectRange) {
         if (Document* d = m_s->doc())
             m_s->setFrameSelection(m_dragLayer, m_anchor, std::clamp(frameAtX(pt.x()), 0, d->durationFrames() - 1));
@@ -330,6 +455,35 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e) {
 }
 
 void TimelineView::mouseReleaseEvent(QMouseEvent*) {
+    if (m_drag == KeyMove) {
+        const int delta = m_keyDelta;
+        m_drag = None; m_keyDelta = 0;
+        if (delta != 0) m_s->moveSelectedKeys(delta);
+        viewport()->update();
+        return;
+    }
+    if (m_drag == Marquee) {
+        const QRect box = QRect(m_marqueeStart, m_marqueeNow).normalized();
+        m_drag = None;
+        if (box.width() > 3 || box.height() > 3) {
+            QVector<KeyRef> sel = m_marqueeAdd ? m_s->selectedKeys() : QVector<KeyRef>();
+            for (int r = 0; r < m_rows.size(); ++r) {
+                if (m_rows[r].prop.isEmpty()) continue;
+                const int cy = kRulerH + r * kRowH - verticalScrollBar()->value() + kRowH / 2;
+                if (cy < box.top() || cy > box.bottom()) continue;
+                auto it = m_rows[r].layer->tracks.constFind(m_rows[r].prop);
+                if (it == m_rows[r].layer->tracks.constEnd()) continue;
+                for (const Keyframe& k : it->keys) {
+                    const int cx = xOfFrame(k.frame) + m_cellW / 2;
+                    const KeyRef kr{m_rows[r].layer->id, m_rows[r].prop, k.frame};
+                    if (cx >= box.left() && cx <= box.right() && !sel.contains(kr)) sel.push_back(kr);
+                }
+            }
+            m_s->setKeySelection(sel);
+        }
+        viewport()->update();
+        return;
+    }
     if (m_drag == Resize) {
         const int delta = m_resizeNewEnd - m_resizeEnd;
         m_drag = None;
@@ -364,6 +518,27 @@ void TimelineView::contextMenuEvent(QContextMenuEvent* e) {
     const QPoint pt = e->pos();
     const int r = rowAtY(pt.y());
     if (r >= 0) m_s->setActiveLayer(m_rows[r].layer->id);
+    if (r >= 0 && pt.x() >= kNameW && !m_rows[r].prop.isEmpty()) {
+        KeyRef kr;
+        if (keyAt(pt, &kr)) {
+            if (!m_s->selectedKeys().contains(kr)) m_s->setKeySelection({kr});
+            QMenu menu(this);
+            m_a->fillKeyframeMenu(&menu);
+            menu.exec(e->globalPos());
+            return;
+        }
+        // empty cell of a property row: add a key there / paste
+        const int f = std::clamp(frameAtX(pt.x()), 0, m_s->doc() ? m_s->doc()->durationFrames() - 1 : 0);
+        if (m_s->doc()) m_s->doc()->setCurrentFrame(f);
+        QMenu menu(this);
+        const Layer* l = m_rows[r].layer; const QString prop = m_rows[r].prop;
+        connect(menu.addAction(tr("Add Keyframe Here")), &QAction::triggered, &menu, [this, l, prop] { m_s->toggleKeyHere(l->id, prop); });
+        QAction* paste = menu.addAction(tr("Paste Keyframes Here"));
+        paste->setEnabled(!m_s->keyClip().isEmpty());
+        connect(paste, &QAction::triggered, &menu, [this] { m_s->pasteKeys(); });
+        menu.exec(e->globalPos());
+        return;
+    }
     if (pt.x() >= kNameW && r >= 0) if (Document* d = m_s->doc()) {
         const int f = std::clamp(frameAtX(pt.x()), 0, d->durationFrames() - 1);
         int a, b;
@@ -377,6 +552,16 @@ void TimelineView::contextMenuEvent(QContextMenuEvent* e) {
     QMenu menu(this);
     m_a->fillContextMenu(&menu);
     menu.exec(e->globalPos());
+}
+
+void TimelineView::keyPressEvent(QKeyEvent* e) {
+    if ((e->key() == Qt::Key_Delete || e->key() == Qt::Key_Backspace) && !m_s->selectedKeys().isEmpty()) {
+        m_s->deleteSelectedKeys();
+        e->accept();
+        return;
+    }
+    if (e->key() == Qt::Key_Escape && m_drag == KeyMove) { m_drag = None; m_keyDelta = 0; viewport()->update(); return; }
+    QAbstractScrollArea::keyPressEvent(e);
 }
 
 // ============================================================ TimelinePanel
@@ -407,6 +592,7 @@ TimelinePanel::TimelinePanel(EditorSession* s, AnimationActions* a, QWidget* par
     btn(a->stopPlayback, "■"); btn(a->nextFrame, "▶"); btn(a->lastFrame, "▶|");
     btn(a->loopPlayback, tr("Loop"));
     btn(a->onionToggle, tr("Onion"));
+    btn(a->autoKey, tr("Auto-Key"));
     bar->addSpacing(8);
     bar->addWidget(new QLabel(tr("Frame")));
     m_frame = new QSpinBox; m_frame->setRange(1, 1); m_frame->setKeyboardTracking(false);

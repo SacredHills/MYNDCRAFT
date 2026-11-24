@@ -1,5 +1,7 @@
 #include "Scene/Layer.h"
 
+#include <algorithm>
+
 namespace mynd {
 
 namespace {
@@ -68,6 +70,45 @@ const QImage* Layer::imageAt(int frame) const {
     return it == drawingImages.end() || it->second.isNull() ? nullptr : &it->second;
 }
 QImage* Layer::imageForEdit(int frame) { return const_cast<QImage*>(static_cast<const Layer*>(this)->imageAt(frame)); }
+
+static QRect alphaBounds(const QImage& img) {
+    int x0 = img.width(), y0 = img.height(), x1 = -1, y1 = -1;
+    const QImage a = img.format() == QImage::Format_ARGB32_Premultiplied || img.format() == QImage::Format_ARGB32 ? img : img.convertToFormat(QImage::Format_ARGB32);
+    for (int y = 0; y < a.height(); ++y) {
+        const auto* row = reinterpret_cast<const quint32*>(a.constScanLine(y));
+        for (int x = 0; x < a.width(); ++x)
+            if (row[x] >> 24) { x0 = std::min(x0, x); x1 = std::max(x1, x); y0 = std::min(y0, y); y1 = std::max(y1, y); }
+    }
+    return x1 < 0 ? QRect() : QRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
+}
+
+QRectF Layer::contentBounds(int frame, const QSize& canvas) const {
+    switch (type) {
+    case LayerType::Raster:
+    case LayerType::Animation: {
+        const QImage* img = imageAt(frame);
+        return img ? QRectF(alphaBounds(*img)) : QRectF();
+    }
+    case LayerType::Vector: {
+        QRectF r;
+        for (const auto& s : shapes) r = r.united(s.bounds());
+        return r;
+    }
+    case LayerType::Text: return textContent.bounds();
+    case LayerType::Group: {
+        QRectF r;
+        const QPointF c(canvas.width() / 2.0, canvas.height() / 2.0);
+        for (const auto& ch : children) {
+            if (!ch->props.visible) continue;
+            const QRectF b = ch->contentBounds(frame, canvas);
+            if (b.isNull()) continue;
+            r = r.united(ch->xformAt(frame).matrix(c).mapRect(b));
+        }
+        return r;
+    }
+    }
+    return {};
+}
 
 LayerPtr Layer::cloneExact() const {
     auto c = std::make_shared<Layer>(type, props.name);

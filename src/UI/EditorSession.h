@@ -24,9 +24,22 @@ struct FrameClip {
     bool isEmpty() const { return length <= 0; }
 };
 
+// One selected keyframe of one property of one layer.
+struct KeyRef {
+    QUuid layer;
+    QString prop;
+    int frame = 0;
+    bool operator==(const KeyRef& o) const { return layer == o.layer && prop == o.prop && frame == o.frame; }
+};
+// Copied keyframes, with frames relative to the earliest one.
+struct KeyClip {
+    QMap<QString, QVector<Keyframe>> keys;
+    bool isEmpty() const { return keys.isEmpty(); }
+};
+
 enum class ToolId {
     Select, DirectSelect, Brush, Pencil, Eraser, Pen, Line, Rectangle, Ellipse, Polygon,
-    Bucket, Gradient, Eyedropper, Hand, Zoom, Smudge, FreeTransform, Text
+    Bucket, Gradient, Eyedropper, Hand, Zoom, Smudge, FreeTransform, Text, LayerTransform
 };
 QString toolName(ToolId t);
 
@@ -121,6 +134,34 @@ public:
     // Jump to the previous/next exposure that shows a drawing on the active animation layer.
     bool gotoDrawing(int direction);
 
+    // ---- Property animation (keyframes on the transform and opacity of any layer) ----
+    // Auto-key: changing a property that is not animated yet creates a keyframe at the current frame
+    // (properties that are already animated always key). Off: such changes edit the static value.
+    bool autoKey() const { return m_autoKey; }
+    void setAutoKey(bool on);
+    // Value of a property on `layer` at the current frame.
+    PropValue propertyValue(const QUuid& layer, const QString& prop) const;
+    // Sets properties of one layer as one undo step. Consecutive calls with the same non-empty mergeKey
+    // (a drag) merge into one step. Returns false when nothing was changed (locked layer, unknown id, ...).
+    bool setProperties(const QUuid& layer, const QVector<QPair<QString, PropValue>>& values, const QString& mergeKey = {});
+    bool setProperty(const QUuid& layer, const QString& prop, PropValue v, const QString& mergeKey = {}) { return setProperties(layer, {{prop, v}}, mergeKey); }
+    bool toggleAnimated(const QUuid& layer, const QString& prop);     // stopwatch
+    bool toggleKeyHere(const QUuid& layer, const QString& prop);      // add / remove the key at the current frame
+    bool gotoKey(int direction);                                       // previous/next keyframe of the active layer
+    // Selection of keyframes (what Delete / Move / Copy / Ease act on).
+    const QVector<KeyRef>& selectedKeys() const { return m_keySel; }
+    void setKeySelection(const QVector<KeyRef>& keys);
+    void clearKeySelection() { setKeySelection({}); }
+    bool isKeySelected(const QUuid& layer, const QString& prop, int frame) const;
+    bool deleteSelectedKeys();
+    bool moveSelectedKeys(int deltaFrames);
+    bool easeSelectedKeys(EasePreset preset, bool incoming = true, bool outgoing = true);
+    bool copyKeys(bool cut);
+    bool pasteKeys();                                                  // onto the active layer, starting at the current frame
+    const KeyClip& keyClip() const { return m_keyClip; }
+    // True when the most recent copy was of keyframes (so Paste means keyframes, not frames).
+    bool keyClipActive() const { return m_keyClipActive && !m_keyClip.isEmpty(); }
+
     int polygonSides = 5;
     int bucketTolerance = 24;
 
@@ -140,6 +181,9 @@ signals:
     void onionChanged();
     void frameSelectionChanged();
     void clipChanged();
+    void keySelectionChanged();
+    void autoKeyChanged();
+    void keyClipChanged();
     void message(const QString& text);
 
 private:
@@ -156,6 +200,10 @@ private:
     int m_selFirst = -1, m_selLast = -1;
     bool m_selInternal = false;
     FrameClip m_clip;
+    bool m_autoKey = false;
+    QVector<KeyRef> m_keySel;
+    KeyClip m_keyClip;
+    bool m_keyClipActive = false;
     Compositor::OnionSkin m_onion;
 };
 

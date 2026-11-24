@@ -42,14 +42,36 @@ AnimationActions::AnimationActions(EditorSession* s, QWidget* dialogParent) : QO
     connect(newDrawingNextFrame, &QAction::triggered, this, [this] { m_s->newDrawingOnNextFrame(false); });
 
     copyFrames = mk("copyFrames", tr("Copy Frames"), QKeySequence::Copy);
-    connect(copyFrames, &QAction::triggered, this, [this] { m_s->copyFrames(false); });
+    connect(copyFrames, &QAction::triggered, this, [this] { if (m_s->selectedKeys().isEmpty()) m_s->copyFrames(false); else m_s->copyKeys(false); });
     cutFrames = mk("cutFrames", tr("Cut Frames"), QKeySequence::Cut);
-    connect(cutFrames, &QAction::triggered, this, [this] { m_s->copyFrames(true); });
+    connect(cutFrames, &QAction::triggered, this, [this] { if (m_s->selectedKeys().isEmpty()) m_s->copyFrames(true); else m_s->copyKeys(true); });
     pasteFrames = mk("pasteFrames", tr("Paste Frames"), QKeySequence::Paste);
-    connect(pasteFrames, &QAction::triggered, this, [this] { m_s->pasteFrames(false); });
+    connect(pasteFrames, &QAction::triggered, this, [this] { if (m_s->keyClipActive()) m_s->pasteKeys(); else m_s->pasteFrames(false); });
     pasteLinked = mk("pasteLinked", tr("Paste Frames (Reuse Same Drawings)"), QKeySequence("Ctrl+Shift+V"));
     connect(pasteLinked, &QAction::triggered, this, [this] { m_s->pasteFrames(true); });
     connect(m_s, &EditorSession::clipChanged, this, &AnimationActions::refresh);
+    connect(m_s, &EditorSession::keySelectionChanged, this, &AnimationActions::refresh);
+    connect(m_s, &EditorSession::keyClipChanged, this, &AnimationActions::refresh);
+
+    autoKey = mk("autoKey", tr("Auto-Key"), QKeySequence("Ctrl+Shift+K"));
+    autoKey->setCheckable(true);
+    connect(autoKey, &QAction::toggled, this, [this](bool on) { m_s->setAutoKey(on); });
+    connect(m_s, &EditorSession::autoKeyChanged, this, [this] { QSignalBlocker b(autoKey); autoKey->setChecked(m_s->autoKey()); });
+    prevKey = mk("prevKey", tr("Previous Keyframe"), QKeySequence("Ctrl+,"));
+    connect(prevKey, &QAction::triggered, this, [this] { m_s->gotoKey(-1); });
+    nextKey = mk("nextKey", tr("Next Keyframe"), QKeySequence("Ctrl+."));
+    connect(nextKey, &QAction::triggered, this, [this] { m_s->gotoKey(+1); });
+    deleteKeys = mk("deleteKeys", tr("Delete Keyframes"));
+    connect(deleteKeys, &QAction::triggered, this, [this] { m_s->deleteSelectedKeys(); });
+    auto ease = [this](QAction*& a, const char* name, const QString& text, EasePreset p, const QKeySequence& k) {
+        a = mk(name, text, k);
+        connect(a, &QAction::triggered, this, [this, p] { m_s->easeSelectedKeys(p); });
+    };
+    ease(keyLinear, "keyLinear", tr("Linear"), EasePreset::Linear, {});
+    ease(keyHold, "keyHold", tr("Hold"), EasePreset::Hold, {});
+    ease(keyEaseIn, "keyEaseIn", tr("Ease In"), EasePreset::EaseIn, QKeySequence("Shift+F9"));
+    ease(keyEaseOut, "keyEaseOut", tr("Ease Out"), EasePreset::EaseOut, QKeySequence("Ctrl+Shift+F9"));
+    ease(keyEaseBoth, "keyEaseBoth", tr("Easy Ease (In and Out)"), EasePreset::EaseInOut, QKeySequence("F9"));
     connect(m_s, &EditorSession::frameSelectionChanged, this, &AnimationActions::refresh);
 
     extend = mk("extend", tr("Extend Exposure by 1 Frame"), QKeySequence("Ctrl+="));
@@ -203,10 +225,14 @@ void AnimationActions::refresh() {
     markKey->setChecked(exposed && marker == PoseMarker::Key);
     markBreakdown->setChecked(exposed && marker == PoseMarker::Breakdown);
     markInbetween->setChecked(exposed && marker == PoseMarker::Inbetween);
-    copyFrames->setEnabled(m_s->activeAnimationLayer() != nullptr);
-    cutFrames->setEnabled(anim);
-    pasteFrames->setEnabled(anim && !m_s->frameClip().isEmpty());
-    pasteLinked->setEnabled(anim && !m_s->frameClip().isEmpty());
+    const bool keysSel = !m_s->selectedKeys().isEmpty();
+    copyFrames->setEnabled(keysSel || m_s->activeAnimationLayer() != nullptr);
+    cutFrames->setEnabled(keysSel || anim);
+    pasteFrames->setEnabled(m_s->keyClipActive() ? m_s->activeLayer() != nullptr : (anim && !m_s->frameClip().isEmpty()));
+    pasteLinked->setEnabled(!m_s->keyClipActive() && anim && !m_s->frameClip().isEmpty());
+    for (QAction* a : {deleteKeys, keyLinear, keyHold, keyEaseIn, keyEaseOut, keyEaseBoth}) a->setEnabled(keysSel);
+    prevKey->setEnabled(m_s->activeLayer() != nullptr); nextKey->setEnabled(m_s->activeLayer() != nullptr);
+    autoKey->setEnabled(m_s->doc() != nullptr);
     const bool hasDoc = m_s->doc() != nullptr;
     for (QAction* a : {firstFrame, prevFrame, nextFrame, lastFrame, playPause, stopPlayback, workIn, workOut, workClear}) a->setEnabled(hasDoc);
     prevDrawing->setEnabled(anim); nextDrawing->setEnabled(anim);
@@ -228,6 +254,23 @@ void AnimationActions::fillMenu(QMenu* m) {
     m->addActions({playPause, stopPlayback, loopPlayback, onionToggle});
     m->addSeparator();
     m->addActions({workIn, workOut, workClear});
+    m->addSeparator();
+    m->addActions({autoKey, prevKey, nextKey});
+    QMenu* interp = m->addMenu(tr("Keyframe Interpolation"));
+    interp->addActions({keyLinear, keyHold, keyEaseIn, keyEaseOut, keyEaseBoth});
+    m->addAction(deleteKeys);
+}
+
+void AnimationActions::fillKeyframeMenu(QMenu* m) {
+    connect(m->addAction(tr("Copy Keyframes")), &QAction::triggered, m, [this] { m_s->copyKeys(false); });
+    connect(m->addAction(tr("Cut Keyframes")), &QAction::triggered, m, [this] { m_s->copyKeys(true); });
+    QAction* paste = m->addAction(tr("Paste Keyframes at Current Frame"));
+    paste->setEnabled(!m_s->keyClip().isEmpty() && m_s->activeLayer());
+    connect(paste, &QAction::triggered, m, [this] { m_s->pasteKeys(); });
+    m->addSeparator();
+    m->addActions({keyEaseBoth, keyEaseIn, keyEaseOut, keyLinear, keyHold});
+    m->addSeparator();
+    m->addAction(deleteKeys);
 }
 
 void AnimationActions::fillContextMenu(QMenu* m) {

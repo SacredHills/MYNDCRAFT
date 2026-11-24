@@ -25,11 +25,16 @@ public:
     QAction *prevDrawing, *nextDrawing, *firstFrame, *prevFrame, *nextFrame, *lastFrame;
     QAction *playPause, *stopPlayback, *loopPlayback, *onionToggle;
     QAction *workIn, *workOut, *workClear;
+    // Property keyframes
+    QAction *autoKey, *prevKey, *nextKey, *deleteKeys;
+    QAction *keyLinear, *keyHold, *keyEaseIn, *keyEaseOut, *keyEaseBoth;
 
     // Adds every animation command (grouped, with separators) to `menu`.
     void fillMenu(QMenu* menu);
     // Context menu for a timeline cell / exposure: timing commands, markers and drawing substitution.
     void fillContextMenu(QMenu* menu);
+    // Context menu for a keyframe in the timeline: copy/paste, interpolation, delete.
+    void fillKeyframeMenu(QMenu* menu);
 
     void goToFrame(int frame);
     QAction* actionFor(const QString& name) const { return m_byName.value(name); }

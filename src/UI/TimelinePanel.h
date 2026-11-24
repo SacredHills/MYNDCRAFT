@@ -24,7 +24,12 @@ public:
     // Geometry helpers (also used by tests): view-space position of a frame / row.
     QPoint cellCenter(int frame, int row) const;
     int rowCount() const { return m_rows.size(); }
-    int rowOfLayer(const QUuid& id) const;
+    int rowOfLayer(const QUuid& id) const;                 // the layer's own row
+    int rowOfProperty(const QUuid& id, const QString& prop) const;   // -1 unless the layer is expanded
+    // Layers show their transform/opacity property rows (with keyframes) when expanded.
+    bool isExpanded(const QUuid& id) const { return m_expanded.contains(id); }
+    void setExpanded(const QUuid& id, bool on);
+    QPoint twirlPoint(int row) const;                      // where the expand arrow of a layer row is
     QRect exposureRect(int row, int frame) const;       // rect of the exposure covering `frame` (null if none)
     QPoint rulerPoint(int frame) const;
     QSize sizeHint() const override { return {700, 160}; }
@@ -36,10 +41,11 @@ protected:
     void mouseReleaseEvent(QMouseEvent*) override;
     void wheelEvent(QWheelEvent*) override;
     void contextMenuEvent(QContextMenuEvent*) override;
+    void keyPressEvent(QKeyEvent*) override;
     void resizeEvent(QResizeEvent*) override;
 
 private:
-    struct Row { Layer* layer; int depth; };
+    struct Row { Layer* layer; int depth; QString prop; };   // prop empty = the layer's own row
     static constexpr int kNameW = 170, kRulerH = 24, kRowH = 24;
     void rebuildRows();
     void updateScrollBars();
@@ -49,13 +55,19 @@ private:
     void ensureFrameVisible(int frame);
     void scrubTo(int x);
     bool hitExposureEdge(const QPoint& p, int* row, int* exposureIndex) const;
+    bool keyAt(const QPoint& p, KeyRef* out) const;       // keyframe diamond under a viewport point
+    int keyHalf() const { return std::clamp(m_cellW / 2 - 1, 3, 7); }
 
     EditorSession* m_s;
     AnimationActions* m_a;
     QVector<Row> m_rows;
-    QMetaObject::Connection m_c1, m_c2, m_c3, m_c4, m_c5;
+    QMetaObject::Connection m_c1, m_c2, m_c3, m_c4, m_c5, m_c6;
     int m_cellW = 16;
-    enum Drag { None, Scrub, Resize, SelectRange } m_drag = None;
+    enum Drag { None, Scrub, Resize, SelectRange, KeyMove, Marquee } m_drag = None;
+    QSet<QUuid> m_expanded;
+    QPoint m_marqueeStart, m_marqueeNow;
+    int m_keyGrabFrame = 0, m_keyDelta = 0;
+    bool m_marqueeAdd = false;
     int m_anchor = 0;
     QUuid m_dragLayer;
     // resize state

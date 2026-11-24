@@ -23,6 +23,7 @@ QString toolName(ToolId t) {
     case ToolId::Zoom: return "Zoom";
     case ToolId::Smudge: return "Smudge";
     case ToolId::FreeTransform: return "Free Transform";
+    case ToolId::LayerTransform: return "Transform Layer";
     case ToolId::Text: return "Text";
     }
     return {};
@@ -57,8 +58,19 @@ void EditorSession::setDocument(Document* d) {
     clearFrameSelection();
     if (d) connect(d, &Document::frameChanged, this, [this] { if (!m_selInternal) clearFrameSelection(); });
     m_selected.clear();
+    m_keySel.clear();
     m_activeLayer = {};
     if (d) {
+        connect(d, &Document::tracksChanged, this, [this] {
+            // keep the keyframe selection valid when keys disappear (delete / undo)
+            QVector<KeyRef> keep;
+            for (const KeyRef& k : m_keySel) {
+                const Layer* l = m_doc ? m_doc->findLayer(k.layer) : nullptr;
+                auto it = l ? l->tracks.constFind(k.prop) : PropertyTracks::const_iterator();
+                if (l && it != l->tracks.constEnd() && it->indexOfKey(k.frame) >= 0) keep << k;
+            }
+            if (keep.size() != m_keySel.size()) { m_keySel = keep; emit keySelectionChanged(); }
+        });
         // Activate the top-most non-group layer.
         Layer* pick = nullptr;
         Document::forEachLayer(d->root(), [&](Layer* l) { if (!l->isGroup()) pick = l; });
@@ -202,6 +214,7 @@ QUuid EditorSession::newDrawingOnNextFrame(bool copyVisible) {
 
 void EditorSession::setFrameSelection(const QUuid& layer, int first, int last) {
     if (!m_doc) return;
+    if (!m_keySel.isEmpty()) { m_keySel.clear(); emit keySelectionChanged(); }
     const int hi = m_doc->durationFrames() - 1;
     first = qBound(0, first, hi); last = qBound(0, last, hi);
     m_selLayer = layer;
@@ -248,6 +261,7 @@ bool EditorSession::copyFrames(bool cut) {
         if (const QImage* img = l->drawingImage(dm.id)) clip.images[dm.id] = img->copy();   // deep copy: later edits must not change the clip
     }
     m_clip = clip;
+    m_keyClipActive = false;
     emit clipChanged();
     if (cut) {
         editActiveAnimation(tr("Cut Frames"), [&](AnimationState& s) { s.clearRange(a, b - a + 1); return true; });
@@ -392,6 +406,243 @@ void EditorSession::setStyle(const VectorStyle& st, bool apply) {
         }
     }
     emit styleChanged();
+}
+
+// ---------------------------------------------------------------- property animation
+void EditorSession::setAutoKey(bool on) {
+    if (on == m_autoKey) return;
+    m_autoKey = on;
+    emit autoKeyChanged();
+}
+
+PropValue EditorSession::propertyValue(const QUuid& layer, const QString& prop) const {
+    const PropertyDef* d = findPropertyDef(prop);
+    if (!d) return {};
+    const Layer* l = m_doc ? m_doc->findLayer(layer) : nullptr;
+    return l ? valueOf(l->tracks, *d, m_doc->currentFrame()) : d->def;
+}
+
+static Layer* editableTracksLayer(EditorSession* s, const QUuid& id) {
+    Layer* l = s->doc() ? s->doc()->findLayer(id) : nullptr;
+    if (!l) return nullptr;
+    if (l->props.locked) { emit s->message(QObject::tr("The layer is locked.")); return nullptr; }
+    return l;
+}
+
+bool EditorSession::setProperties(const QUuid& layer, const QVector<QPair<QString, PropValue>>& values, const QString& mergeKey) {
+    Layer* l = editableTracksLayer(this, layer);
+    if (!l || values.isEmpty()) return false;
+    PropertyTracks t = l->tracks;
+    QString name;
+    for (const auto& [id, v] : values) {
+        const PropertyDef* d = findPropertyDef(id);
+        if (!d) continue;
+        setValueAt(t, id, m_doc->currentFrame(), v, m_autoKey);
+        name = name.isEmpty() ? d->label : tr("Properties");
+    }
+    if (name.isEmpty() || t == l->tracks) return false;
+    m_doc->editTracks(layer, t, tr("Change %1").arg(name), mergeKey);
+    return true;
+}
+
+bool EditorSession::toggleAnimated(const QUuid& layer, const QString& prop) {
+    Layer* l = editableTracksLayer(this, layer);
+    const PropertyDef* d = findPropertyDef(prop);
+    if (!l || !d) return false;
+    PropertyTracks t = l->tracks;
+    const bool animated = t.contains(prop) && t[prop].animated();
+    if (animated) disableAnimation(t, prop, m_doc->currentFrame()); else enableAnimation(t, prop, m_doc->currentFrame());
+    m_doc->editTracks(layer, t, animated ? tr("Stop Animating %1").arg(d->label) : tr("Animate %1").arg(d->label));
+    return true;
+}
+
+bool EditorSession::toggleKeyHere(const QUuid& layer, const QString& prop) {
+    Layer* l = editableTracksLayer(this, layer);
+    const PropertyDef* d = findPropertyDef(prop);
+    if (!l || !d) return false;
+    PropertyTracks t = l->tracks;
+    const int f = m_doc->currentFrame();
+    const PropValue cur = valueOf(t, *d, f);
+    if (!t.contains(prop)) { PropertyTrack nt; nt.base = d->def; t.insert(prop, nt); }
+    PropertyTrack& trk = t[prop];
+    if (trk.indexOfKey(f) >= 0) {
+        if (trk.keys.size() == 1) disableAnimation(t, prop, f);     // last key: the property becomes static again
+        else trk.removeKey(f);
+        m_doc->editTracks(layer, t, tr("Remove Keyframe"));
+    } else {
+        trk.setKey(*d, f, cur);
+        m_doc->editTracks(layer, t, tr("Add Keyframe"));
+    }
+    return true;
+}
+
+bool EditorSession::gotoKey(int direction) {
+    Layer* l = activeLayer();
+    if (!m_doc || !l || direction == 0) return false;
+    const int cur = m_doc->currentFrame();
+    int best = -1;
+    for (auto it = l->tracks.begin(); it != l->tracks.end(); ++it)
+        for (const Keyframe& k : it->keys) {
+            if (direction > 0 && k.frame > cur && (best < 0 || k.frame < best)) best = k.frame;
+            if (direction < 0 && k.frame < cur && k.frame > best) best = k.frame;
+        }
+    if (best < 0) return false;
+    m_doc->setCurrentFrame(best);
+    return true;
+}
+
+void EditorSession::setKeySelection(const QVector<KeyRef>& keys) {
+    if (keys == m_keySel) return;
+    m_keySel = keys;
+    if (!keys.isEmpty()) clearFrameSelection();            // frames and keyframes are never selected at once
+    emit keySelectionChanged();
+}
+
+bool EditorSession::isKeySelected(const QUuid& layer, const QString& prop, int frame) const {
+    return m_keySel.contains(KeyRef{layer, prop, frame});
+}
+
+namespace {
+// Selected keys grouped by layer, then property.
+QMap<QUuid, QMap<QString, QVector<int>>> groupKeys(const QVector<KeyRef>& sel) {
+    QMap<QUuid, QMap<QString, QVector<int>>> g;
+    for (const KeyRef& k : sel) g[k.layer][k.prop].push_back(k.frame);
+    return g;
+}
+}  // namespace
+
+bool EditorSession::deleteSelectedKeys() {
+    if (!m_doc || m_keySel.isEmpty()) return false;
+    const auto groups = groupKeys(m_keySel);
+    bool any = false;
+    m_doc->undoStack()->beginMacro(tr("Delete Keyframes"));
+    for (auto lg = groups.begin(); lg != groups.end(); ++lg) {
+        Layer* l = editableTracksLayer(this, lg.key());
+        if (!l) continue;
+        PropertyTracks t = l->tracks;
+        for (auto pg = lg->begin(); pg != lg->end(); ++pg) {
+            if (!t.contains(pg.key())) continue;
+            PropertyTrack& tr = t[pg.key()];
+            const PropertyDef* d = findPropertyDef(pg.key());
+            // Removing the last key leaves the property static at the value it had at that key.
+            const PropValue last = d && !tr.keys.isEmpty() ? tr.keys.last().value : tr.base;
+            for (int f : pg.value()) any |= tr.removeKey(f);
+            if (tr.keys.isEmpty()) tr.base = last;
+        }
+        m_doc->editTracks(lg.key(), t, tr("Delete Keyframes"));
+    }
+    m_doc->undoStack()->endMacro();
+    clearKeySelection();
+    return any;
+}
+
+bool EditorSession::moveSelectedKeys(int delta) {
+    if (!m_doc || m_keySel.isEmpty() || delta == 0) return false;
+    int minFrame = INT_MAX;
+    for (const KeyRef& k : m_keySel) minFrame = qMin(minFrame, k.frame);
+    delta = qMax(delta, -minFrame);                       // cannot go before frame 0
+    if (delta == 0) return false;
+    const auto groups = groupKeys(m_keySel);
+    QVector<KeyRef> moved;
+    bool any = false;
+    m_doc->undoStack()->beginMacro(tr("Move Keyframes"));
+    for (auto lg = groups.begin(); lg != groups.end(); ++lg) {
+        Layer* l = editableTracksLayer(this, lg.key());
+        if (!l) continue;
+        PropertyTracks t = l->tracks;
+        for (auto pg = lg->begin(); pg != lg->end(); ++pg) {
+            if (!t.contains(pg.key())) continue;
+            PropertyTrack& tr = t[pg.key()];
+            QVector<Keyframe> lift;
+            for (int f : pg.value()) { const int i = tr.indexOfKey(f); if (i >= 0) { lift.push_back(tr.keys[i]); } }
+            for (const Keyframe& k : lift) tr.removeKey(k.frame);
+            for (Keyframe k : lift) {
+                k.frame += delta;
+                tr.removeKey(k.frame);                    // lands on an unselected key: replaces it
+                auto it = std::lower_bound(tr.keys.begin(), tr.keys.end(), k.frame, [](const Keyframe& a, int fr) { return a.frame < fr; });
+                tr.keys.insert(it, k);
+                moved.push_back({lg.key(), pg.key(), k.frame});
+                any = true;
+            }
+        }
+        m_doc->editTracks(lg.key(), t, tr("Move Keyframes"));
+    }
+    m_doc->undoStack()->endMacro();
+    setKeySelection(moved);
+    return any;
+}
+
+bool EditorSession::easeSelectedKeys(EasePreset preset, bool incoming, bool outgoing) {
+    if (!m_doc || m_keySel.isEmpty()) return false;
+    const auto groups = groupKeys(m_keySel);
+    bool any = false;
+    m_doc->undoStack()->beginMacro(tr("Keyframe Interpolation"));
+    for (auto lg = groups.begin(); lg != groups.end(); ++lg) {
+        Layer* l = editableTracksLayer(this, lg.key());
+        if (!l) continue;
+        PropertyTracks t = l->tracks;
+        for (auto pg = lg->begin(); pg != lg->end(); ++pg) {
+            if (!t.contains(pg.key())) continue;
+            for (int f : pg.value()) any |= t[pg.key()].applyEase(f, preset, incoming, outgoing);
+        }
+        m_doc->editTracks(lg.key(), t, tr("Keyframe Interpolation"));
+    }
+    m_doc->undoStack()->endMacro();
+    return any;
+}
+
+bool EditorSession::copyKeys(bool cut) {
+    if (!m_doc || m_keySel.isEmpty()) { emit message(tr("Select keyframes to copy.")); return false; }
+    int minFrame = INT_MAX;
+    for (const KeyRef& k : m_keySel) minFrame = qMin(minFrame, k.frame);
+    KeyClip clip;
+    for (const KeyRef& r : m_keySel) {
+        const Layer* l = m_doc->findLayer(r.layer);
+        if (!l || !l->tracks.contains(r.prop)) continue;
+        const PropertyTrack& tr = l->tracks[r.prop];
+        const int i = tr.indexOfKey(r.frame);
+        if (i < 0) continue;
+        Keyframe k = tr.keys[i];
+        k.frame -= minFrame;
+        QVector<Keyframe>& v = clip.keys[r.prop];
+        const auto it = std::find_if(v.begin(), v.end(), [&](const Keyframe& e) { return e.frame == k.frame; });
+        if (it != v.end()) *it = k; else v.push_back(k);
+    }
+    if (clip.isEmpty()) return false;
+    for (auto& v : clip.keys) std::sort(v.begin(), v.end(), [](const Keyframe& a, const Keyframe& b) { return a.frame < b.frame; });
+    m_keyClip = clip;
+    m_keyClipActive = true;
+    emit keyClipChanged();
+    if (cut) deleteSelectedKeys();
+    return true;
+}
+
+bool EditorSession::pasteKeys() {
+    Layer* l = activeLayer();
+    if (!m_doc || !l) { emit message(tr("Select a layer to paste keyframes onto.")); return false; }
+    if (m_keyClip.isEmpty()) { emit message(tr("Copy keyframes first.")); return false; }
+    l = editableTracksLayer(this, l->id);
+    if (!l) return false;
+    PropertyTracks t = l->tracks;
+    const int at = m_doc->currentFrame();
+    QVector<KeyRef> sel;
+    for (auto it = m_keyClip.keys.begin(); it != m_keyClip.keys.end(); ++it) {
+        const PropertyDef* d = findPropertyDef(it.key());
+        if (!d) continue;
+        if (!t.contains(it.key())) { PropertyTrack nt; nt.base = d->def; t.insert(it.key(), nt); }
+        PropertyTrack& tr = t[it.key()];
+        for (Keyframe k : it.value()) {
+            k.frame += at;
+            tr.removeKey(k.frame);
+            auto pos = std::lower_bound(tr.keys.begin(), tr.keys.end(), k.frame, [](const Keyframe& a, int fr) { return a.frame < fr; });
+            tr.keys.insert(pos, k);
+            sel.push_back({l->id, it.key(), k.frame});
+        }
+    }
+    if (sel.isEmpty()) return false;
+    m_doc->editTracks(l->id, t, tr("Paste Keyframes"));
+    setKeySelection(sel);
+    return true;
 }
 
 }  // namespace mynd

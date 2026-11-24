@@ -930,6 +930,167 @@ public:
     }
 };
 
+// ============================================================ Layer transform (animatable)
+// Moves, rotates and scales the whole active layer through its transform properties, so the change is
+// keyframed (auto-key) and animates over time. Pixels and shapes are never modified.
+class LayerTransformTool : public Tool {
+public:
+    using Tool::Tool;
+    ToolId id() const override { return ToolId::LayerTransform; }
+    bool busy() const override { return m_h != None; }
+    QCursor cursor() const override { return Qt::ArrowCursor; }
+
+    void press(const PointerEvent& e) override {
+        if (e.button != Qt::LeftButton) return;
+        const Geo g = geo();
+        if (!g.ok) { emit m_s->message(QObject::tr("This layer has nothing to transform on this frame.")); return; }
+        if (g.layer->props.locked) { emit m_s->message(QObject::tr("The active layer is locked.")); return; }
+        m_h = hit(g, e.doc);
+        if (m_h == None) return;
+        m_g0 = g; m_start = e.doc; m_moved = false;
+        m_key = "xform-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+        m_layer = g.layer->id;
+    }
+    void move(const PointerEvent& e) override {
+        if (m_h == None) return;
+        apply(e);
+    }
+    void release(const PointerEvent& e) override {
+        if (m_h == None) return;
+        apply(e);
+        m_h = None;
+        m_c->update();
+    }
+    void cancel() override {
+        if (m_h == None) return;
+        if (m_moved && m_s->doc()) m_s->doc()->undoStack()->undo();
+        m_h = None;
+        m_c->update();
+    }
+    bool keyPress(QKeyEvent* k) override {
+        if (k->key() == Qt::Key_Escape && m_h != None) { cancel(); return true; }
+        return false;
+    }
+    void paintOverlay(QPainter& p, const QTransform& t) override {
+        const Geo g = m_h != None ? geoOf(m_s->doc()->findLayer(m_layer)) : geo();
+        if (!g.ok) return;
+        const QPolygonF v = t.map(g.poly);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(QColor(255, 140, 0), 1));
+        p.drawPolygon(v);
+        for (const QPointF& q : handlePoints(v)) drawSquare(p, q, 4, false);
+        const QPointF a = t.map(g.anchorDoc);                         // anchor point: ring with a cross
+        p.setPen(QPen(QColor(255, 140, 0), 1.5));
+        p.drawEllipse(a, 6, 6);
+        p.drawLine(a - QPointF(9, 0), a + QPointF(9, 0));
+        p.drawLine(a - QPointF(0, 9), a + QPointF(0, 9));
+    }
+
+private:
+    enum H { None, Move, Rotate, Anchor, TL, T, TR, R, BR, B, BL, L };
+    struct Geo {
+        bool ok = false;
+        Layer* layer = nullptr;
+        QRectF box;                 // layer space
+        QTransform m;               // layer space -> document
+        QPolygonF poly;             // box in document space (TL, TR, BR, BL)
+        QPointF center, anchorDoc;
+        LayerXform xf;
+    };
+    Geo geoOf(Layer* l) const {
+        Geo g;
+        if (!l || !m_s->doc()) return g;
+        const int f = m_s->doc()->currentFrame();
+        const QSize cs = m_s->doc()->canvasSize();
+        g.box = l->contentBounds(f, cs);
+        if (g.box.isNull() || g.box.isEmpty()) return g;
+        g.layer = l;
+        g.xf = l->xformAt(f);
+        g.center = QPointF(cs.width() / 2.0, cs.height() / 2.0);
+        g.m = g.xf.matrix(g.center);
+        g.poly = g.m.map(QPolygonF(g.box));
+        if (g.poly.size() > 4) g.poly.resize(4);
+        g.anchorDoc = g.center + g.xf.anchor + g.xf.position;
+        g.ok = true;
+        return g;
+    }
+    Geo geo() const { return geoOf(m_s->activeLayer()); }
+    // Corner and edge-middle points in the order TL, T, TR, R, BR, B, BL, L.
+    static QVector<QPointF> handlePoints(const QPolygonF& q) {
+        QVector<QPointF> v;
+        for (int i = 0; i < 4; ++i) { v << q[i]; v << (q[i] + q[(i + 1) % 4]) / 2; }
+        return v;
+    }
+    static QPointF layerHandle(const QRectF& b, H h) {
+        switch (h) {
+        case TL: return b.topLeft(); case T: return {b.center().x(), b.top()}; case TR: return b.topRight();
+        case R: return {b.right(), b.center().y()}; case BR: return b.bottomRight();
+        case B: return {b.center().x(), b.bottom()}; case BL: return b.bottomLeft();
+        case L: return {b.left(), b.center().y()}; default: return b.center();
+        }
+    }
+    H hit(const Geo& g, const QPointF& p) const {
+        const double tol = 7.0 / m_c->zoom();
+        if (QLineF(p, g.anchorDoc).length() <= tol + 2 / m_c->zoom()) return Anchor;
+        static const H order[8] = {TL, T, TR, R, BR, B, BL, L};
+        const QVector<QPointF> pts = handlePoints(g.poly);
+        for (int i : {0, 2, 4, 6, 1, 3, 5, 7}) if (QLineF(p, pts[i]).length() <= tol) return order[i];
+        if (g.poly.containsPoint(p, Qt::OddEvenFill)) return Move;
+        const double rz = 26.0 / m_c->zoom();
+        if (g.poly.boundingRect().adjusted(-rz, -rz, rz, rz).contains(p)) return Rotate;
+        return None;
+    }
+    void apply(const PointerEvent& e) {
+        Layer* l = m_s->doc() ? m_s->doc()->findLayer(m_layer) : nullptr;
+        if (!l) return;
+        const Geo& g = m_g0;
+        QVector<QPair<QString, PropValue>> vals;
+        auto vec = [](const QString& id, double x, double y) { return qMakePair(id, PropValue::of(x, y)); };
+        if (m_h == Move) {
+            QPointF d = e.doc - m_start;
+            if (e.shift()) { if (std::abs(d.x()) > std::abs(d.y())) d.setY(0); else d.setX(0); }
+            vals << vec("transform.position", g.xf.position.x() + d.x(), g.xf.position.y() + d.y());
+        } else if (m_h == Rotate) {
+            const QPointF a = g.anchorDoc;
+            double deg = qRadiansToDegrees(std::atan2(e.doc.y() - a.y(), e.doc.x() - a.x()) - std::atan2(m_start.y() - a.y(), m_start.x() - a.x()));
+            double rot = g.xf.rotation + deg;
+            if (e.shift()) rot = std::round(rot / 15.0) * 15.0;
+            vals << qMakePair(QString("transform.rotation"), PropValue::of(rot));
+        } else if (m_h == Anchor) {
+            // Move the pivot without moving the picture: compensate with position so the matrix is unchanged.
+            const QPointF newA = e.doc - g.center;
+            const QPointF keep = g.m.map(e.doc);
+            const QPointF pos = keep - e.doc;                       // new anchor lands where the old matrix put that point
+            vals << vec("transform.anchor", newA.x(), newA.y()) << vec("transform.position", pos.x(), pos.y());
+        } else {
+            const QPointF hl = layerHandle(g.box, m_h);
+            const QPointF al = g.center + g.xf.anchor;                // anchor in layer space
+            QTransform rotInv; rotInv.rotate(-g.xf.rotation);
+            const QPointF v = rotInv.map(e.doc - g.anchorDoc);        // pointer relative to the anchor, un-rotated
+            double sx = g.xf.scale.x(), sy = g.xf.scale.y();
+            const bool horiz = m_h != T && m_h != B, vert = m_h != L && m_h != R;
+            if (horiz && std::abs(hl.x() - al.x()) > 1e-6) sx = v.x() / (hl.x() - al.x());
+            if (vert && std::abs(hl.y() - al.y()) > 1e-6) sy = v.y() / (hl.y() - al.y());
+            if (e.shift()) {
+                const double r0x = horiz ? sx / (g.xf.scale.x() == 0 ? 1 : g.xf.scale.x()) : 1, r0y = vert ? sy / (g.xf.scale.y() == 0 ? 1 : g.xf.scale.y()) : 1;
+                const double f = (horiz && vert) ? (std::abs(r0x - 1) > std::abs(r0y - 1) ? r0x : r0y) : (horiz ? r0x : r0y);
+                sx = g.xf.scale.x() * f; sy = g.xf.scale.y() * f;
+            }
+            auto fix = [](double s) { return std::abs(s) < 0.01 ? (s < 0 ? -0.01 : 0.01) : s; };
+            vals << vec("transform.scale", fix(sx) * 100.0, fix(sy) * 100.0);
+        }
+        if (m_s->setProperties(m_layer, vals, m_key)) m_moved = true;
+        m_c->update();
+    }
+    H m_h = None;
+    Geo m_g0;
+    QPointF m_start;
+    QString m_key;
+    QUuid m_layer;
+    bool m_moved = false;
+};
+
 }  // namespace
 
 std::unique_ptr<Tool> createTool(ToolId id, EditorSession* s, CanvasView* c) {
@@ -952,6 +1113,7 @@ std::unique_ptr<Tool> createTool(ToolId id, EditorSession* s, CanvasView* c) {
     case ToolId::Zoom: return std::make_unique<ZoomTool>(s, c);
     case ToolId::FreeTransform: return std::make_unique<FreeTransformTool>(s, c);
     case ToolId::Text: return std::make_unique<TextTool>(s, c);
+    case ToolId::LayerTransform: return std::make_unique<LayerTransformTool>(s, c);
     }
     return nullptr;
 }

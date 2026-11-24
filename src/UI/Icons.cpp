@@ -89,6 +89,11 @@ QIcon tool(ToolId id) {
             p.drawRect(QRectF(6.5, 6.5, 11, 11));
             for (QPointF q : {QPointF(6.5, 6.5), QPointF(17.5, 6.5), QPointF(6.5, 17.5), QPointF(17.5, 17.5)}) { p.setBrush(c); p.drawRect(QRectF(q.x() - 2, q.y() - 2, 4, 4)); }
             break;
+        case ToolId::LayerTransform:
+            p.drawRect(QRectF(5.5, 8.5, 10, 9));
+            p.drawEllipse(QPointF(15.5, 8.5), 2.2, 2.2);
+            p.drawLine(QPointF(15.5, 6), QPointF(15.5, 11)); p.drawLine(QPointF(13, 8.5), QPointF(18, 8.5));
+            p.drawArc(QRectF(11, 3, 9, 9), 40 * 16, 110 * 16); break;
         case ToolId::Text:
             p.drawLine(6, 6, 18, 6); p.drawLine(12, 6, 12, 19); p.drawLine(9, 19, 15, 19); break;
         case ToolId::Zoom:

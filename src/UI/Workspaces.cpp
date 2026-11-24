@@ -60,8 +60,9 @@ void WorkspaceManager::applyPreset(const QString& name) {
     QDockWidget* tim = m_docks["timeline"];
     QDockWidget* exs = m_docks["exposure"];
     QDockWidget* oni = m_docks["onion"];
-    for (QDockWidget* d : {opt, sty, lay, his, tim, exs, oni}) { if (d) m_win->removeDockWidget(d); }
-    if (name != "Animation") for (QDockWidget* d : {tim, exs, oni}) if (d) d->hide();   // still available from the Window menu
+    QDockWidget* prp = m_docks["properties"];
+    for (QDockWidget* d : {opt, sty, lay, his, tim, exs, oni, prp}) { if (d) m_win->removeDockWidget(d); }
+    if (name != "Animation") for (QDockWidget* d : {tim, exs, oni, prp}) if (d) d->hide();   // still available from the Window menu
     if (QToolBar* tb = m_win->findChild<QToolBar*>("tools")) { tb->show(); m_win->addToolBar(Qt::LeftToolBarArea, tb); }
 
     if (name == "Drawing") {
@@ -78,6 +79,8 @@ void WorkspaceManager::applyPreset(const QString& name) {
         m_win->addDockWidget(Qt::LeftDockWidgetArea, opt);
         m_win->addDockWidget(Qt::LeftDockWidgetArea, oni);
         m_win->tabifyDockWidget(opt, oni);
+        m_win->addDockWidget(Qt::LeftDockWidgetArea, prp);
+        m_win->tabifyDockWidget(oni, prp);
         m_win->addDockWidget(Qt::LeftDockWidgetArea, sty);
         m_win->splitDockWidget(opt, sty, Qt::Vertical);
         m_win->addDockWidget(Qt::RightDockWidgetArea, exs);
@@ -86,8 +89,8 @@ void WorkspaceManager::applyPreset(const QString& name) {
         m_win->addDockWidget(Qt::RightDockWidgetArea, his);
         m_win->tabifyDockWidget(lay, his);
         m_win->addDockWidget(Qt::BottomDockWidgetArea, tim);
-        for (auto* d : {opt, oni, sty, exs, lay, his, tim}) d->show();
-        opt->raise(); lay->raise();
+        for (auto* d : {opt, oni, prp, sty, exs, lay, his, tim}) d->show();
+        prp->raise(); lay->raise();
         m_win->resizeDocks({tim}, {210}, Qt::Vertical);
         m_win->resizeDocks({opt, exs}, {250, 270}, Qt::Horizontal);
         m_win->resizeDocks({exs, lay}, {330, 220}, Qt::Vertical);
