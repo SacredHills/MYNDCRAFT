@@ -1091,11 +1091,53 @@ private:
     bool m_moved = false;
 };
 
+// ============================================================ Unified Select (V)
+// One selection tool that covers three jobs, chosen by what is active and the modifier held:
+//  - drawing / raster / group layers: transforms the whole layer (keyframeable);
+//  - vector and text layers: selects and moves shapes; Alt+drag transforms the whole layer instead;
+//  - Ctrl+drag (on a vector layer): edits points and handles, like Direct Selection.
+class UnifiedSelectTool : public Tool {
+public:
+    UnifiedSelectTool(EditorSession* s, CanvasView* c)
+        : Tool(s, c), m_select(s, c), m_direct(s, c), m_layer(s, c) {}
+    ToolId id() const override { return ToolId::Select; }
+    bool busy() const override { return m_active && m_active->busy(); }
+    QCursor cursor() const override { return Qt::ArrowCursor; }
+
+    void press(const PointerEvent& e) override {
+        const Layer* l = m_s->activeLayer();
+        const bool shapes = l && (l->type == LayerType::Vector || l->type == LayerType::Text);
+        if (!shapes) m_active = &m_layer;
+        else if (e.alt()) m_active = &m_layer;
+        else if (e.ctrl() && l->type == LayerType::Vector) m_active = &m_direct;
+        else m_active = &m_select;
+        m_active->press(e);
+    }
+    void move(const PointerEvent& e) override { if (m_active) m_active->move(e); }
+    void release(const PointerEvent& e) override { if (m_active) m_active->release(e); }
+    void doubleClick(const PointerEvent& e) override { if (m_active) m_active->doubleClick(e); }
+    void cancel() override { if (m_active) m_active->cancel(); }
+    bool keyPress(QKeyEvent* k) override { return idleTool().keyPress(k); }
+    void paintOverlay(QPainter& p, const QTransform& t) override { idleTool().paintOverlay(p, t); }
+
+private:
+    Tool& idleTool() {
+        if (m_active && m_active->busy()) return *m_active;
+        const Layer* l = m_s->activeLayer();
+        const bool shapes = l && (l->type == LayerType::Vector || l->type == LayerType::Text);
+        return shapes ? static_cast<Tool&>(m_select) : static_cast<Tool&>(m_layer);
+    }
+    SelectTool m_select;
+    DirectSelectTool m_direct;
+    LayerTransformTool m_layer;
+    Tool* m_active = nullptr;
+};
+
 }  // namespace
 
 std::unique_ptr<Tool> createTool(ToolId id, EditorSession* s, CanvasView* c) {
     switch (id) {
-    case ToolId::Select: return std::make_unique<SelectTool>(s, c);
+    case ToolId::Select: return std::make_unique<UnifiedSelectTool>(s, c);
     case ToolId::DirectSelect: return std::make_unique<DirectSelectTool>(s, c);
     case ToolId::Brush:
     case ToolId::Pencil:

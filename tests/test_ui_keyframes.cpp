@@ -352,6 +352,15 @@ private slots:
         QCOMPARE(keys("transform.position"), QStringList{"0:60"});
     }
 
+    void theSelectToolTransformsDrawingLayersSoThereIsNoSeparateLayerTool() {
+        s->setTool(ToolId::Select);
+        s->setAutoKey(true);
+        doc->setCurrentFrame(0);
+        drag({130, 130}, {190, 170});
+        QCOMPARE(keys("transform.position"), QStringList{"0:60"});
+        QCOMPARE(px(0, 200, 160), QColor(Qt::red));
+    }
+
     void transformToolRotatesScalesAndMovesTheAnchorWithoutMovingThePicture() {
         s->setTool(ToolId::LayerTransform);
         // rotate: grab just outside the box, swing 90 degrees clockwise about the anchor (canvas centre)

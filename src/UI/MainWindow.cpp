@@ -357,11 +357,11 @@ void MainWindow::buildActions() {
     // Tools
     m_toolGroup = new QActionGroup(this);
     struct T { ToolId id; const char* key; };
-    const T tools[] = {{ToolId::Select, "V"}, {ToolId::DirectSelect, "A"}, {ToolId::Brush, "B"}, {ToolId::Pencil, "N"},
+    const T tools[] = {{ToolId::Select, "V"}, {ToolId::Brush, "B"}, {ToolId::Pencil, "N"},
                        {ToolId::Eraser, "E"}, {ToolId::Pen, "P"}, {ToolId::Line, "L"}, {ToolId::Rectangle, "M"},
                        {ToolId::Ellipse, "O"}, {ToolId::Polygon, "Y"}, {ToolId::Bucket, "K"}, {ToolId::Gradient, "G"},
                        {ToolId::Eyedropper, "I"}, {ToolId::Hand, "H"}, {ToolId::Zoom, "Z"},
-                       {ToolId::Smudge, "S"}, {ToolId::FreeTransform, "Q"}, {ToolId::Text, "T"}, {ToolId::LayerTransform, "W"}};
+                       {ToolId::Smudge, "S"}, {ToolId::FreeTransform, "Q"}, {ToolId::Text, "T"}};
     for (const T& t : tools) {
         auto* a = new QAction(icons::tool(t.id), toolName(t.id), this);
         a->setCheckable(true);
@@ -413,9 +413,9 @@ void MainWindow::buildToolbars() {
     tb->show();
     int i = 0;
     for (auto it = m_toolActions.begin(); it != m_toolActions.end(); ++it, ++i) {}
-    const ToolId order[] = {ToolId::Select, ToolId::DirectSelect, ToolId::Hand, ToolId::Zoom, ToolId::Brush, ToolId::Pencil,
+    const ToolId order[] = {ToolId::Select, ToolId::Hand, ToolId::Zoom, ToolId::Brush, ToolId::Pencil,
                             ToolId::Eraser, ToolId::Smudge, ToolId::Bucket, ToolId::Gradient, ToolId::Eyedropper, ToolId::Pen, ToolId::Line,
-                            ToolId::Rectangle, ToolId::Ellipse, ToolId::Polygon, ToolId::Text, ToolId::FreeTransform, ToolId::LayerTransform};
+                            ToolId::Rectangle, ToolId::Ellipse, ToolId::Polygon, ToolId::Text, ToolId::FreeTransform};
     for (ToolId id : order) {
         tb->addAction(m_toolActions[id]);
         if (id == ToolId::Zoom || id == ToolId::Eyedropper) tb->addSeparator();

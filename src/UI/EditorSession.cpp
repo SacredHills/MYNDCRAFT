@@ -6,7 +6,7 @@ namespace mynd {
 
 QString toolName(ToolId t) {
     switch (t) {
-    case ToolId::Select: return "Selection";
+    case ToolId::Select: return "Select / Transform";
     case ToolId::DirectSelect: return "Direct Selection";
     case ToolId::Brush: return "Brush";
     case ToolId::Pencil: return "Pencil";

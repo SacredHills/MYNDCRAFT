@@ -181,3 +181,7 @@ No installers (MSI/DMG/AppImage/DEB/RPM) exist.
 - Frame selection is only on the timeline (the exposure sheet has no multi-cell selection).
 - Panels can be nested/stacked anywhere; each workspace (built-in or custom) remembers its arrangement when you switch away and on exit.
   "Reset Current Workspace" restores the factory layout. Verified headless only; not hand-tested on Windows.
+
+
+## Selection tools merged
+The Select tool (V) now covers Direct Selection and Transform Layer: on drawing/raster layers it transforms the whole layer (keyframeable); on vector/text layers it moves shapes, Alt+drag transforms the layer, Ctrl+drag edits points. The separate toolbar buttons and the A/W shortcuts were removed (internal tool classes remain). Verified by automated tests only; point editing via Ctrl is not yet exercised by a dedicated test.
