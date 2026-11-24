@@ -16,6 +16,7 @@ public:
     explicit ScrubSpinBox(QWidget* parent = nullptr) : QDoubleSpinBox(parent) {
         lineEdit()->installEventFilter(this);
         setCursor(Qt::SizeHorCursor);
+        lineEdit()->setCursor(Qt::SizeHorCursor);       // the inner text field has its own (I-beam) cursor otherwise
         setToolTip(tr("Drag to change. Shift = fine, Ctrl = coarse. Click to type."));
     }
     // Pixels of drag per singleStep().
@@ -35,6 +36,14 @@ public:
     }
 
 protected:
+    // QAbstractSpinBox::event() hands shortcut checks straight to its line edit, so the line edit's own filter is not enough.
+    bool event(QEvent* e) override {
+        if (e->type() == QEvent::ShortcutOverride) {
+            auto* k = static_cast<QKeyEvent*>(e);
+            if ((k->matches(QKeySequence::Undo) || k->matches(QKeySequence::Redo)) && !hasPendingText()) { e->ignore(); return false; }
+        }
+        return QDoubleSpinBox::event(e);
+    }
     // Mouse events arrive either on the spin box itself (its border) or on the line edit inside it: both do the same.
     void mousePressEvent(QMouseEvent* e) override { if (!press(e)) QDoubleSpinBox::mousePressEvent(e); }
     void mouseMoveEvent(QMouseEvent* e) override { if (!move(e)) QDoubleSpinBox::mouseMoveEvent(e); }
@@ -42,6 +51,12 @@ protected:
     bool eventFilter(QObject* o, QEvent* e) override {
         if (o == lineEdit() && isEnabled() && !isReadOnly()) {
             switch (e->type()) {
+            case QEvent::ShortcutOverride: {
+                // Ctrl+Z / Ctrl+Y belong to the document (undo the scrub) unless there is typed text that has not been applied yet.
+                auto* k = static_cast<QKeyEvent*>(e);
+                if ((k->matches(QKeySequence::Undo) || k->matches(QKeySequence::Redo)) && !hasPendingText()) { e->ignore(); return true; }
+                break;
+            }
             case QEvent::MouseButtonPress: if (press(static_cast<QMouseEvent*>(e))) return true; break;
             case QEvent::MouseMove: if (move(static_cast<QMouseEvent*>(e))) return true; break;
             case QEvent::MouseButtonRelease: if (release(static_cast<QMouseEvent*>(e))) return true; break;
@@ -52,6 +67,7 @@ protected:
     }
 
 private:
+    bool hasPendingText() const { return lineEdit()->text() != prefix() + textFromValue(value()) + suffix(); }
     bool press(QMouseEvent* m) {
         if (m->button() != Qt::LeftButton || !isEnabled() || isReadOnly()) return false;
         // On the up/down buttons (when shown) the normal spin box behaviour stays.
@@ -66,13 +82,14 @@ private:
         if (!m_pressed) return false;
         const double dx = m->globalPosition().x() - m_pressX;
         if (!m_dragging && std::abs(dx) < 3) return true;
-        if (!m_dragging) { m_dragging = true; lineEdit()->deselect(); }
+        if (!m_dragging) { m_dragging = true; lineEdit()->deselect(); QApplication::setOverrideCursor(Qt::SizeHorCursor); }
         scrubBy(dx, m->modifiers());
         return true;
     }
     bool release(QMouseEvent*) {
         if (!m_pressed) return false;
         m_pressed = false;
+        if (m_dragging) QApplication::restoreOverrideCursor();
         if (!m_dragging) {                               // a click: edit the text, cursor where it was clicked
             const bool had = lineEdit()->hasFocus();
             lineEdit()->setFocus(Qt::MouseFocusReason);

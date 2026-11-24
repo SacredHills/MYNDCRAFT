@@ -486,6 +486,29 @@ private slots:
         s->playback()->pause();
     }
 
+    void undoAfterScrubbingWorksWhileTheFieldIsStillFocused() {
+        buildScene();
+        QApplication::processEvents();
+        ScrubSpinBox* sp = nullptr;
+        for (auto* c : w->scene3dPanel()->findChildren<ScrubSpinBox*>()) if (c->isVisible() && c->isEnabled()) { sp = c; break; }
+        QVERIFY(sp);
+        QCOMPARE(sp->cursor().shape(), Qt::SizeHorCursor);
+        QLineEdit* le = sp->findChild<QLineEdit*>();
+        QCOMPARE(le->cursor().shape(), Qt::SizeHorCursor);
+        const int before = doc->undoStack()->index();
+        const double v0 = sp->value();
+        QTest::mousePress(le, Qt::LeftButton, {}, QPoint(10, 5));
+        QTest::mouseMove(le, QPoint(30, 5));
+        QTest::mouseMove(le, QPoint(40, 5));
+        QTest::mouseRelease(le, Qt::LeftButton, {}, QPoint(40, 5));
+        QApplication::processEvents();
+        QVERIFY(sp->value() != v0);
+        QCOMPARE(doc->undoStack()->index(), before + 1);             // the whole drag is one undo step
+        QTest::keyClick(le, Qt::Key_Z, Qt::ControlModifier);
+        QApplication::processEvents();
+        QCOMPARE(doc->undoStack()->index(), before);
+    }
+
     void rotateAndScaleGizmosWork() {
         const QUuid cube = buildScene();
         vp->setMode(Viewport3D::Mode::Rotate);
