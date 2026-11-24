@@ -23,6 +23,14 @@ void Autosaver::attach(Document* doc) {
     if (m_enabled) m_timer.start();
 }
 
+void Autosaver::waitForWriter() {
+    if (!m_thread) return;
+    QThread* t = m_thread;
+    t->wait();
+    m_thread = nullptr; m_busy = false;
+    delete t;
+}
+
 void Autosaver::detach(bool removeFile) {
     m_timer.stop();
     waitForWriter();          // a write still running would put the file back after we delete it
@@ -70,7 +78,11 @@ bool Autosaver::saveInBackground() {
         if (f.open(QIODevice::WriteOnly)) f.write(QJsonDocument(meta).toJson());
     });
     m_thread = t;
-    connect(t, &QThread::finished, this, [this, t] { m_busy = false; if (m_thread == t) m_thread = nullptr; t->deleteLater(); });
+    QPointer<QThread> guard(t);
+    connect(t, &QThread::finished, this, [this, guard] {
+        if (!guard) return;                       // already collected by waitForWriter()
+        m_busy = false; if (m_thread == guard) m_thread = nullptr; guard->deleteLater();
+    });
     t->start();
     return true;
 }

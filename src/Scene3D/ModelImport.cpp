@@ -12,16 +12,19 @@ QString modelFileFilter() {
     return QObject::tr("3D models (*.glb *.gltf *.obj *.fbx);;glTF / GLB (*.glb *.gltf);;Wavefront OBJ (*.obj);;Autodesk FBX (*.fbx)");
 }
 
-qint64 maxModelFileBytes() { return qint64(4) << 30; }   // glTF/FBX use 32-bit chunk sizes; the whole file is held in memory while it is read
+qint64 maxModelFileBytes() { return qint64(64) << 30; }   // sanity limit only; the file is memory-mapped, so what matters is free memory for the decoded model
 
 ImportResult importModelFile(const QString& path, double fps) {
     ImportResult r;
     QFileInfo fi(path);
     if (!fi.exists() || !fi.isFile()) { r.error = QObject::tr("File not found: %1").arg(path); return r; }
-    if (fi.size() > maxModelFileBytes()) { r.error = QObject::tr("The file is larger than 4 GB, which this importer does not accept."); return r; }
+    if (fi.size() > maxModelFileBytes()) { r.error = QObject::tr("The file is larger than 64 GB, which this importer does not accept."); return r; }
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) { r.error = QObject::tr("Cannot read %1: %2").arg(path, f.errorString()); return r; }
-    const QByteArray data = f.readAll();
+    // Memory-map the file instead of copying it into a QByteArray: no second copy, and the OS pages it in as the importer reads.
+    QByteArray data;
+    if (uchar* mapped = f.map(0, f.size())) data = QByteArray::fromRawData(reinterpret_cast<const char*>(mapped), f.size());
+    else data = f.readAll();                                  // (some file systems cannot be mapped)
     const QString ext = fi.suffix().toLower(), base = fi.completeBaseName(), dir = fi.absolutePath();
     if (ext == "obj") return importObjData(data, dir, base);
     if (ext == "glb" || ext == "gltf") return importGltfData(data, dir, base, fps);

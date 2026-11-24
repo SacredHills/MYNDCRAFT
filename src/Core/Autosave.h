@@ -20,7 +20,7 @@ class Autosaver : public QObject {
 public:
     explicit Autosaver(QObject* parent = nullptr);
     ~Autosaver() override { waitForWriter(); }
-    void waitForWriter() { if (m_thread) m_thread->wait(); }
+    void waitForWriter();
     void attach(Document* doc);
     void detach(bool removeFile);   // removeFile=true on clean close/save
     void setInterval(int seconds);

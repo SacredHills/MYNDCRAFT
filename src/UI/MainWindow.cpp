@@ -310,6 +310,10 @@ void MainWindow::buildActions() {
     aRulers = toggle(tr("Show &Rulers"), QKeySequence("Ctrl+R"), &m_session->rulersVisible);
     aGuides = toggle(tr("Show G&uides"), QKeySequence("Ctrl+Shift+;"), &m_session->guidesVisible);
     aSnap = toggle(tr("&Snap to Grid / Guides"), QKeySequence("Ctrl+;"), &m_session->snapEnabled);
+    aDetachCanvas = mk(tr("Canvas in Separate Window"));
+    aDetachCanvas->setCheckable(true);
+    aDetachCanvas->setToolTip(tr("Moves the canvas into its own window that can be dragged anywhere (or onto another screen). Uncheck to put it back in the middle."));
+    connect(aDetachCanvas, &QAction::toggled, this, [this](bool on) { setCanvasDetached(on); });
     aClearGuides = mk(tr("Clear Guides"));
     connect(aClearGuides, &QAction::triggered, this, [this] {
         if (m_doc && !m_doc->comp().guides.isEmpty()) { m_doc->compMutable().guides.clear(); m_doc->markDirty(); m_canvas->update(); }
@@ -459,6 +463,36 @@ void MainWindow::buildToolbars() {
     updateBreadcrumb();
 }
 
+void MainWindow::setCanvasDetached(bool on) {
+    if (on == (m_canvasDock != nullptr)) return;
+    if (on) {
+        takeCentralWidget();                                   // keeps the canvas alive
+        auto* ph = new QWidget(this);
+        ph->setObjectName("centralPlaceholder");
+        ph->setMaximumSize(0, 0);
+        setCentralWidget(ph);
+        m_canvasDock = new QDockWidget(tr("Canvas"), this);
+        m_canvasDock->setObjectName("dock.canvasWindow");
+        m_canvasDock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+        m_canvasDock->setWidget(m_canvas);
+        addDockWidget(Qt::TopDockWidgetArea, m_canvasDock);
+        m_canvasDock->setFloating(true);
+        m_canvasDock->resize(qMax(700, width() / 2), qMax(500, height() / 2));
+        m_canvasDock->show();
+        m_canvas->fitToView();
+    } else {
+        QDockWidget* d = m_canvasDock;
+        m_canvasDock = nullptr;
+        d->setWidget(nullptr);
+        removeDockWidget(d);
+        setCentralWidget(m_canvas);                            // replaces (and deletes) the placeholder
+        m_canvas->show();
+        d->deleteLater();
+        m_canvas->fitToView();
+    }
+    if (aDetachCanvas && aDetachCanvas->isChecked() != on) { QSignalBlocker b(aDetachCanvas); aDetachCanvas->setChecked(on); }
+}
+
 // Brings the 3D panels up (placing them if the current workspace never had them).
 void MainWindow::show3DPanels() {
     QDockWidget* sc = m_docks.value("scene3d");
@@ -544,6 +578,8 @@ void MainWindow::buildMenus() {
     view->addActions({aRotL, aRotR, aRotReset});
     view->addSeparator();
     view->addActions({aGrid, aRulers, aGuides, aSnap, aClearGuides});
+    view->addSeparator();
+    view->addAction(aDetachCanvas);
 
     QMenu* obj = menuBar()->addMenu(tr("&Object"));
     obj->addActions({aGroupShapes, aUngroupShapes});

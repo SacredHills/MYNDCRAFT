@@ -1,4 +1,5 @@
 // glTF 2.0 importer (.gltf with embedded or external buffers, and binary .glb).
+#include <memory>
 #include <QDir>
 #include <functional>
 #include <QFile>
@@ -21,7 +22,7 @@ namespace mynd {
 
 namespace {
 
-constexpr qint64 kMaxBuffer = 4LL << 30;
+constexpr qint64 kMaxBuffer = 64LL << 30;
 
 struct Ctx {
     QJsonObject root;
@@ -33,6 +34,8 @@ struct Ctx {
 };
 
 QByteArray loadUri(const QString& uri, const QString& baseDir, QString* err) {
+    static thread_local std::vector<std::unique_ptr<QFile>> keepMapped;   // mapped external buffers stay mapped for the rest of this thread's imports (small)
+    if (keepMapped.size() > 64) keepMapped.clear();
     if (uri.startsWith("data:")) {
         const int comma = uri.indexOf(',');
         if (comma < 0) { *err = "malformed data URI"; return {}; }
@@ -44,6 +47,8 @@ QByteArray loadUri(const QString& uri, const QString& baseDir, QString* err) {
     QFile f(QDir(baseDir).filePath(rel));
     if (!f.open(QIODevice::ReadOnly)) { *err = "cannot open external file '" + uri + "'"; return {}; }
     if (f.size() > kMaxBuffer) { *err = "external file too large"; return {}; }
+    auto file = std::make_unique<QFile>(f.fileName());
+    if (file->open(QIODevice::ReadOnly)) if (uchar* m = file->map(0, file->size())) { QByteArray v = QByteArray::fromRawData(reinterpret_cast<const char*>(m), file->size()); keepMapped.push_back(std::move(file)); return v; }
     return f.readAll();
 }
 
@@ -129,8 +134,8 @@ ImportResult importGltfData(const QByteArray& data, const QString& baseDir, cons
             std::memcpy(&len, data.constData() + pos, 4); std::memcpy(&type, data.constData() + pos + 4, 4);
             pos += 8;
             if (qint64(len) > data.size() - pos) { r.error = QObject::tr("The GLB file is truncated."); return r; }
-            if (type == 0x4E4F534A && !haveJson) { jsonData = data.mid(pos, len); haveJson = true; }
-            else if (type == 0x004E4942 && !c.hasGlbBin) { c.glbBin = data.mid(pos, len); c.hasGlbBin = true; }
+            if (type == 0x4E4F534A && !haveJson) { jsonData = QByteArray::fromRawData(data.constData() + pos, len); haveJson = true; }
+            else if (type == 0x004E4942 && !c.hasGlbBin) { c.glbBin = QByteArray::fromRawData(data.constData() + pos, len); c.hasGlbBin = true; }
             pos += (len + 3) & ~3u;
         }
         if (!haveJson) { r.error = QObject::tr("The GLB file has no JSON chunk."); return r; }

@@ -509,6 +509,34 @@ private slots:
         QCOMPARE(doc->undoStack()->index(), before);
     }
 
+    void theCanvasCanMoveToItsOwnWindowAndBack() {
+        QVERIFY(!w->canvasDetached());
+        const QUuid L = doc->addLayer(LayerType::Raster, "R");
+        s->setActiveLayer(L);
+        w->setCanvasDetached(true);
+        QApplication::processEvents();
+        auto* dock = w->findChild<QDockWidget*>("dock.canvasWindow");
+        QVERIFY(dock && dock->isFloating() && dock->isVisible());
+        QCOMPARE(w->canvas()->parentWidget(), dock);
+        QVERIFY(w->canvas()->width() > 100 && w->canvas()->height() > 100);
+        // it still draws: paint with the brush through real mouse events
+        s->setForeground(Qt::black);
+        s->setTool(ToolId::Brush);
+        const QPoint a = w->canvas()->docToView().map(QPointF(50, 50)).toPoint(), b = w->canvas()->docToView().map(QPointF(150, 50)).toPoint();
+        QTest::mousePress(w->canvas(), Qt::LeftButton, {}, a);
+        QTest::mouseMove(w->canvas(), (a + b) / 2);
+        QTest::mouseMove(w->canvas(), b);
+        QTest::mouseRelease(w->canvas(), Qt::LeftButton, {}, b);
+        QVERIFY(doc->undoStack()->count() > 0);
+        w->workspaces()->apply("Drawing");                             // switching workspaces does not touch it
+        QVERIFY(w->canvasDetached() && dock->isVisible());
+        w->setCanvasDetached(false);
+        QApplication::processEvents();
+        QVERIFY(!w->canvasDetached());
+        QCOMPARE(w->centralWidget(), static_cast<QWidget*>(w->canvas()));
+        QVERIFY(w->canvas()->isVisible());
+    }
+
     void rotateAndScaleGizmosWork() {
         const QUuid cube = buildScene();
         vp->setMode(Viewport3D::Mode::Rotate);
