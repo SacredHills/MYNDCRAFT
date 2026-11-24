@@ -20,6 +20,10 @@ private slots:
         // 24000/1001 (23.976): one hour of playback lands on exactly the right frame.
         const qint64 hour = 3600LL * 1000000;
         QCOMPARE(Playback::frameAt(hour, 0, 0, 10'000'000, {24000, 1001}, 100, false, &fin), int(hour * 24000 / (1001LL * 1000000)));
+        // 59.94 fps over ten hours, 200 % speed: compare with an independent long-double calculation
+        const qint64 ten = 10LL * 3600 * 1000000;
+        const long double exact = (long double)ten * 2 * 60000 / (1001.0L * 1000000);
+        QVERIFY(qAbs(Playback::frameAt(ten, 0, 0, 100'000'000, {60000, 1001}, 200, false, &fin) - (long long)exact) <= 1);
         // 30 fps, half speed: 1 second advances 15 frames
         QCOMPARE(Playback::frameAt(1000000, 0, 0, 99, {30, 1}, 50, false, &fin), 15);
         // start offset
