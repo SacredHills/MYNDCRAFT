@@ -402,7 +402,7 @@ private slots:
         QTest::mouseRelease(le, Qt::LeftButton, {}, QPoint(25, 5));
         sb.setValue(10);
         sb.scrubBy(20, Qt::ShiftModifier);                 // fine: x0.1
-        QCOMPARE(sb.value(), 10.0);                        // (from the drag start value, not the current one)
+        QCOMPARE(sb.value(), 12.0);                        // 20 px x 1 step x 0.1, from the value at the start of the drag
     }
 
     void workspacesComeBackIdenticallyWhateverWasShownBefore() {
