@@ -385,6 +385,23 @@ private slots:
         QCOMPARE(v->shapes[0].nodes.size(), 4);
     }
 
+    void draggingAnOutlineBendsTheSegmentWithoutAddingPoints() {
+        s->setTool(ToolId::Rectangle);
+        drag({{100, 100}, {220, 180}});
+        Layer* v = s->activeLayer();
+        const double top0 = v->shapes[0].path().boundingRect().top();
+        s->setTool(ToolId::DirectSelect);
+        click(160, 100);                                                   // select; click on the edge
+        drag({{160, 100}, {160, 60}});                                     // pull the top edge up
+        QCOMPARE(v->shapes[0].nodes.size(), 4);                            // still four points
+        const QRectF b = v->shapes[0].path().boundingRect();
+        QVERIFY(b.top() < 90);                                             // edge bulged upward
+        QVERIFY(v->shapes[0].nearestSegment(QPointF(160, 60)).distance < 8);   // curve follows the cursor
+        w->document()->undoStack()->undo();
+        QVERIFY(v->shapes[0].nodes[0].out.isNull() && v->shapes[0].nodes[1].in.isNull());
+        QCOMPARE(v->shapes[0].path().boundingRect().top(), top0);
+    }
+
     void smudgeToolDragsPixelsAndUndoes() {
         Layer* l = s->activeLayer();
         { QPainter p(&l->raster); p.fillRect(0, 100, 100, 60, Qt::red); }

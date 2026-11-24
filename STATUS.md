@@ -2,7 +2,7 @@
 
 **Current phase:** 1 — Foundation and Drawing (complete for the scope below; see limitations)
 **Build:** Linux x86-64, GCC 13.3, Qt 6.4.2, CMake 3.28 — builds with no warnings.
-**Tests:** 5 CTest suites, 76 test cases, all passing (also clean under AddressSanitizer + UBSan).
+**Tests:** 5 CTest suites, 77 test cases, all passing (also clean under AddressSanitizer + UBSan).
 **Other platforms:** Windows and macOS are built and tested in CI on every push (see bottom). The Windows portable build was run by hand by the project owner; the macOS build has not been run by a person. No installers.
 
 ## Phase 1 acceptance check
@@ -46,7 +46,7 @@ shapes are still editable. Interactive use on a real display with a real tablet 
 - **Free transform (Q):** scale (8 handles, Shift keeps proportions, Alt from center), rotate (drag just outside
   the box, Shift snaps 15°), move (drag inside) for selected vector shapes (baked into the path nodes) or the
   content of a raster layer (resampled once, so repeated transforms lose sharpness; each is one undo step).
-- **Add point to a path:** Direct Select, double-click on the outline; shape is unchanged (curve is split exactly).
+- **Path editing on the outline:** with Direct Select, press and drag on the selected shape's outline to bend that segment directly (no point needed; works on straight edges too); double-click the outline to add a point (shape unchanged).
 - **Image import:** File > Import Image… (Ctrl+Shift+I) or drag files onto the window; formats are whatever
   Qt's image plugins provide. Becomes a new raster layer above the active one, centered, scaled down if larger
   than the canvas. Dropping a `.studio` file opens it.

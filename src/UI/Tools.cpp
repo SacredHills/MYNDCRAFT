@@ -398,6 +398,15 @@ public:
             for (int i = 0; i < cur->nodes.size(); ++i) {
                 if (QLineF(e.doc, cur->nodes[i].pos).length() <= tol) { m_node = i; emit m_s->selectionChanged(); return begin(l, Node); }
             }
+            // Press on the outline of the selected shape and drag: bend that segment (no point needed).
+            const VectorShape::SegmentHit sh = cur->nearestSegment(e.doc);
+            if (sh.seg >= 0 && sh.distance <= tol) {
+                m_seg = sh.seg; m_segT = std::clamp(sh.t, 0.15, 0.85); m_segPress = sh.point;
+                const int j = (sh.seg + 1) % cur->nodes.size();
+                m_segOut = cur->nodes[sh.seg].out; m_segIn = cur->nodes[j].in;
+                m_node = -1;
+                return begin(l, Segment);
+            }
         }
         const int hit = topmostHit(*l, e.doc, tol);
         if (hit >= 0) { m_s->setSelectedShapes({l->shapes[hit].id}); m_node = -1; }
@@ -408,6 +417,19 @@ public:
         if (m_drag == None) return;
         Layer* l = activeVector(m_s);
         VectorShape* s = l ? current(*l) : nullptr;
+        if (m_drag == Segment) {
+            if (!s || m_seg < 0 || m_seg >= s->nodes.size()) return;
+            const int n = s->nodes.size(), j = (m_seg + 1) % n;
+            // Moving both control points by d / (3 t (1-t)) moves the curve point at t by exactly d.
+            const QPointF d = (e.doc - m_segPress) / (3.0 * m_segT * (1.0 - m_segT));
+            PathNode& a = s->nodes[m_seg]; PathNode& b = s->nodes[j];
+            a.out = m_segOut + d;
+            b.in = m_segIn + d;
+            if (a.smooth) a.in = -a.out;
+            if (b.smooth) b.out = -b.in;
+            m_s->doc()->emitContentChanged({});
+            return;
+        }
         if (!s || m_node < 0 || m_node >= s->nodes.size()) return;
         PathNode& n = s->nodes[m_node];
         if (m_drag == Node) {
@@ -508,7 +530,8 @@ public:
         }
     }
 private:
-    enum Drag { None, Node, HandleIn, HandleOut };
+    enum Drag { None, Node, HandleIn, HandleOut, Segment };
+    int m_seg = -1; double m_segT = 0.5; QPointF m_segPress, m_segOut, m_segIn;
     VectorShape* current(Layer& l) {
         for (auto& s : l.shapes) if (m_s->selectedShapes().contains(s.id)) return &s;
         return nullptr;
