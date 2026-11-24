@@ -30,6 +30,9 @@ signals:
 
 private:
     void applyPreset(const QString& name);
+    QByteArray captureLayout() const;
+    bool restoreLayout(const QByteArray& bytes);
+    void clearDocks();
     QMainWindow* m_win;
     QMap<QString, QDockWidget*> m_docks;
     QString m_current;

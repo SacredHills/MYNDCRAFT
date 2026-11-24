@@ -397,6 +397,24 @@ private slots:
         QVERIFY(le->hasFocus());
     }
 
+    void workspacesComeBackIdenticallyWhateverWasShownBefore() {
+        auto snap = [&] {
+            QStringList out;
+            for (QDockWidget* d : w->findChildren<QDockWidget*>())
+                out << QString("%1:%2:%3:%4").arg(d->objectName()).arg(d->isVisible()).arg(d->isVisible() ? int(w->dockWidgetArea(d)) : 0).arg(d->isFloating());
+            out.sort();
+            return out;
+        };
+        QMap<QString, QStringList> first;
+        for (const QString& n : WorkspaceManager::presetNames()) { w->workspaces()->apply(n); QApplication::processEvents(); first[n] = snap(); }
+        // go around in a different order, twice, with a 3D panel popped up in between: every workspace must look the same as the first time
+        for (int round = 0; round < 2; ++round)
+            for (const QString& n : {QString("Animation"), QString("Drawing"), QString("3D"), QString("Illustration"), QString("Drawing"), QString("Animation")}) {
+                w->workspaces()->apply(n); QApplication::processEvents();
+                QCOMPARE(snap(), first[n]);
+            }
+    }
+
     void rotateAndScaleGizmosWork() {
         const QUuid cube = buildScene();
         vp->setMode(Viewport3D::Mode::Rotate);

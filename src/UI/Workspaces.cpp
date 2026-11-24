@@ -1,5 +1,7 @@
 #include "UI/Workspaces.h"
 
+#include <QDataStream>
+#include <QIODevice>
 #include <QToolBar>
 
 #include "Core/Settings.h"
@@ -13,9 +15,41 @@ WorkspaceManager::WorkspaceManager(QMainWindow* w, const QMap<QString, QDockWidg
     m_win->setDockOptions(m_win->dockOptions() | QMainWindow::AllowNestedDocks | QMainWindow::AllowTabbedDocks | QMainWindow::AnimatedDocks);
 }
 
+// Layout bytes = our own wrapper (magic + names of panels that are hidden) around QMainWindow::saveState(). Qt does not hide a panel that a
+// saved layout does not mention, and a hidden panel is not always remembered, so the hidden ones are stored explicitly.
+static const quint32 kLayoutMagic = 0x4d594c32;   // "MYL2"
+
+QByteArray WorkspaceManager::captureLayout() const {
+    QStringList hidden;
+    for (QDockWidget* d : m_docks) if (d && !d->isVisible() && !d->isFloating()) hidden << d->objectName();
+    QByteArray out;
+    QDataStream ds(&out, QIODevice::WriteOnly);
+    ds << kLayoutMagic << hidden << m_win->saveState(2);
+    return out;
+}
+
+bool WorkspaceManager::restoreLayout(const QByteArray& bytes) {
+    QStringList hidden;
+    QByteArray st = bytes;
+    QDataStream ds(bytes);
+    quint32 magic = 0;
+    ds >> magic;
+    const bool wrapped = magic == kLayoutMagic;
+    if (wrapped) { ds >> hidden >> st; if (ds.status() != QDataStream::Ok) return false; }
+    clearDocks();
+    bool ok = m_win->restoreState(st, 2);
+    if (!ok && !wrapped) {
+        ok = m_win->restoreState(st, 1);
+        if (ok) if (QDockWidget* p = m_docks.value("properties")) p->hide();   // an older layout does not know this panel
+    }
+    if (!ok) return false;
+    for (QDockWidget* d : m_docks) if (d && hidden.contains(d->objectName())) d->hide();
+    return true;
+}
+
 void WorkspaceManager::saveCurrent() {
     if (m_current.isEmpty() || !m_win->isVisible()) return;   // a window that was never shown has no real layout to keep
-    const QByteArray st = m_win->saveState(2);
+    const QByteArray st = captureLayout();
     if (presetNames().contains(m_current)) settings::savePresetLayout(m_current, st);
     else settings::saveWorkspaceState(m_current, st);
 }
@@ -27,7 +61,7 @@ void WorkspaceManager::resetCurrent() {
         emit changed();
     } else if (!m_current.isEmpty()) {
         const QByteArray st = settings::workspaceState(m_current);
-        if (!st.isEmpty() && !m_win->restoreState(st, 2)) m_win->restoreState(st, 1);
+        if (!st.isEmpty()) restoreLayout(st);
     }
 }
 
@@ -41,19 +75,26 @@ void WorkspaceManager::reapplyCurrent() {
     apply(n);
 }
 
+// Starting from "nothing docked, everything hidden" makes every workspace come back identical instead of depending on the one before.
+void WorkspaceManager::clearDocks() {
+    for (QDockWidget* d : m_docks) {
+        if (!d) continue;
+        d->setFloating(false);
+        m_win->removeDockWidget(d);
+        d->hide();
+    }
+}
+
 bool WorkspaceManager::apply(const QString& name) {
     if (!presetNames().contains(name) && !customNames().contains(name)) return false;
     if (name != m_current) saveCurrent();                       // keep the arrangement of the one we are leaving
     if (presetNames().contains(name)) {
         const QByteArray mine = settings::presetLayout(name);
-        if (mine.isEmpty() || !m_win->restoreState(mine, 2)) applyPreset(name);   // (layouts saved before the Properties dock existed are version 1: dropped)
+        if (mine.isEmpty() || !restoreLayout(mine)) applyPreset(name);
     } else if (customNames().contains(name)) {
         const QByteArray st = settings::workspaceState(name);
         if (st.isEmpty()) return false;
-        if (!m_win->restoreState(st, 2)) {
-            if (!m_win->restoreState(st, 1)) return false;
-            if (QDockWidget* p = m_docks.value("properties")) p->hide();   // an older layout does not know this panel
-        }
+        if (!restoreLayout(st)) return false;
     } else {
         return false;
     }
@@ -144,7 +185,7 @@ void WorkspaceManager::applyPreset(const QString& name) {
 }
 
 void WorkspaceManager::saveCurrentAs(const QString& name) {
-    settings::saveWorkspaceState(name, m_win->saveState(2));
+    settings::saveWorkspaceState(name, captureLayout());
     m_current = name;
     settings::setLastWorkspace(name);
     emit changed();

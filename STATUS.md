@@ -287,6 +287,7 @@ Limitations (honest list):
 - Fix: unchecking a 3D layer crashed (use-after-free on a reference into a deleted card node). Ids are now passed by value; regression test run under ASAN.
 - Transform/inspector number fields can be dragged horizontally (Shift fine, Ctrl coarse; click to type). Covers 3D inspector fields and 2D property fields. Tested with synthetic mouse events only.
 - Not done: context menu on timeline layer rows.
+- Fix: workspaces came back different depending on the previous one (Qt leaves panels a saved layout doesn't mention where they were, and hidden panels weren't remembered). Every restore now starts from all panels undocked, and hidden panels are stored with the layout (old saved layouts still load). Test cycles all workspaces and compares panel visibility/placement. Not hand-tested on Windows.
 
 ## Next tasks
 1. Phase 8: unified 2D/3D composition (awaiting go-ahead).
