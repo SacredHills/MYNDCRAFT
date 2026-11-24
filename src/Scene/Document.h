@@ -106,6 +106,11 @@ public:
     // Keyframes / static values of a layer's animatable properties. `mergeKey` merges consecutive edits (drags).
     void editTracks(const QUuid& layerId, const PropertyTracks& after, const QString& text, const QString& mergeKey = {});
     void emitTracksChanged(const QUuid& layerId);
+    void emitScene3DChanged(const QUuid& layerId);
+    // 3D scenes: `fn` edits a copy of the layer's scene and returns whether it changed anything; the edit is one undo step
+    // (steps with the same non-empty mergeKey on the same layer merge, for drags and spin boxes).
+    bool editScene3D(const QUuid& layerId, const std::function<bool(Scene3D&)>& fn, const QString& text, const QString& mergeKey = {});
+    QUuid addScene3DLayer(const QString& name = {});
 
     // Shape tween state of a vector layer (end shapes + whether they are being edited). Undoable.
     void setShapeTween(const QUuid& layerId, const ShapeList& shapes, const ShapeList& morph, bool editingEnd, const QString& text);
@@ -169,6 +174,7 @@ signals:
     void frameChanged(int frame);
     void animationChanged(const QUuid& layerId);
     void tracksChanged(const QUuid& layerId);
+    void scene3DChanged(const QUuid& layerId);
     void timingChanged();
     void symbolsChanged();
     void contextChanged();                // entered or left a symbol

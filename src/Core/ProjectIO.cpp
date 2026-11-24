@@ -23,6 +23,13 @@ QString drawingAssetName(const QUuid& layer, const QUuid& drawing) {
     return "assets/drawings/" + layer.toString(QUuid::WithoutBraces) + "/" + drawing.toString(QUuid::WithoutBraces) + ".png";
 }
 
+QString meshAssetName(const QUuid& layer, const QUuid& mesh) {
+    return "assets/scene3d/" + layer.toString(QUuid::WithoutBraces) + "/meshes/" + mesh.toString(QUuid::WithoutBraces) + ".bin";
+}
+QString textureAssetName(const QUuid& layer, const QUuid& tex) {
+    return "assets/scene3d/" + layer.toString(QUuid::WithoutBraces) + "/textures/" + tex.toString(QUuid::WithoutBraces) + ".png";
+}
+
 QJsonObject layerToJson(const Layer& l) {
     QJsonObject o;
     o["id"] = l.id.toString(QUuid::WithoutBraces);
@@ -39,6 +46,7 @@ QJsonObject layerToJson(const Layer& l) {
         if (!(l.editingEnd ? l.shapes : l.morphShapes).isEmpty()) o["morphShapes"] = shapesToJson(l.editingEnd ? l.shapes : l.morphShapes);
     }
     if (l.type == LayerType::Text) o["text"] = l.textContent.toJson();
+    if (l.type == LayerType::Scene3D && l.scene3d) o["scene3d"] = l.scene3d->toJson();
     if (l.type == LayerType::Animation) o["animation"] = l.anim.toJson();
     if (!l.tracks.isEmpty()) o["tracks"] = tracksToJson(l.tracks);
     if (l.type == LayerType::Symbol) {
@@ -56,7 +64,7 @@ QJsonObject layerToJson(const Layer& l) {
 
 void collectRaster(const Layer& g, QVector<const Layer*>& out) {
     for (const auto& c : g.children) {
-        if (c->type == LayerType::Raster || c->type == LayerType::Animation) out.append(c.get());
+        if (c->type == LayerType::Raster || c->type == LayerType::Animation || c->type == LayerType::Scene3D) out.append(c.get());
         collectRaster(*c, out);
     }
 }
@@ -132,6 +140,17 @@ bool writeZip(const Document& doc, const QString& path, QString* error) {
     for (const SymbolDef& d : doc.symbols()) if (d.root) collectRaster(*d.root, rasters);
     for (const Layer* l : rasters) {
         if (!ok) break;
+        if (l->type == LayerType::Scene3D) {
+            if (!l->scene3d) continue;
+            for (const auto& [mid, mesh] : l->scene3d->meshes) { ok = w.add(meshAssetName(l->id, mid), mesh->geometryBlob(), true); if (!ok) break; }
+            for (const auto& [tid, img] : l->scene3d->textures) {
+                if (!ok) break;
+                QByteArray png; QBuffer buf(&png); buf.open(QIODevice::WriteOnly);
+                if (!img.save(&buf, "PNG")) { ok = false; break; }
+                ok = w.add(textureAssetName(l->id, tid), png, false);
+            }
+            continue;
+        }
         if (l->type == LayerType::Animation) {
             for (const auto& dm : l->anim.drawings) {   // only drawings the layer still lists; undo-orphans are dropped
                 auto it = l->drawingImages.find(dm.id);
@@ -198,6 +217,7 @@ bool ProjectIO::save(Document& doc, const QString& path, QString* error, bool ke
 
 bool ProjectIO::migrate(QJsonObject&, int fromVersion, QString* error) {
     // v3 -> v4 also added shape tweens (morphShapes, the "shape.morph" property).
+    // v4 -> v5 added 3D scene layers (scene3d JSON + mesh/texture assets), optional as well.
     // v3 -> v4 added the symbol library and symbol-instance layers, also optional.
     // v2 -> v3 added per-layer property tracks (transform/opacity keyframes), also optional.
     // v1 -> v2 added animation layers, drawings and timeline settings. Every new field is optional with
@@ -294,6 +314,31 @@ LayerPtr layerFromJson(const QJsonObject& o, zip_t* z, const Document& doc, QStr
                 img = doc.newRasterImage();
             }
             l->drawingImages[dm.id] = img;
+        }
+    } else if (t == LayerType::Scene3D) {
+        const QJsonObject so = o["scene3d"].toObject();
+        QString serr;
+        if (!Scene3D::fromJson(so, *l->scene3d, &serr)) { *err = "3D scene '" + l->props.name + "': " + serr; return nullptr; }
+        for (const auto& mv : so["meshes"].toArray()) {
+            const QJsonObject mo = mv.toObject();
+            const QUuid mid(mo["id"].toString());
+            bool found = false;
+            const QByteArray blob = readEntry(z, meshAssetName(l->id, mid).toUtf8().constData(), &found);
+            std::shared_ptr<Mesh> mesh = found ? Mesh::fromJson(mo, blob, &serr) : nullptr;
+            if (mesh) l->scene3d->meshes[mesh->id] = mesh;
+            else warnings << QString("3D scene '%1': mesh '%2' is missing or damaged (%3); objects using it are not drawn").arg(l->props.name, mo["name"].toString(), found ? serr : QString("file missing"));
+        }
+        for (const auto& tv : so["textures"].toArray()) {
+            const QUuid tid(tv.toString());
+            bool found = false;
+            const QByteArray png = readEntry(z, textureAssetName(l->id, tid).toUtf8().constData(), &found);
+            QImage img;
+            if (found && img.loadFromData(png, "PNG") && !img.isNull()) l->scene3d->textures[tid] = img;
+            else warnings << QString("3D scene '%1': a texture is missing or unreadable; surfaces using it are drawn untextured").arg(l->props.name);
+        }
+        for (const QString& w : l->scene3d->validate()) {
+            if (w.contains("ancestor") || w.contains("duplicate")) { *err = "3D scene '" + l->props.name + "': " + w; return nullptr; }
+            warnings << QString("3D scene '%1': %2").arg(l->props.name, w);
         }
     } else if (t == LayerType::Symbol) {
         l->symbolId = QUuid(o["symbolId"].toString());

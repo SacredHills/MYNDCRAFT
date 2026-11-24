@@ -8,12 +8,13 @@
 
 #include "Scene/Animation.h"
 #include "Scene/Property.h"
+#include "Scene3D/Scene3D.h"
 #include "Scene/TextContent.h"
 #include "Scene/VectorShape.h"
 
 namespace mynd {
 
-enum class LayerType { Raster, Vector, Group, Text, Animation, Symbol };
+enum class LayerType { Raster, Vector, Group, Text, Animation, Symbol, Scene3D };
 // Symbols: reusable artwork with its own timeline. A Graphic symbol's time follows the timeline it sits in (with
 // loop / play-once / single-frame control); a Movie Clip runs on its own and always loops from its first frame.
 enum class SymbolKind { Graphic, MovieClip };
@@ -72,6 +73,8 @@ public:
     QUuid symbolId;
     SymbolPlay symbolPlay = SymbolPlay::Loop;
     int symbolFirstFrame = 0;
+    // Scene3D layers: a 3D scene rendered through its active camera into the composition (never null for that type).
+    std::shared_ptr<mynd::Scene3D> scene3d;
     Layer* parent = nullptr;         // maintained by Document
 
     LayerProps properties() const { return props; }

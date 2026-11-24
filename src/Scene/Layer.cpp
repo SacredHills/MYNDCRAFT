@@ -45,6 +45,7 @@ QString layerTypeKey(LayerType t) {
     case LayerType::Text: return "text";
     case LayerType::Animation: return "animation";
     case LayerType::Symbol: return "symbol";
+    case LayerType::Scene3D: return "scene3d";
     }
     return "raster";
 }
@@ -55,6 +56,7 @@ bool layerTypeFromKey(const QString& k, LayerType& out) {
     else if (k == "text") out = LayerType::Text;
     else if (k == "animation") out = LayerType::Animation;
     else if (k == "symbol") out = LayerType::Symbol;
+    else if (k == "scene3d") out = LayerType::Scene3D;
     else return false;
     return true;
 }
@@ -82,7 +84,10 @@ int symbolLocalFrame(const Layer& inst, const SymbolDef& def, int parentFrame) {
     return ((first + parentFrame) % n + n) % n;
 }
 
-Layer::Layer(LayerType t, const QString& name) : id(QUuid::createUuid()), type(t) { props.name = name; }
+Layer::Layer(LayerType t, const QString& name) : id(QUuid::createUuid()), type(t) {
+    props.name = name;
+    if (t == LayerType::Scene3D) scene3d = std::make_shared<mynd::Scene3D>();
+}
 
 QImage* Layer::drawingImage(const QUuid& id) {
     auto it = drawingImages.find(id);
@@ -142,6 +147,7 @@ QRectF Layer::contentBounds(int frame, const QSize& canvas, const SymbolResolver
         return r;
     }
     case LayerType::Text: return textContent.bounds();
+    case LayerType::Scene3D: return QRectF(QPointF(0, 0), QSizeF(canvas));
     case LayerType::Group: return childrenBounds(children, frame, canvas, syms);
     case LayerType::Symbol: {
         const SymbolDef* d = syms ? syms->findSymbol(symbolId) : nullptr;
@@ -168,6 +174,7 @@ LayerPtr Layer::cloneExact() const {
     c->anim = anim;
     c->tracks = tracks;
     c->symbolId = symbolId; c->symbolPlay = symbolPlay; c->symbolFirstFrame = symbolFirstFrame;
+    if (scene3d) c->scene3d = std::make_shared<mynd::Scene3D>(*scene3d);
     for (const auto& [did, img] : drawingImages) c->drawingImages[did] = img.copy();
     for (const auto& ch : children) {
         auto cc = ch->cloneExact();
@@ -187,6 +194,13 @@ LayerPtr Layer::cloneWithNewIds() const {
     c->anim = anim;
     c->tracks = tracks;
     c->symbolId = symbolId; c->symbolPlay = symbolPlay; c->symbolFirstFrame = symbolFirstFrame;
+    if (scene3d) {
+        c->scene3d = std::make_shared<mynd::Scene3D>(*scene3d);
+        std::map<QUuid, QUuid> nodeMap;
+        for (auto& n : c->scene3d->nodes) { const QUuid nid = QUuid::createUuid(); nodeMap[n.id] = nid; n.id = nid; }
+        for (auto& n : c->scene3d->nodes) if (nodeMap.count(n.parent)) n.parent = nodeMap[n.parent];
+        if (nodeMap.count(c->scene3d->activeCamera)) c->scene3d->activeCamera = nodeMap[c->scene3d->activeCamera];
+    }
     for (const auto& [did, img] : drawingImages) c->drawingImages[did] = img.copy();
     for (auto& s : c->shapes) s.id = QUuid::createUuid();  // group ids stay consistent within the layer
     QHash<QUuid, QUuid> gmap;

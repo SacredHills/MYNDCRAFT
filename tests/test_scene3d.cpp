@@ -1,6 +1,9 @@
 #include <QtTest>
 
 #include "TestEnv.h"
+#include "Core/ProjectIO.h"
+#include "Graphics/Compositor.h"
+#include "Scene/Document.h"
 #include "Scene3D/Render3D.h"
 #include "Scene3D/Scene3D.h"
 
@@ -148,6 +151,52 @@ private slots:
         QVERIFY(!s.reparent(ia, ia));
         s.removeNode(ia);                                                    // takes the child with it
         QVERIFY(s.nodes.empty());
+    }
+
+
+    void aSceneLayerRendersInTheCompositionUndoesAndSurvivesSaving() {
+        CompositionSettings cs; cs.width = 120; cs.height = 80; cs.durationFrames = 10; cs.background = Qt::white;
+        Document d(cs);
+        const QUuid lid = d.addScene3DLayer("Scene");
+        Material mat; mat.id = QUuid::createUuid(); mat.baseColor = Qt::red; mat.roughness = 1;
+        auto cube = makeCube(2); cube->parts = {{0, int(cube->indices.size()), mat.id}};
+        d.undoStack()->clear();
+        QVERIFY(d.editScene3D(lid, [&](Scene3D& s) {
+            s.materials.push_back(mat); s.meshes[cube->id] = cube;
+            Node3D n; n.kind = NodeKind::Mesh; n.mesh = cube->id; n.name = "Box"; s.addNode(n);
+            Node3D c; c.kind = NodeKind::Camera; c.position = {0, 0, 6}; c.name = "Cam"; s.addNode(c);
+            s.ambientIntensity = 1; return true; }, "Build"));
+        auto px = [&](int x, int y) { return Compositor::render(d, d.canvasRect(), {}).pixelColor(x, y); };
+        QCOMPARE(px(60, 40), QColor(Qt::red));
+        QCOMPARE(px(2, 2), QColor(Qt::white));                               // 3D layer is transparent outside the objects
+        d.undoStack()->undo();
+        QCOMPARE(px(60, 40), QColor(Qt::white));
+        d.undoStack()->redo();
+        QCOMPARE(px(60, 40), QColor(Qt::red));
+        // dragging merges into a single undo step
+        const QUuid box = d.findLayer(lid)->scene3d->nodes[0].id;
+        for (int i = 1; i <= 5; ++i)
+            d.editScene3D(lid, [&](Scene3D& s) { s.node(box)->position = QVector3D(float(i), 0, 0); return true; }, "Move", "drag");
+        QCOMPARE(d.undoStack()->count(), 2);
+        // save, reopen, same picture and same scene
+        QTemporaryDir dir;
+        const QString path = dir.filePath("scene.studio");
+        QString err;
+        QVERIFY2(ProjectIO::save(d, path, &err), qPrintable(err));
+        LoadResult r = ProjectIO::load(path);
+        QVERIFY2(r.doc, qPrintable(r.error));
+        QVERIFY2(r.warnings.isEmpty(), qPrintable(r.warnings.join("; ")));
+        const Layer* l = r.doc->findLayer(lid);
+        QVERIFY(l && l->scene3d);
+        QCOMPARE(l->scene3d->nodes.size(), size_t(2));
+        QCOMPARE(l->scene3d->node(box)->position, QVector3D(5, 0, 0));
+        QCOMPARE(l->scene3d->meshes.size(), size_t(1));
+        QCOMPARE(Compositor::render(*r.doc, r.doc->canvasRect(), {}), Compositor::render(d, d.canvasRect(), {}));
+        // a duplicated layer is independent
+        auto dup = d.findLayer(lid)->cloneWithNewIds();
+        dup->scene3d->nodes[0].position = {9, 9, 9};
+        QCOMPARE(d.findLayer(lid)->scene3d->node(box)->position, QVector3D(5, 0, 0));
+        QVERIFY(dup->scene3d->nodes[0].id != box);
     }
 
     void sceneSerialisesAndRejectsDamagedData() {

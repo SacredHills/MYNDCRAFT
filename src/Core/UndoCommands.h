@@ -81,6 +81,19 @@ private:
     Document* m_doc; QUuid m_layer; PropertyTracks m_before, m_after; QString m_key;
 };
 
+class Scene3DCommand : public QUndoCommand {
+public:
+    Scene3DCommand(Document* d, const QUuid& layer, std::shared_ptr<const Scene3D> before, std::shared_ptr<const Scene3D> after,
+                   const QString& text, const QString& mergeKey);
+    void undo() override;
+    void redo() override;
+    int id() const override { return m_key.isEmpty() ? -1 : 0x7F3B; }
+    bool mergeWith(const QUndoCommand* other) override;
+private:
+    void apply(const Scene3D& s);
+    Document* m_doc; QUuid m_layer; std::shared_ptr<const Scene3D> m_before, m_after; QString m_key;
+};
+
 // Frame rate, duration and work area of the composition.
 struct TimingSettings {
     FrameRate fps{24, 1};

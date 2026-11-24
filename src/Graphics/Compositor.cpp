@@ -1,5 +1,7 @@
 #include "Graphics/Compositor.h"
 
+#include "Scene3D/Render3D.h"
+
 namespace mynd {
 
 QPainter::CompositionMode Compositor::mode(BlendMode m) {
@@ -38,7 +40,7 @@ QImage Compositor::render(const Document& doc, const QRect& region, const Option
     p.setRenderHint(QPainter::Antialiasing);
     p.translate(-r.topLeft());
     p.setClipRect(r);
-    const Ctx ctx{opt.frame >= 0 ? opt.frame : doc.currentFrame(), &opt.onion, &doc, 0};
+    const Ctx ctx{opt.frame >= 0 ? opt.frame : doc.currentFrame(), &opt.onion, &doc, 0, opt.scene3dSupersample};
     drawGroup(p, *doc.root(), r, doc.canvasSize(), ctx);
     return out;
 }
@@ -114,6 +116,14 @@ void Compositor::drawAnimationLayer(QPainter& p, const Layer& l, const QRect& re
     p.drawImage(region.topLeft(), buf);
 }
 
+void Compositor::drawScene3D(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx) {
+    if (!l.scene3d || canvas.isEmpty()) return;
+    RenderOptions ro;
+    ro.supersample = ctx.ss3d;
+    const QImage img = renderScene(*l.scene3d, sceneCamera(*l.scene3d, double(canvas.width()) / canvas.height()), canvas, ro);
+    p.drawImage(region.topLeft(), img, region);
+}
+
 // Draws the layer's own content (no transform) into `p`, restricted to `region`, with `opacity` and `blend`.
 void Compositor::drawLayerContent(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx,
                                   double opacity, BlendMode blend) {
@@ -132,6 +142,7 @@ void Compositor::drawLayerContent(QPainter& p, const Layer& l, const QRect& regi
         if (l.type == LayerType::Vector) drawShapes(p, l.shapesAt(ctx.frame));
         else if (l.type == LayerType::Text) l.textContent.draw(p);
         else if (l.type == LayerType::Symbol) drawSymbol(p, l, region, canvas, ctx);
+        else if (l.type == LayerType::Scene3D) drawScene3D(p, l, region, canvas, ctx);
         else drawGroup(p, l, region, canvas, ctx);
     } else {
         // Isolated: render to a transparent buffer sized to the region, then blend as a unit.
@@ -144,6 +155,7 @@ void Compositor::drawLayerContent(QPainter& p, const Layer& l, const QRect& regi
         if (l.type == LayerType::Vector) drawShapes(bp, l.shapesAt(ctx.frame));
         else if (l.type == LayerType::Text) l.textContent.draw(bp);
         else if (l.type == LayerType::Symbol) drawSymbol(bp, l, region, canvas, ctx);
+        else if (l.type == LayerType::Scene3D) drawScene3D(bp, l, region, canvas, ctx);
         else drawGroup(bp, l, region, canvas, ctx);
         bp.end();
         p.setOpacity(opacity);

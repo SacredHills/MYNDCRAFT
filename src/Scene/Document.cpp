@@ -109,6 +109,23 @@ void Document::editTracks(const QUuid& layerId, const PropertyTracks& after, con
     if (l->tracks == clean) return;
     m_undo.push(new TracksCommand(this, layerId, l->tracks, clean, text, mergeKey));
 }
+void Document::emitScene3DChanged(const QUuid& id) { emit scene3DChanged(id); emitContentChanged({}); }
+bool Document::editScene3D(const QUuid& layerId, const std::function<bool(Scene3D&)>& fn, const QString& text, const QString& mergeKey) {
+    Layer* l = findLayer(layerId);
+    if (!l || l->type != LayerType::Scene3D || !l->scene3d) return false;
+    auto after = std::make_shared<Scene3D>(*l->scene3d);
+    if (!fn(*after)) return false;
+    m_undo.push(new Scene3DCommand(this, layerId, std::make_shared<Scene3D>(*l->scene3d), after, text, mergeKey));
+    return true;
+}
+QUuid Document::addScene3DLayer(const QString& name) {
+    auto l = std::make_shared<Layer>(LayerType::Scene3D, name.isEmpty() ? tr("3D Scene") : name);
+    const QUuid id = l->id;
+    auto* cmd = new AddLayerCommand(this, {}, -1, l);
+    cmd->setText(tr("Add 3D Scene"));
+    m_undo.push(cmd);
+    return id;
+}
 void Document::emitAnimationChanged(const QUuid& id) { emit animationChanged(id); emitContentChanged({}); }
 
 // ---------------- undoable edits ----------------

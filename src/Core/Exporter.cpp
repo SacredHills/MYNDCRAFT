@@ -215,6 +215,7 @@ bool writeGif(const Document& doc, const QString& path, const ExportOptions& opt
     for (int i = 0; i < count; ++i) {
         Compositor::Options co;
         co.includeBackground = !opt.transparentBackground;
+        co.scene3dSupersample = 2;
         co.frame = first + i;
         QImage img = Compositor::render(doc, doc.canvasRect(), co);
         if (!opt.transparentBackground) {                       // flatten onto opaque white in case the background itself is transparent
@@ -257,6 +258,7 @@ bool writePngSequence(const Document& doc, const QString& dir, const QString& ba
     for (int i = 0; i < count; ++i) {
         Compositor::Options co;
         co.includeBackground = !opt.transparentBackground;
+        co.scene3dSupersample = 2;
         co.frame = opt.firstFrame + i;
         const QImage img = Compositor::render(doc, doc.canvasRect(), co);
         const QString file = QDir(dir).filePath(QString("%1_%2.png").arg(baseName).arg(i + 1, digits, 10, QChar('0')));
