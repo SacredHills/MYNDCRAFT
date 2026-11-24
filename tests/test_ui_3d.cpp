@@ -490,7 +490,7 @@ private slots:
         buildScene();
         QApplication::processEvents();
         ScrubSpinBox* sp = nullptr;
-        for (auto* c : w->scene3dPanel()->findChildren<ScrubSpinBox*>()) if (c->isVisible() && c->isEnabled()) { sp = c; break; }
+        for (auto* c : w->scene3dPanel()->findChildren<QDoubleSpinBox*>()) if (auto* sc = dynamic_cast<ScrubSpinBox*>(c); sc && sc->isVisible() && sc->isEnabled()) { sp = sc; break; }
         QVERIFY(sp);
         QCOMPARE(sp->cursor().shape(), Qt::SizeHorCursor);
         QLineEdit* le = sp->findChild<QLineEdit*>();
