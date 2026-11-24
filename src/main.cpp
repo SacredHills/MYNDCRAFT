@@ -6,6 +6,33 @@
 #include "Core/Settings.h"
 #include "UI/MainWindow.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <cstdio>
+// If the app dies with an unhandled exception, leave a small text report next to the exe so the
+// cause can be diagnosed (exception code, faulting address and a raw call stack as module+offset).
+static LONG WINAPI crashReport(EXCEPTION_POINTERS* ep) {
+    char path[MAX_PATH];
+    GetModuleFileNameA(nullptr, path, MAX_PATH);
+    std::string p(path);
+    p = p.substr(0, p.find_last_of("\\/") + 1) + "myndcraft-crash.txt";
+    if (FILE* f = std::fopen(p.c_str(), "w")) {
+        std::fprintf(f, "MyndCraft crash\ncode=0x%08lX address=%p\n", ep->ExceptionRecord->ExceptionCode, ep->ExceptionRecord->ExceptionAddress);
+        void* frames[48];
+        const USHORT n = CaptureStackBackTrace(0, 48, frames, nullptr);
+        for (USHORT i = 0; i < n; ++i) {
+            HMODULE m = nullptr;
+            GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)frames[i], &m);
+            char name[MAX_PATH] = "?";
+            if (m) GetModuleFileNameA(m, name, MAX_PATH);
+            std::fprintf(f, "#%u %s +0x%llX\n", i, name, (unsigned long long)((char*)frames[i] - (char*)m));
+        }
+        std::fclose(f);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
+
 static void applyDarkTheme(QApplication& app) {
     app.setStyle(QStyleFactory::create("Fusion"));
     QPalette p;
@@ -29,6 +56,9 @@ static void applyDarkTheme(QApplication& app) {
 }
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    SetUnhandledExceptionFilter(crashReport);
+#endif
     QApplication app(argc, argv);
     app.setApplicationName("MyndCraft");
     app.setOrganizationName("MyndCraft");

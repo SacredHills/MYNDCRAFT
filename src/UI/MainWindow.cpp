@@ -214,20 +214,6 @@ bool MainWindow::maybeSave() {
     return true;
 }
 
-void MainWindow::showEvent(QShowEvent* e) {
-    QMainWindow::showEvent(e);
-    if (m_shownOnce) return;
-    m_shownOnce = true;
-    // A dock layout restored before the window has its real size is applied against bogus geometry
-    // (panels overlap, the canvas keeps a stale offset). Re-apply it once the window is laid out.
-    QTimer::singleShot(0, this, [this] {
-        const QString cur = m_workspaces->current();
-        if (cur.isEmpty()) return;
-        m_workspaces->reapplyCurrent();
-        if (m_canvas) m_canvas->updateGeometry();
-    });
-}
-
 void MainWindow::closeEvent(QCloseEvent* e) {
     if (!maybeSave()) { e->ignore(); return; }
     settings::setWindowGeometry(saveGeometry());

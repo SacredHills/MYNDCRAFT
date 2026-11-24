@@ -45,8 +45,6 @@ public:
 
 protected:
     void closeEvent(QCloseEvent*) override;
-    void showEvent(QShowEvent*) override;
-    bool m_shownOnce = false;
     void dragEnterEvent(QDragEnterEvent*) override;
     void dropEvent(QDropEvent*) override;
 
