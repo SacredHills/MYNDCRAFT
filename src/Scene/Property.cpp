@@ -193,8 +193,8 @@ bool PropertyTrack::applyEase(int frame, EasePreset p, bool incoming, bool outgo
         switch (p) {
         case EasePreset::Linear: setSide(in, Interp::Linear, Handle{}); break;
         case EasePreset::Hold: setSide(in, Interp::Hold, Handle{}); break;
-        case EasePreset::EaseIn: if (in) setSide(true, Interp::Bezier, Handle{1.0 / 3.0, 0}); else setSide(false, Interp::Linear, Handle{}); break;
-        case EasePreset::EaseOut: if (!in) setSide(false, Interp::Bezier, Handle{1.0 / 3.0, 0}); else setSide(true, Interp::Linear, Handle{}); break;
+        case EasePreset::EaseIn: if (in) setSide(true, Interp::Bezier, Handle{1.0 / 3.0, 0}); break;      // only the incoming side, like After Effects
+        case EasePreset::EaseOut: if (!in) setSide(false, Interp::Bezier, Handle{1.0 / 3.0, 0}); break;
         case EasePreset::EaseInOut: setSide(in, Interp::Bezier, Handle{1.0 / 3.0, 0}); break;
         }
     }

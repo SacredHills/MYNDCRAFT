@@ -72,9 +72,9 @@ AnimationActions::AnimationActions(EditorSession* s, QWidget* dialogParent) : QO
     };
     ease(keyLinear, "keyLinear", tr("Linear"), EasePreset::Linear, {});
     ease(keyHold, "keyHold", tr("Hold"), EasePreset::Hold, {});
-    ease(keyEaseIn, "keyEaseIn", tr("Ease In"), EasePreset::EaseIn, QKeySequence("Shift+F9"));
-    ease(keyEaseOut, "keyEaseOut", tr("Ease Out"), EasePreset::EaseOut, QKeySequence("Ctrl+Shift+F9"));
-    ease(keyEaseBoth, "keyEaseBoth", tr("Easy Ease (In and Out)"), EasePreset::EaseInOut, QKeySequence("F9"));
+    ease(keyEaseIn, "keyEaseIn", tr("Easy Ease In"), EasePreset::EaseIn, QKeySequence("Shift+F9"));
+    ease(keyEaseOut, "keyEaseOut", tr("Easy Ease Out"), EasePreset::EaseOut, QKeySequence("Ctrl+Shift+F9"));
+    ease(keyEaseBoth, "keyEaseBoth", tr("Easy Ease"), EasePreset::EaseInOut, QKeySequence("F9"));
     connect(m_s, &EditorSession::frameSelectionChanged, this, &AnimationActions::refresh);
 
     createTweenAction = mk("createTween", tr("Create Tween…"));
@@ -386,13 +386,16 @@ void AnimationActions::fillMenu(QMenu* m) {
 }
 
 void AnimationActions::fillKeyframeMenu(QMenu* m) {
+    refresh();
     connect(m->addAction(tr("Copy Keyframes")), &QAction::triggered, m, [this] { m_s->copyKeys(false); });
     connect(m->addAction(tr("Cut Keyframes")), &QAction::triggered, m, [this] { m_s->copyKeys(true); });
     QAction* paste = m->addAction(tr("Paste Keyframes at Current Frame"));
     paste->setEnabled(!m_s->keyClip().isEmpty() && m_s->activeLayer());
     connect(paste, &QAction::triggered, m, [this] { m_s->pasteKeys(); });
     m->addSeparator();
-    m->addActions({keyEaseBoth, keyEaseIn, keyEaseOut, keyLinear, keyHold});
+    m->addActions({keyEaseBoth, keyEaseIn, keyEaseOut});
+    m->addSeparator();
+    m->addActions({keyLinear, keyHold});
     m->addSeparator();
     m->addAction(deleteKeys);
 }

@@ -437,12 +437,12 @@ void MainWindow::buildToolbars() {
     m_crumb = new QLabel;
     m_crumb->setObjectName("breadcrumb");
     m_crumb->setContentsMargins(8, 0, 8, 0);
-    top->addWidget(m_crumb);
+    m_crumbAction = top->addWidget(m_crumb);
     m_crumbExit = new QToolButton;
     m_crumbExit->setText(tr("◂ Exit Symbol"));
     m_crumbExit->setToolTip(tr("Leave the symbol and go back one level (Ctrl+Shift+Up)"));
     connect(m_crumbExit, &QToolButton::clicked, this, [this] { if (m_symbolActions) m_symbolActions->leave(); });
-    top->addWidget(m_crumbExit);
+    m_crumbExitAction = top->addWidget(m_crumbExit);      // a toolbar hides widgets through their action, not the widget
     connect(m_session, &EditorSession::documentChanged, this, [this] {
         if (Document* d = m_session->doc()) connect(d, &Document::contextChanged, this, &MainWindow::updateBreadcrumb);
         updateBreadcrumb();
@@ -453,9 +453,9 @@ void MainWindow::buildToolbars() {
 void MainWindow::updateBreadcrumb() {
     const Document* d = m_session ? m_session->doc() : nullptr;
     const bool inside = d && d->editingSymbol();
-    if (m_crumbExit) m_crumbExit->setVisible(inside);
+    if (m_crumbExitAction) m_crumbExitAction->setVisible(inside);
+    if (m_crumbAction) m_crumbAction->setVisible(inside);
     if (m_crumb) {
-        m_crumb->setVisible(inside);
         m_crumb->setText(inside ? tr("Editing symbol:  %1").arg(d->breadcrumb().join("  ›  ")) : QString());
         m_crumb->setStyleSheet("color:#ffc83a; font-weight:bold;");
     }

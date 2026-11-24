@@ -441,8 +441,8 @@ GraphEditorPanel::GraphEditorPanel(EditorSession* s, QWidget* parent) : QWidget(
     bar->addSpacing(8);
     mkBtn(tr("Linear"), tr("Linear interpolation on the selected keys"), [s] { s->easeSelectedKeys(EasePreset::Linear); });
     mkBtn(tr("Hold"), tr("Hold on the selected keys"), [s] { s->easeSelectedKeys(EasePreset::Hold); });
-    mkBtn(tr("Ease In"), tr("Ease In (Shift+F9)"), [s] { s->easeSelectedKeys(EasePreset::EaseIn); });
-    mkBtn(tr("Ease Out"), tr("Ease Out"), [s] { s->easeSelectedKeys(EasePreset::EaseOut); });
+    mkBtn(tr("Easy Ease In"), tr("Ease In (Shift+F9)"), [s] { s->easeSelectedKeys(EasePreset::EaseIn); });
+    mkBtn(tr("Easy Ease Out"), tr("Ease Out"), [s] { s->easeSelectedKeys(EasePreset::EaseOut); });
     mkBtn(tr("Easy Ease"), tr("Easy Ease (F9)"), [s] { s->easeSelectedKeys(EasePreset::EaseInOut); });
     bar->addStretch(1);
     v->addLayout(bar);

@@ -107,6 +107,16 @@ private slots:
         QCOMPARE(bezierEase(2, 0.3, 0.3, 0.7, 0.7), 1.0);
     }
 
+    void easeInAndEaseOutOnlyTouchTheirOwnSideLikeAfterEffects() {
+        const auto& d = D("opacity");
+        PropertyTrack t; t.setKey(d, 0, V(0)); t.setKey(d, 10, V(100));
+        t.applyEase(0, EasePreset::EaseOut, true, true);
+        QCOMPARE(int(t.keys[0].out), int(Interp::Bezier));
+        t.applyEase(0, EasePreset::EaseIn, true, true);                   // must not undo the outgoing ease
+        QCOMPARE(int(t.keys[0].out), int(Interp::Bezier));
+        QCOMPARE(int(t.keys[0].in), int(Interp::Bezier));
+    }
+
     void easePresetsShapeTheSegmentOnBothSides() {
         const auto& d = D("opacity");
         PropertyTrack t; t.setKey(d, 0, V(0)); t.setKey(d, 10, V(100));

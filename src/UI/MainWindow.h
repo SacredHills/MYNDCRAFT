@@ -81,6 +81,8 @@ private:
     SymbolActions* m_symbolActions = nullptr;
     QLabel* m_crumb = nullptr;
     QToolButton* m_crumbExit = nullptr;
+    QAction* m_crumbExitAction = nullptr;
+    QAction* m_crumbAction = nullptr;
     void updateBreadcrumb();
     Autosaver* m_autosave;
     QMap<QString, QDockWidget*> m_docks;

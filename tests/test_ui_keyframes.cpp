@@ -329,7 +329,7 @@ private slots:
         w->animation()->fillKeyframeMenu(&m);
         QStringList texts; for (QAction* a : m.actions()) texts << a->text();
         QVERIFY(texts.contains("Copy Keyframes"));
-        QVERIFY(texts.contains("Easy Ease (In and Out)") && texts.contains("Hold") && texts.contains("Linear"));
+        QVERIFY(texts.contains("Easy Ease") && texts.contains("Easy Ease In") && texts.contains("Easy Ease Out") && texts.contains("Hold") && texts.contains("Linear"));
     }
 
     // ------------------------------------------------------------ Transform Layer tool
@@ -692,6 +692,7 @@ private slots:
         s->setTool(ToolId::Select);
         QTest::mouseDClick(cv, Qt::LeftButton, {}, view(130, 130));
         QVERIFY(doc->editingSymbol());
+        QCoreApplication::sendPostedEvents(); QCoreApplication::processEvents();
         QVERIFY(w->findChild<QLabel*>("breadcrumb")->isVisibleTo(w.get()));
         QVERIFY(w->findChild<QLabel*>("breadcrumb")->text().contains("Box"));
         QCOMPARE(doc->root()->children.size(), size_t(1));                  // the symbol's own layer
@@ -699,6 +700,7 @@ private slots:
         QVERIFY(sa->exitSymbol->isEnabled());
         sa->exitSymbol->trigger();
         QVERIFY(!doc->editingSymbol());
+        QCoreApplication::sendPostedEvents(); QCoreApplication::processEvents();
         QVERIFY(!w->findChild<QLabel*>("breadcrumb")->isVisibleTo(w.get()));
         // inserting a second instance from the library
         sa->setLibrarySelection(sym);
