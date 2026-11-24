@@ -34,6 +34,9 @@ Scene3DActions::Scene3DActions(EditorSession* s, QWidget* dialogParent) : QObjec
     duplicateNode = mk(tr("Duplicate Node")); deleteNode = mk(tr("Delete Node"));
     useAsSceneCamera = mk(tr("Use as Scene Camera"));
     frameSelection = mk(tr("Frame Selection in 3D View"), QKeySequence("Shift+F"));
+    make3D = mk(tr("3&D Layer (show layer in 3D space)"));
+    make3D->setCheckable(true);
+    make3D->setToolTip(tr("Turns the selected 2D layer into a card in a 3D scene so it can be moved, rotated and scaled in 3D space"));
 
     connect(newScene, &QAction::triggered, this, [this] { m_s->doc()->undoStack()->beginMacro(tr("New 3D Scene")); const QUuid id = m_s->doc()->addScene3DLayer(); m_s->setActiveLayer(id); m_s->doc()->undoStack()->endMacro(); emit sceneLayerActivated(); });
     connect(importModel, &QAction::triggered, this, [this] {
@@ -43,6 +46,13 @@ Scene3DActions::Scene3DActions(EditorSession* s, QWidget* dialogParent) : QObjec
         if (importModelFile(path, &err, &warn).isNull()) { QMessageBox::warning(m_parent, tr("Import 3D Model"), err); return; }
         if (!warn.isEmpty()) QMessageBox::information(m_parent, tr("Import 3D Model"), tr("Imported with notes:\n\n• %1").arg(warn.join("\n• ")));
         else emit m_s->message(tr("Imported %1").arg(QFileInfo(path).fileName()));
+    });
+    connect(make3D, &QAction::triggered, this, [this](bool on) {
+        const QUuid id = m_s->activeLayerId();
+        QString err;
+        if (on) { if (makeLayer3D(id, &err).isNull() && !err.isEmpty()) QMessageBox::information(m_parent, tr("3D Layer"), err); }
+        else removeLayer3D(id);
+        refresh();
     });
     connect(addCube, &QAction::triggered, this, [this] { createPrimitive(Primitive::Cube); });
     connect(addSphere, &QAction::triggered, this, [this] { createPrimitive(Primitive::Sphere); });
@@ -73,6 +83,8 @@ void Scene3DActions::fillMenu(QMenu* m) {
     m->addAction(addCamera);
     m->addAction(addGroup);
     m->addSeparator();
+    m->addAction(make3D);
+    m->addSeparator();
     m->addActions({duplicateNode, deleteNode, useAsSceneCamera, frameSelection});
 }
 
@@ -87,6 +99,84 @@ void Scene3DActions::refresh() {
     deleteNode->setEnabled(n != nullptr);
     useAsSceneCamera->setEnabled(n && n->kind == NodeKind::Camera);
     frameSelection->setEnabled(l != nullptr);
+    const Layer* al = m_s->activeLayer();
+    const bool is3D = al && isLayer3D(al->id);
+    make3D->setEnabled(doc && al && (al->type != LayerType::Scene3D || is3D));
+    make3D->blockSignals(true);
+    make3D->setChecked(is3D);
+    make3D->blockSignals(false);
+}
+
+bool Scene3DActions::isLayer3D(const QUuid& layer, QUuid* sceneLayer, QUuid* node) const {
+    Document* d = m_s->doc();
+    if (!d || layer.isNull()) return false;
+    bool found = false;
+    Document::forEachLayer(d->root(), [&](Layer* l) {
+        if (found || l->type != LayerType::Scene3D || !l->scene3d) return;
+        for (const Node3D& n : l->scene3d->nodes) if (n.cardLayer == layer) { found = true; if (sceneLayer) *sceneLayer = l->id; if (node) *node = n.id; return; }
+    });
+    return found;
+}
+
+QUuid Scene3DActions::makeLayer3D(const QUuid& layerId, QString* error) {
+    Document* d = m_s->doc();
+    Layer* src = d ? d->findLayer(layerId) : nullptr;
+    if (!src) { if (error) *error = tr("There is no layer to make 3D."); return {}; }
+    if (src->type == LayerType::Scene3D) { if (error) *error = tr("A 3D scene layer is already 3D."); return {}; }
+    if (src->props.locked) { if (error) *error = tr("The layer is locked."); return {}; }
+    QUuid existing;
+    if (isLayer3D(layerId, nullptr, &existing)) return existing;
+    // which scene layer: the nearest one above the layer in the same parent, else the nearest below, else a new one right above
+    Layer* parent = src->parent ? src->parent : d->root();
+    const int at = d->indexInParent(src);
+    Layer* scene = nullptr;
+    for (int i = at + 1; i < int(parent->children.size()) && !scene; ++i) if (parent->children[size_t(i)]->type == LayerType::Scene3D) scene = parent->children[size_t(i)].get();
+    for (int i = at - 1; i >= 0 && !scene; --i) if (parent->children[size_t(i)]->type == LayerType::Scene3D) scene = parent->children[size_t(i)].get();
+    d->undoStack()->beginMacro(tr("Make \"%1\" a 3D Layer").arg(src->props.name));
+    QUuid sceneId = scene ? scene->id : QUuid();
+    if (sceneId.isNull()) sceneId = d->addScene3DLayer(tr("3D Scene"), parent == d->root() ? QUuid() : parent->id, at + 1);
+    const double aspect = d->comp().height > 0 ? double(d->comp().width) / d->comp().height : 1.0;
+    QUuid made;
+    d->editScene3D(sceneId, [&](Scene3D& s) {
+        auto mesh = makeCardPlane(2.0 * aspect, 2.0);               // 2 units tall, canvas-shaped; at distance 2.414 a 45° camera frames it exactly
+        mesh->parts = {{0, int(mesh->indices.size()), QUuid()}};
+        s.meshes[mesh->id] = mesh;
+        Node3D n; n.kind = NodeKind::Mesh; n.name = s.uniqueName(tr("Card: %1").arg(src->props.name)); n.mesh = mesh->id; n.cardLayer = layerId;
+        made = s.addNode(n);
+        if (s.firstCamera().isNull()) {
+            Node3D cam; cam.kind = NodeKind::Camera; cam.name = s.uniqueName(tr("Camera")); cam.fov = 45;
+            cam.position = QVector3D(0, 0, float(1.0 / std::tan(22.5 * M_PI / 180.0)));
+            s.activeCamera = s.addNode(cam);
+        }
+        return true;
+    }, tr("Add Card"));
+    d->undoStack()->endMacro();
+    m_s->setActiveLayer(sceneId);
+    m_s->setSelectedNode(made);
+    emit sceneLayerActivated();
+    return made;
+}
+
+bool Scene3DActions::removeLayer3D(const QUuid& layerId) {
+    Document* d = m_s->doc();
+    if (!d) return false;
+    QVector<QUuid> scenes;
+    Document::forEachLayer(d->root(), [&](Layer* l) {
+        if (l->type != LayerType::Scene3D || !l->scene3d) return;
+        for (const Node3D& n : l->scene3d->nodes) if (n.cardLayer == layerId) { scenes << l->id; return; }
+    });
+    if (scenes.isEmpty()) return false;
+    d->undoStack()->beginMacro(tr("Make Layer 2D Again"));
+    for (const QUuid& sid : scenes)
+        d->editScene3D(sid, [&](Scene3D& s) {
+            QVector<QUuid> victims;
+            for (const Node3D& n : s.nodes) if (n.cardLayer == layerId) victims << n.id;
+            for (const QUuid& v : victims) s.removeNode(v);
+            return !victims.isEmpty();
+        }, tr("Remove Card"));
+    d->undoStack()->endMacro();
+    m_s->setActiveLayer(layerId);
+    return true;
 }
 
 QUuid Scene3DActions::ensureSceneLayer() {

@@ -563,6 +563,8 @@ void MainWindow::buildMenus() {
     layer->addActions({aGroupLayer, aUngroupLayer});
     layer->addSeparator();
     layer->addActions({aUp, aDown, aToggleVis, aToggleLock});
+    layer->addSeparator();
+    layer->addAction(m_scene3dActions->make3D);
 
     QMenu* anim = menuBar()->addMenu(tr("&Animation"));
     m_anim->fillMenu(anim);

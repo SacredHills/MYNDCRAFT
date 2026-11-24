@@ -12,6 +12,7 @@ class QDoubleSpinBox;
 class QGroupBox;
 class QPushButton;
 class QToolButton;
+class QLabel;
 class QListWidget;
 class QSpinBox;
 
@@ -30,6 +31,8 @@ public:
     QDoubleSpinBox* intensityField() const { return m_intensity; }
     QToolButton* stopwatch(const QString& what) const { for (const KeyRow& r : m_keyRows) if (r.what == what) return r.watch; return nullptr; }
     QToolButton* keyButton(const QString& what) const { for (const KeyRow& r : m_keyRows) if (r.what == what) return r.key; return nullptr; }
+    QGroupBox* cardGroup() const { return m_gCard; }
+    QCheckBox* cardLitBox() const { return m_cardLit; }
     QGroupBox *transformGroup() const { return m_gXform; }
     QGroupBox *materialGroup() const { return m_gMat; }
     QGroupBox *lightGroup() const { return m_gLight; }
@@ -74,6 +77,9 @@ private:
     QComboBox* m_cameraCombo;
     QVector<KeyRow> m_keyRows;
     QGroupBox* m_gClips = nullptr;
+    QGroupBox* m_gCard = nullptr;
+    QLabel* m_cardSource = nullptr;
+    QCheckBox* m_cardLit = nullptr;
     QListWidget *m_clipList = nullptr, *m_placeList = nullptr;
     QSpinBox *m_pStart = nullptr, *m_pOffset = nullptr;
     QDoubleSpinBox* m_pSpeed = nullptr;

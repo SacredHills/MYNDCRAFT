@@ -43,9 +43,67 @@ QImage Compositor::render(const Document& doc, const QRect& region, const Option
     p.setRenderHint(QPainter::Antialiasing);
     p.translate(-r.topLeft());
     p.setClipRect(r);
-    const Ctx ctx{opt.frame >= 0 ? opt.frame : doc.currentFrame(), &opt.onion, &doc, 0, opt.scene3dSupersample};
+    QSet<QUuid> cards;
+    collectCardSources(*doc.root(), cards);
+    const Ctx ctx{opt.frame >= 0 ? opt.frame : doc.currentFrame(), &opt.onion, &doc, 0, opt.scene3dSupersample, &cards};
     drawGroup(p, *doc.root(), r, doc.canvasSize(), ctx);
     return out;
+}
+
+void Compositor::collectCardSources(const Layer& group, QSet<QUuid>& out) {
+    for (const auto& c : group.children) {
+        if (c->type == LayerType::Scene3D && c->scene3d)
+            for (const Node3D& n : c->scene3d->nodes) if (!n.cardLayer.isNull()) out.insert(n.cardLayer);
+        if (c->isGroup()) collectCardSources(*c, out);
+    }
+}
+
+static const Layer* findInTree(const Layer& g, const QUuid& id) {
+    for (const auto& c : g.children) {
+        if (c->id == id) return c.get();
+        if (c->isGroup()) if (const Layer* f = findInTree(*c, id)) return f;
+    }
+    return nullptr;
+}
+
+std::shared_ptr<const Scene3D> Compositor::sceneForDrawing(const Layer& l, int frame, const QSize& canvas, const SymbolResolver* syms) {
+    std::shared_ptr<const Scene3D> base = l.sceneAt(frame);
+    if (!base) return base;
+    bool anyCard = false;
+    for (const Node3D& n : base->nodes) anyCard |= !n.cardLayer.isNull();
+    if (!anyCard || canvas.isEmpty()) return base;
+    const Layer* root = &l;
+    while (root->parent) root = root->parent;
+    auto s = std::make_shared<Scene3D>(*base);
+    quint64 h = 1469598103934665603ull;
+    const QSet<QUuid> noCards;                                   // the layer shown on a card is drawn by the card only
+    const Ctx ctx{frame, nullptr, syms, 1, 1, &noCards};
+    for (Node3D& n : s->nodes) {
+        if (n.cardLayer.isNull()) continue;
+        const Layer* src = findInTree(*root, n.cardLayer);
+        if (!src || src == &l || src->type == LayerType::Scene3D || !src->props.visible) { n.visible = false; continue; }
+        QImage img(canvas, QImage::Format_ARGB32_Premultiplied);
+        img.fill(Qt::transparent);
+        {
+            QPainter p(&img);
+            p.setRenderHint(QPainter::Antialiasing);
+            drawLayerContent(p, *src, QRect(QPoint(0, 0), canvas), canvas, ctx, 1.0, BlendMode::Normal);
+        }
+        const double opacity = std::clamp(src->props.opacity * src->xformAt(frame).opacity, 0.0, 1.0);
+        h ^= qHash(QByteArray::fromRawData(reinterpret_cast<const char*>(img.constBits()), qsizetype(img.sizeInBytes())), 0x9E3779B9u);
+        h *= 1099511628211ull;
+        h ^= quint64(opacity * 1e6) + quint64(n.cardLit);
+        h *= 1099511628211ull;
+        const QUuid tid = QUuid::createUuid();
+        s->textures[tid] = img;
+        Material m;
+        m.id = QUuid::createUuid(); m.name = "Card"; m.baseColor = QColor::fromRgbF(1, 1, 1, float(opacity)); m.baseTexture = tid;
+        m.roughness = 1.0; m.doubleSided = true; m.unlit = !n.cardLit;
+        n.materialOverride = m.id;
+        s->materials.push_back(m);
+    }
+    s->revision = (base->revision * 0x9E3779B97F4A7C15ull) ^ h ^ (1ull << 62);
+    return s;
 }
 
 void Compositor::drawGroup(QPainter& p, const Layer& group, const QRect& region, const QSize& canvas, const Ctx& ctx) {
@@ -84,6 +142,9 @@ void Compositor::drawSymbol(QPainter& p, const Layer& l, const QRect& region, co
     inner.frame = symbolLocalFrame(l, *d, ctx.frame);
     inner.onion = nullptr;                              // onion skin is a per-timeline editing aid
     inner.depth = ctx.depth + 1;
+    QSet<QUuid> innerCards;
+    collectCardSources(*d->root, innerCards);
+    inner.cards = &innerCards;
     drawGroup(p, *d->root, region, canvas, inner);
 }
 
@@ -121,7 +182,7 @@ void Compositor::drawAnimationLayer(QPainter& p, const Layer& l, const QRect& re
 
 void Compositor::drawScene3D(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx) {
     if (!l.scene3d || canvas.isEmpty()) return;
-    const std::shared_ptr<const Scene3D> scene = l.sceneAt(ctx.frame);
+    const std::shared_ptr<const Scene3D> scene = sceneForDrawing(l, ctx.frame, canvas, ctx.syms);
     int ss = ctx.ss3d;
     if (ss <= 0) ss = (qint64(canvas.width()) * canvas.height() <= 1200000) ? 2 : 1;
     // The software renderer draws the whole canvas, so keep the last few results: repaints of other layers, partial redraws and
@@ -188,6 +249,7 @@ void Compositor::drawLayerContent(QPainter& p, const Layer& l, const QRect& regi
 
 void Compositor::drawLayer(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx) {
     if (!l.props.visible) return;
+    if (ctx.cards && ctx.cards->contains(l.id)) return;           // shown through a card in a 3D scene instead
     const LayerXform xf = l.xformAt(ctx.frame);
     const double opacity = l.props.opacity * xf.opacity;
     if (opacity <= 0) return;

@@ -118,7 +118,7 @@ public:
     // Adds a key at the current frame holding the value shown there, or removes the key if there is one (starts animating if needed).
     bool toggleScene3DKey(const QUuid& layerId, const QString& propId);
     bool editScene3D(const QUuid& layerId, const std::function<bool(Scene3D&)>& fn, const QString& text, const QString& mergeKey = {}, bool autoKey = false);
-    QUuid addScene3DLayer(const QString& name = {});
+    QUuid addScene3DLayer(const QString& name = {}, QUuid parentId = {}, int index = -1);
 
     // Shape tween state of a vector layer (end shapes + whether they are being edited). Undoable.
     void setShapeTween(const QUuid& layerId, const ShapeList& shapes, const ShapeList& morph, bool editingEnd, const QString& text);

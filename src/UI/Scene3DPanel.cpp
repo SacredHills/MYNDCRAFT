@@ -127,6 +127,21 @@ Scene3DPanel::Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent)
     row3(fx, tr("Scale"), m_scl, -1e5, 1e5, 0.1, 3, "scl");
     il->addWidget(m_gXform);
 
+    m_gCard = new QGroupBox(tr("3D Layer Card"));
+    auto* fcd = new QFormLayout(m_gCard);
+    m_cardSource = new QLabel; m_cardSource->setWordWrap(true); fcd->addRow(tr("Layer"), m_cardSource);
+    m_cardLit = new QCheckBox(tr("Lit by the scene's lights")); m_cardLit->setToolTip(tr("Off: the card looks exactly like the 2D layer. On: lights shade it."));
+    fcd->addRow(QString(), m_cardLit);
+    auto* cardBack = new QPushButton(tr("Make Layer 2D Again"));
+    fcd->addRow(QString(), cardBack);
+    il->addWidget(m_gCard);
+    connect(m_cardLit, &QCheckBox::toggled, this, [this](bool on) { if (!m_updating) edit(tr("Card Lighting"), {}, [on](Scene3D&, Node3D& n) { if (n.cardLayer.isNull() || n.cardLit == on) return false; n.cardLit = on; return true; }); });
+    connect(cardBack, &QPushButton::clicked, this, [this] {
+        const Layer* l = m_s->active3DLayer();
+        const Node3D* n = l ? l->scene3d->node(m_s->selectedNode()) : nullptr;
+        if (n && !n->cardLayer.isNull()) m_a->removeLayer3D(n->cardLayer);
+    });
+
     m_gMat = new QGroupBox(tr("Material"));
     auto* fm = new QFormLayout(m_gMat);
     m_matCombo = new QComboBox; fm->addRow(tr("Slot"), m_matCombo);
@@ -498,13 +513,19 @@ void Scene3DPanel::refreshInspector() {
     m_updating = true;
     auto setSpin = [](QDoubleSpinBox* b, double v) { if (!b->hasFocus() || !b->isVisible()) b->setValue(v); };
     m_gXform->setVisible(n != nullptr);
-    m_gMat->setVisible(n && n->kind == NodeKind::Mesh);
+    m_gMat->setVisible(n && n->kind == NodeKind::Mesh && n->cardLayer.isNull());
+    m_gCard->setVisible(n && !n->cardLayer.isNull());
+    if (n && !n->cardLayer.isNull()) {
+        const Layer* src = m_s->doc() ? m_s->doc()->findLayer(n->cardLayer) : nullptr;
+        m_cardSource->setText(src ? src->props.name : tr("(the layer no longer exists)"));
+        m_cardLit->setChecked(n->cardLit);
+    }
     m_gLight->setVisible(n && n->kind == NodeKind::Light);
     m_gCam->setVisible(n && n->kind == NodeKind::Camera);
     m_gScene->setVisible(sc != nullptr);
     if (n) {
         for (int i = 0; i < 3; ++i) { setSpin(m_pos[i], n->position[i]); setSpin(m_rot[i], n->rotation[i]); setSpin(m_scl[i], n->scale[i]); }
-        if (n->kind == NodeKind::Mesh) {
+        if (n->kind == NodeKind::Mesh && n->cardLayer.isNull()) {
             QUuid keep = currentMaterialId();
             m_matCombo->clear();
             QVector<QUuid> mats;

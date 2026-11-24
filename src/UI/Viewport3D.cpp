@@ -1,5 +1,7 @@
 #include "UI/Viewport3D.h"
 
+#include "Graphics/Compositor.h"
+
 #include <QButtonGroup>
 #include <QHBoxLayout>
 #include <QKeyEvent>
@@ -143,7 +145,11 @@ public:
         p.translate(vr.topLeft());
         drawGrid(p, cam, vr.size());
         RenderOptions ro; ro.supersample = 1;
-        p.drawImage(0, 0, renderScene(sc, cam, vr.size(), ro));
+        {
+            // cards show their 2D layer's current content, so the viewport draws the same scene the composition does
+            const auto drawn = Compositor::sceneForDrawing(*l, m_v->m_s->doc()->currentFrame(), m_v->m_s->doc()->canvasSize(), m_v->m_s->doc());
+            p.drawImage(0, 0, renderScene(*drawn, cam, vr.size(), ro));
+        }
         drawMarkers(p, sc, cam, vr.size());
         drawSelection(p, sc, cam, vr.size());
         p.resetTransform();

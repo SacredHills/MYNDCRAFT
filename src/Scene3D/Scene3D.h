@@ -58,9 +58,10 @@ struct Material {
     double roughness = 0.6;              // 0..1
     QColor emissive{0, 0, 0};
     bool doubleSided = false;
+    bool unlit = false;                  // flat: base colour (times texture) is shown as is, lights are ignored
     bool operator==(const Material& o) const {
         return id == o.id && name == o.name && baseColor == o.baseColor && baseTexture == o.baseTexture && metallic == o.metallic &&
-               roughness == o.roughness && emissive == o.emissive && doubleSided == o.doubleSided;
+               roughness == o.roughness && emissive == o.emissive && doubleSided == o.doubleSided && unlit == o.unlit;
     }
 };
 
@@ -91,6 +92,9 @@ struct Node3D {
     // Mesh nodes
     QUuid mesh;                          // key into Scene3D::meshes
     QUuid materialOverride;              // replaces every part's material when set
+    // A "card": this mesh node shows the rendered content of a 2D layer of the composition (the layer is then drawn only through the card).
+    QUuid cardLayer;
+    bool cardLit = false;                // flat by default (looks exactly like the 2D layer); lit cards react to the scene's lights
     QUuid skin;                          // key into Scene3D::skins; the mesh then follows the skin's joints and this node's own transform is ignored
     // Light nodes
     LightType lightType = LightType::Point;
@@ -186,6 +190,8 @@ void decomposeMatrix(const QMatrix4x4& m, QVector3D* t, QVector3D* eulerDeg, QVe
 std::shared_ptr<Mesh> makeCube(double size = 1.0);
 std::shared_ptr<Mesh> makeSphere(double radius = 0.5, int segments = 24, int rings = 12);
 std::shared_ptr<Mesh> makePlane(double size = 1.0);
+std::shared_ptr<Mesh> makeCardPlane(double width, double height);   // upright (XY) plane facing +Z, UV v up
+
 std::shared_ptr<Mesh> makeCylinder(double radius = 0.5, double height = 1.0, int segments = 24);
 
 }  // namespace mynd

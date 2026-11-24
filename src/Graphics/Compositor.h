@@ -1,6 +1,7 @@
 #pragma once
 #include <QImage>
 #include <QPainter>
+#include <QSet>
 
 #include "Scene/Document.h"
 
@@ -31,9 +32,15 @@ public:
         OnionSkin onion;
         int scene3dSupersample = 0;   // 0 = automatic (2x anti-aliasing unless the canvas is large), 1 = fastest, 2 = anti-aliased (export)
     };
-    struct Ctx { int frame; const OnionSkin* onion; const SymbolResolver* syms = nullptr; int depth = 0; int ss3d = 1; };
+    struct Ctx { int frame; const OnionSkin* onion; const SymbolResolver* syms = nullptr; int depth = 0; int ss3d = 1; const QSet<QUuid>* cards = nullptr; };
     static QImage render(const Document& doc, const QRect& region, const Options& opt);
     static QImage render(const Document& doc) { return render(doc, doc.canvasRect(), Options{}); }
+
+    // The 3D scene of `sceneLayer` at `frame` as it is drawn: animation applied and every card node showing the current content of its
+    // 2D layer (rendered at `canvas` size). Same pointer as sceneLayer.scene3d when nothing is animated and there are no cards.
+    static std::shared_ptr<const Scene3D> sceneForDrawing(const Layer& sceneLayer, int frame, const QSize& canvas, const SymbolResolver* syms = nullptr);
+    // Layers (anywhere below `group`) that are shown through a card of some 3D scene layer and so are not drawn by themselves.
+    static void collectCardSources(const Layer& group, QSet<QUuid>& out);
 
     static void drawShape(QPainter& p, const VectorShape& s);
     static void drawShapes(QPainter& p, const ShapeList& shapes);

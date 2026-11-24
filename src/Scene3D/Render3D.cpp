@@ -116,6 +116,7 @@ struct ShadeMat {
     QVector3D emissive;
     float metallic, roughness;
     bool doubleSided;
+    bool unlit = false;
     const QImage* tex = nullptr;
 };
 
@@ -146,6 +147,7 @@ Frag shade(const ShadeMat& m, QVector3D P, QVector3D N, const QVector2D& uv, boo
         base = QVector3D(base.x() * t.x(), base.y() * t.y(), base.z() * t.z());
         alpha *= t.w();
     }
+    if (m.unlit) return {QVector3D(std::clamp(base.x() + m.emissive.x(), 0.f, 1.f), std::clamp(base.y() + m.emissive.y(), 0.f, 1.f), std::clamp(base.z() + m.emissive.z(), 0.f, 1.f)), alpha};
     if (backFacing) N = -N;
     N.normalize();
     const QVector3D V = (eye - P).normalized();
@@ -304,7 +306,23 @@ QImage renderScene(const Scene3D& s, const RenderCamera& cam, const QSize& size,
     for (const auto& [id, im] : s.textures) if (!im.isNull()) tex[id] = im.convertToFormat(QImage::Format_ARGB32);
 
     const QMatrix4x4 vp = cam.proj * cam.view;
-    for (const auto& n : s.nodes) {
+    // Opaque meshes first, then see-through ones (cards, translucent materials) from far to near, so overlapping translucent
+    // surfaces blend in a sensible order. (Per node, not per triangle: intersecting translucent meshes can still blend wrongly.)
+    auto translucent = [&](const Node3D& n) {
+        if (!n.cardLayer.isNull()) return true;
+        if (const Material* m = s.material(n.materialOverride)) return m->baseColor.alpha() < 255;
+        auto it = s.meshes.find(n.mesh);
+        if (it != s.meshes.end()) for (const MeshPart& p : it->second->parts) if (const Material* m = s.material(p.material)) if (m->baseColor.alpha() < 255) return true;
+        return false;
+    };
+    std::vector<const Node3D*> order, late;
+    for (const auto& n : s.nodes) (translucent(n) ? late : order).push_back(&n);
+    std::sort(late.begin(), late.end(), [&](const Node3D* a, const Node3D* b) {
+        return (s.worldMatrix(a->id).map(QVector3D(0, 0, 0)) - cam.eye).lengthSquared() > (s.worldMatrix(b->id).map(QVector3D(0, 0, 0)) - cam.eye).lengthSquared();
+    });
+    order.insert(order.end(), late.begin(), late.end());
+    for (const Node3D* np : order) {
+        const Node3D& n = *np;
         if (n.kind != NodeKind::Mesh || !s.effectivelyVisible(n.id)) continue;
         auto mit = s.meshes.find(n.mesh);
         if (mit == s.meshes.end()) continue;
@@ -332,7 +350,7 @@ QImage renderScene(const Scene3D& s, const RenderCamera& cam, const QSize& size,
             ShadeMat sm;
             if (mat) {
                 sm.base = rgb(mat->baseColor); sm.alpha = float(mat->baseColor.alphaF()); sm.emissive = rgb(mat->emissive);
-                sm.metallic = float(mat->metallic); sm.roughness = float(mat->roughness); sm.doubleSided = mat->doubleSided;
+                sm.metallic = float(mat->metallic); sm.roughness = float(mat->roughness); sm.doubleSided = mat->doubleSided; sm.unlit = mat->unlit;
                 auto t = tex.find(mat->baseTexture);
                 if (t != tex.end()) sm.tex = &t->second;
             } else { sm.base = QVector3D(0.78f, 0.78f, 0.78f); sm.alpha = 1; sm.metallic = 0; sm.roughness = 0.6f; sm.doubleSided = false; }

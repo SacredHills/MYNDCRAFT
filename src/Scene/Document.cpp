@@ -217,10 +217,10 @@ bool Document::toggleScene3DKey(const QUuid& layerId, const QString& propId) {
     return true;
 }
 
-QUuid Document::addScene3DLayer(const QString& name) {
+QUuid Document::addScene3DLayer(const QString& name, QUuid parentId, int index) {
     auto l = std::make_shared<Layer>(LayerType::Scene3D, name.isEmpty() ? tr("3D Scene") : name);
     const QUuid id = l->id;
-    auto* cmd = new AddLayerCommand(this, {}, -1, l);
+    auto* cmd = new AddLayerCommand(this, parentId, index, l);
     cmd->setText(tr("Add 3D Scene"));
     m_undo.push(cmd);
     return id;

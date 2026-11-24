@@ -262,11 +262,29 @@ Limitations (honest list):
   - Duplicating a single node does not copy its keyframes (duplicating the whole layer does).
   - The scene camera, ambient/background and light type are not animatable (only the properties listed above).
 
+## 2D layers in 3D space ("3D Layer" cards) (implemented, headless-tested; not yet hand-tested on Windows)
+- **How to use.** Select any 2D layer (raster, vector, text, animation, symbol instance or group) and choose *Layer ▸ 3D Layer* (or *3D ▸ 3D Layer*).
+  The layer becomes a **card**: a flat plane inside a 3D scene layer that is placed directly above it (an existing scene layer in the same
+  group is reused). The card gets a normal 3D transform (position, rotation, scale, all keyframeable like any 3D node), is depth-correct against
+  the scene's 3D objects and other cards, and is seen through the scene camera. A new scene gets a camera at the distance where a card at the
+  origin looks exactly like the flat layer. Unchecking the action (or "Make Layer 2D Again" in the panel) restores the plain layer.
+- **What the card shows.** The layer's current content at the current frame (vector shapes, text, drawings, animation layer frames, symbols),
+  rendered at canvas resolution; the layer's opacity (and its animated opacity) becomes the card's transparency. By default the card is flat
+  (unlit, so it looks exactly like the 2D layer); "Lit by the scene's lights" switches it to normal shading.
+- **Rendering order.** The source layer is no longer drawn by itself; only the card shows it. See-through meshes (cards and translucent materials) are drawn
+  after opaque ones and sorted far-to-near per object.
+- **Tests.** `test_layer3d` (8 core tests) and an end-to-end UI test; clean under ASAN/UBSAN.
+- **Limitations.** The layer's own 2D transform (position/rotation/scale tracks), blend mode and masks are not applied to the card: use the
+  card's 3D transform instead (opacity is applied). The card texture is the canvas size, so a card scaled up in 3D softens (it is not re-rendered at
+  higher resolution) and edges are bilinear-filtered. Translucent surfaces are sorted per object, not per triangle, so crossing/intersecting
+  translucent cards can blend in the wrong order. Cards are re-rendered whenever the scene is redrawn (a scene with many large cards will be slow
+  on this CPU renderer). If the canvas size changes after a card was made, the card keeps its old shape. Cards of layers inside symbols are untested.
+  Text/vector layers with effects that depend on the 2D transform will not show them. Not hand-tested on Windows.
+
 ## Next tasks
-1. 2D layers in 3D space (raster/vector/text/animation layers as textured planes inside a 3D scene) — next.
-2. Phase 8: unified 2D/3D composition (awaiting go-ahead).
-3. Visual tween spans in the timeline, swapping an instance's symbol, per-instance Movie Clip play/stop; FBX animation; clip blocks on the timeline.
-4. The 3D renderer is a CPU software renderer; a GPU backend is future work.
+1. Phase 8: unified 2D/3D composition (awaiting go-ahead).
+2. Visual tween spans in the timeline, swapping an instance's symbol, per-instance Movie Clip play/stop; FBX animation; clip blocks on the timeline.
+3. The 3D renderer is a CPU software renderer; a GPU backend is future work.
 
 ## Build / CI status
 `.github/workflows/build.yml` builds and runs the tests on Linux, Windows (MSVC, Qt 6.8.3, vcpkg libzip) and

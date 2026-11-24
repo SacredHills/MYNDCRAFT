@@ -229,6 +229,58 @@ private slots:
         QCOMPARE(p->placementList()->count(), 1);
     }
 
+    void aTwoDLayerBecomesACardInThreeDSpaceAndBackAgain() {
+        const QUuid art = doc->addLayer(LayerType::Vector, "Art");
+        VectorShape r = VectorShape::makeRect(QRectF(100, 75, 200, 150)); r.fill.color = Qt::red; r.stroke.enabled = false;
+        doc->setShapes(art, {r}, "rect");
+        s->setActiveLayer(art);
+        doc->undoStack()->clear();
+        QVERIFY(a->make3D->isEnabled() && !a->make3D->isChecked());
+        const QColor before = px(200, 150);
+        QCOMPARE(before, QColor(Qt::red));
+        QString err;
+        const QUuid card = a->makeLayer3D(art, &err);
+        QVERIFY2(!card.isNull(), qPrintable(err));
+        QApplication::processEvents();
+        // a scene layer was made right above the art layer, with the card and a camera that frames it exactly
+        QCOMPARE(doc->root()->children.size(), size_t(2));
+        QCOMPARE(doc->root()->children[1]->type, LayerType::Scene3D);
+        QVERIFY(scene() && scene()->node(card) && scene()->node(card)->cardLayer == art);
+        QVERIFY(!scene()->firstCamera().isNull());
+        QVERIFY(px(200, 150).red() > 200 && px(200, 150).green() < 60);                // same picture as before
+        QCOMPARE(px(20, 20), QColor(Qt::white));
+        QVERIFY(a->isLayer3D(art));
+        QCOMPARE(w->scene3dPanel()->cardGroup()->isVisibleTo(w->scene3dPanel()), true);
+        QVERIFY(!w->scene3dPanel()->materialGroup()->isVisibleTo(w->scene3dPanel()));
+        // it is a real 3D object now: turning it changes the picture
+        s->setSelectedNode(card);
+        doc->editScene3D(s->activeLayerId(), [&](Scene3D& sc) { sc.node(card)->rotation = {0, 80, 0}; return true; }, "Turn");
+        QVERIFY(px(300, 150) != QColor(Qt::red));
+        // the checkable action reflects it from the source layer, and unchecking restores the plain layer
+        s->setActiveLayer(art);
+        QApplication::processEvents();
+        QVERIFY(a->make3D->isChecked());
+        a->make3D->trigger();
+        QVERIFY(!a->isLayer3D(art));
+        QApplication::processEvents();
+        QCOMPARE(px(200, 150), QColor(Qt::red));
+        QVERIFY(!a->make3D->isChecked());
+        // the whole "make 3D" gesture is one undo step
+        a->make3D->trigger();
+        QVERIFY(a->isLayer3D(art));
+        doc->undoStack()->undo();                                                       // removes the card
+        QVERIFY(!a->isLayer3D(art));
+        doc->undoStack()->undo();                                                       // undoes "Make 3D" as a whole
+        QVERIFY(a->isLayer3D(art));
+        while (doc->undoStack()->canUndo()) doc->undoStack()->undo();
+        QCOMPARE(doc->root()->children.size(), size_t(1));
+        QCOMPARE(px(200, 150), QColor(Qt::red));
+        // a 3D scene layer cannot itself be made a card
+        const QUuid sc2 = doc->addScene3DLayer();
+        s->setActiveLayer(sc2);
+        QVERIFY(a->makeLayer3D(sc2, &err).isNull() && !err.isEmpty());
+    }
+
     void rotateAndScaleGizmosWork() {
         const QUuid cube = buildScene();
         vp->setMode(Viewport3D::Mode::Rotate);
