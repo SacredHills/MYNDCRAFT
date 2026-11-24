@@ -4,6 +4,7 @@
 
 #include "TestEnv.h"
 #include "Core/Settings.h"
+#include "UI/Workspaces.h"
 #include "UI/ExposureSheet.h"
 #include "UI/MainWindow.h"
 #include "UI/TimelinePanel.h"
@@ -42,6 +43,7 @@ class TestUiAnimation : public QObject {
 
 private slots:
     void init() {
+        for (const QString& n : WorkspaceManager::presetNames()) settings::removePresetLayout(n);   // tests must not inherit a saved layout
         w = std::make_unique<MainWindow>();
         CompositionSettings cs; cs.width = 400; cs.height = 300; cs.durationFrames = 24;
         w->newDocument(cs, false);
@@ -49,6 +51,7 @@ private slots:
         w->show();
         QVERIFY(QTest::qWaitForWindowExposed(w.get()));
         w->workspaces()->apply("Animation");
+        for (const QString& n : WorkspaceManager::presetNames()) settings::removePresetLayout(n);
         QApplication::processEvents();
         cv = w->canvas(); s = w->session(); doc = w->document();
         layerId = s->addLayerAboveActive(LayerType::Animation, "Anim");
@@ -357,6 +360,200 @@ private slots:
         layerId = l->id; doc = d2;
         QCOMPARE(cv->compositeImage().pixelColor(140, 100), QColor(Qt::red));
     }
+    // Layer content used by the copy/paste tests: frame 0 = red drawing, frames 1-2 = blue drawing (held), frame 3 empty.
+    void makeClipSource() {
+        doc->setCurrentFrame(0);  const QUuid a = s->newDrawing(false);
+        L()->drawingImages[a].fill(Qt::red);
+        doc->setCurrentFrame(1);  const QUuid b = s->newDrawing(false);
+        L()->drawingImages[b].fill(Qt::blue);
+        doc->setCurrentFrame(1);
+        w->animation()->extend->trigger();                               // blue held over frames 1..2
+        doc->undoStack()->clear();
+    }
+
+    void draggingAcrossTimelineCellsSelectsFramesAndShiftClickExtends() {
+        makeClipSource();
+        auto* tv = timeline()->view();
+        tv->setCellWidth(20);
+        QApplication::processEvents();
+        const int row = tv->rowOfLayer(layerId);
+        QTest::mousePress(tv->viewport(), Qt::LeftButton, {}, tv->cellCenter(1, row));
+        QTest::mouseMove(tv->viewport(), tv->cellCenter(3, row));
+        QTest::mouseRelease(tv->viewport(), Qt::LeftButton, {}, tv->cellCenter(3, row));
+        int a, b; s->selectedFrameRange(&a, &b);
+        QVERIFY(s->hasFrameSelection());
+        QCOMPARE(a, 1); QCOMPARE(b, 3);
+        QCOMPARE(doc->currentFrame(), 3);                                // playhead follows the drag end
+        // dragging backwards works too
+        QTest::mousePress(tv->viewport(), Qt::LeftButton, {}, tv->cellCenter(6, row));
+        QTest::mouseMove(tv->viewport(), tv->cellCenter(4, row));
+        QTest::mouseRelease(tv->viewport(), Qt::LeftButton, {}, tv->cellCenter(4, row));
+        s->selectedFrameRange(&a, &b);
+        QCOMPARE(a, 4); QCOMPARE(b, 6);
+        // Shift+click extends from the end that is not under the playhead
+        QTest::mouseClick(tv->viewport(), Qt::LeftButton, Qt::ShiftModifier, tv->cellCenter(9, row));
+        s->selectedFrameRange(&a, &b);
+        QCOMPARE(a, 6); QCOMPARE(b, 9);
+        // a plain click selects just that frame
+        QTest::mouseClick(tv->viewport(), Qt::LeftButton, {}, tv->cellCenter(2, row));
+        s->selectedFrameRange(&a, &b);
+        QCOMPARE(a, 2); QCOMPARE(b, 2);
+        // moving the playhead any other way clears the selection
+        s->setFrameSelection(layerId, 1, 4);
+        QVERIFY(s->hasFrameSelection());
+        QTest::keyClick(w.get(), Qt::Key_Period);
+        QVERIFY(!s->hasFrameSelection());
+        // so does activating another layer
+        s->setFrameSelection(layerId, 1, 4);
+        s->setActiveLayer(QUuid());
+        QVERIFY(!s->hasFrameSelection());
+        // the selection is clamped to the composition
+        s->setActiveLayer(layerId);
+        s->setFrameSelection(layerId, -5, 999);
+        s->selectedFrameRange(&a, &b);
+        QCOMPARE(a, 0); QCOMPARE(b, 23);
+    }
+
+    void pasteMakesIndependentCopiesAtThePlayheadAndOverwrites() {
+        makeClipSource();
+        s->setFrameSelection(layerId, 0, 3);
+        QVERIFY(s->copyFrames(false));
+        QCOMPARE(s->frameClip().length, 4);
+        QCOMPARE(s->frameClip().exposures.size(), 2);                    // red@0, blue@1+2; frame 3 is a gap
+        doc->setCurrentFrame(10);
+        const QUuid red = L()->anim.drawings[0].id, blue = L()->anim.drawings[1].id;
+        QVERIFY(s->pasteFrames(false));
+        QCOMPARE(L()->anim.drawings.size(), 4);                          // two new drawings
+        QCOMPARE(L()->anim.at(10)->length, 1);
+        QCOMPARE(L()->anim.at(11)->length, 2);
+        QVERIFY(L()->anim.drawingAt(10) != red);                         // independent, not the original
+        QVERIFY(L()->anim.drawingAt(11) != blue);
+        QVERIFY(!L()->anim.at(13));                                      // the gap came along
+        QCOMPARE(doc->currentFrame(), 10);                               // playhead stays where it was pasted
+        int a, b; s->selectedFrameRange(&a, &b);
+        QCOMPARE(a, 10); QCOMPARE(b, 13);                                // pasted range is selected
+        QCOMPARE(QColor(L()->imageAt(10)->pixel(5, 5)), QColor(Qt::red));
+        QCOMPARE(QColor(L()->imageAt(12)->pixel(5, 5)), QColor(Qt::blue));
+        { QPainter pp(&L()->drawingImages[L()->anim.drawingAt(10)]); pp.fillRect(0, 0, 20, 20, Qt::green); }    // editing the copy...
+        QCOMPARE(QColor(L()->imageAt(0)->pixel(5, 5)), QColor(Qt::red)); // ...leaves the original alone
+        { QPainter pp(&L()->drawingImages[red]); pp.fillRect(0, 0, 20, 20, Qt::yellow); }    // and the clip is a snapshot too
+        QCOMPARE(QColor(s->frameClip().images.value(red).pixel(5, 5)), QColor(Qt::red));
+        // one undo removes the whole paste
+        doc->undoStack()->undo();
+        QVERIFY(!L()->anim.at(10) && !L()->anim.at(11));
+        QCOMPARE(L()->anim.drawings.size(), 2);
+        doc->undoStack()->redo();
+        QCOMPARE(L()->anim.drawings.size(), 4);
+        QVERIFY(L()->imageAt(11));                                       // redo brought the pixels back
+        // pasting over existing frames overwrites them (including the gap)
+        doc->setCurrentFrame(2);
+        QVERIFY(s->pasteFrames(false));
+        QCOMPARE(L()->anim.at(2)->start, 2);
+        QCOMPARE(L()->anim.at(3)->length, 2);
+        QVERIFY(!L()->anim.at(5));
+    }
+
+    void linkedPasteReusesDrawingsSoEditsAreShared() {
+        makeClipSource();
+        s->setFrameSelection(layerId, 0, 2);
+        s->copyFrames(false);
+        doc->setCurrentFrame(8);
+        QVERIFY(s->pasteFrames(true));
+        QCOMPARE(L()->anim.drawings.size(), 2);                          // no new drawings
+        QCOMPARE(L()->anim.drawingAt(8), L()->anim.drawingAt(0));
+        QCOMPARE(L()->anim.drawingAt(10), L()->anim.drawingAt(2));
+        s->setTool(ToolId::Brush);
+        doc->setCurrentFrame(8);
+        s->setForeground(Qt::black);
+        s->brushFor(ToolId::Brush).size = 12;
+        drag({{50, 50}, {150, 50}});
+        QCOMPARE(QColor(L()->imageAt(0)->pixel(100, 50)), QColor(Qt::black));   // the original changed too
+        // Pasting linked onto a different layer cannot share, so it falls back to independent copies.
+        const QUuid other = s->addLayerAboveActive(LayerType::Animation, "Other");
+        doc->setCurrentFrame(4);
+        QVERIFY(s->pasteFrames(true));
+        const Layer* ol = doc->findLayer(other);
+        QCOMPARE(ol->anim.drawings.size(), 2);
+        QVERIFY(ol->imageAt(4));
+        QCOMPARE(ol->anim.at(5)->length, 2);
+    }
+
+    void cutRemovesFramesButKeepsThemForPasting() {
+        makeClipSource();
+        s->setFrameSelection(layerId, 1, 2);
+        QVERIFY(s->copyFrames(true));
+        QVERIFY(!L()->anim.at(1) && !L()->anim.at(2));                   // cut leaves empty frames, nothing shifts
+        QVERIFY(L()->anim.at(0));
+        QVERIFY(!s->hasFrameSelection());
+        doc->setCurrentFrame(6);
+        QVERIFY(s->pasteFrames(false));
+        QCOMPARE(L()->anim.at(6)->length, 2);
+        QCOMPARE(QColor(L()->imageAt(7)->pixel(3, 3)), QColor(Qt::blue));
+        doc->undoStack()->undo();                                        // paste
+        doc->undoStack()->undo();                                        // cut
+        QVERIFY(L()->anim.at(1) && L()->anim.at(2));
+        // cut on a locked layer neither cuts nor changes the clip
+        LayerProps p = L()->props; p.locked = true; doc->setLayerProps(layerId, p);
+        const int len = s->frameClip().length;
+        s->setFrameSelection(layerId, 0, 0);
+        QVERIFY(!s->copyFrames(true));
+        QVERIFY(L()->anim.at(0));
+        QCOMPARE(s->frameClip().length, len);
+        QVERIFY(!s->pasteFrames(false));
+    }
+
+    void pastePastTheEndGrowsTheCompositionAndKeyboardShortcutsWork() {
+        makeClipSource();
+        w->activateWindow(); cv->setFocus();
+        s->setFrameSelection(layerId, 0, 3);
+        QTest::keyClick(w.get(), Qt::Key_C, Qt::ControlModifier);
+        QCOMPARE(s->frameClip().length, 4);
+        doc->setCurrentFrame(22);                                        // composition is 24 frames
+        QTest::keyClick(w.get(), Qt::Key_V, Qt::ControlModifier);
+        QCOMPARE(doc->durationFrames(), 25);                             // grew to fit the last pasted exposure (the trailing gap needs no frames)
+        QVERIFY(L()->anim.at(22));
+        QCOMPARE(doc->undoStack()->undoText(), QString("Paste Frames"));
+        doc->undoStack()->undo();
+        QCOMPARE(doc->durationFrames(), 24);                             // duration growth is part of the same undo step
+        // Ctrl+Shift+V = linked
+        doc->setCurrentFrame(12);
+        const int n = L()->anim.drawings.size();
+        QTest::keyClick(w.get(), Qt::Key_V, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(L()->anim.drawings.size(), n);
+        // Ctrl+X
+        s->setFrameSelection(layerId, 12, 12);
+        QTest::keyClick(w.get(), Qt::Key_X, Qt::ControlModifier);
+        QVERIFY(!L()->anim.at(12));
+    }
+
+    void contextMenuOffersCopyCutPasteAndTracksTheClipboardState() {
+        makeClipSource();
+        QMenu m;
+        w->animation()->fillContextMenu(&m);
+        QStringList texts; for (QAction* a : m.actions()) texts << a->text();
+        QVERIFY(texts.contains("Copy Frames") && texts.contains("Cut Frames") && texts.contains("Paste Frames"));
+        QVERIFY(texts.contains("Paste Frames (Reuse Same Drawings)"));
+        QVERIFY(w->animation()->copyFrames->isEnabled());
+        QVERIFY(!w->animation()->pasteFrames->isEnabled());               // nothing copied yet
+        s->setFrameSelection(layerId, 0, 1);
+        w->animation()->copyFrames->trigger();
+        QVERIFY(w->animation()->pasteFrames->isEnabled());
+        s->setActiveLayer(QUuid());                                       // no animation layer active
+        QVERIFY(!w->animation()->pasteFrames->isEnabled());
+        QVERIFY(!w->animation()->copyFrames->isEnabled());
+    }
+
+    void deleteFramesActsOnTheWholeSelectionAndClosesTheGap() {
+        makeClipSource();                                                 // red@0, blue@1..2
+        doc->setCurrentFrame(5); const QUuid c = s->newDrawing(false);
+        L()->drawingImages[c].fill(Qt::green);
+        s->setFrameSelection(layerId, 1, 4);                              // blue + the empty frames after it
+        w->animation()->deleteFrame->trigger();
+        QCOMPARE(L()->anim.at(1)->drawing, c);                            // green slid left over the gap
+        QCOMPARE(L()->anim.at(0)->length, 1);
+        QCOMPARE(doc->undoStack()->undoText(), QString("Delete Frames"));
+    }
+
     // Optional: MYND_SHOT=/path/out.png renders the Animation workspace with sample content for visual review.
     void zzScreenshotForReview() {
         const QString out = qEnvironmentVariable("MYND_SHOT");

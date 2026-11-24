@@ -18,6 +18,7 @@ public:
     // Layers & drawings
     QAction *newLayer, *newDrawing, *duplicateDrawing, *newDrawingNextFrame;
     // Exposure timing
+    QAction *copyFrames, *cutFrames, *pasteFrames, *pasteLinked;
     QAction *extend, *shorten, *insertBlank, *deleteFrame, *makeBlank, *duplicateExposure, *loopExposures;
     QAction *markKey, *markBreakdown, *markInbetween, *markClear;
     // Navigation / transport

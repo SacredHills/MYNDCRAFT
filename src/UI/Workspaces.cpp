@@ -7,14 +7,39 @@
 namespace mynd {
 
 WorkspaceManager::WorkspaceManager(QMainWindow* w, const QMap<QString, QDockWidget*>& docks, QObject* parent)
-    : QObject(parent), m_win(w), m_docks(docks) {}
+    : QObject(parent), m_win(w), m_docks(docks) {
+    // Let panels sit under/over each other anywhere, not just one column per side.
+    m_win->setDockNestingEnabled(true);
+    m_win->setDockOptions(m_win->dockOptions() | QMainWindow::AllowNestedDocks | QMainWindow::AllowTabbedDocks | QMainWindow::AnimatedDocks);
+}
+
+void WorkspaceManager::saveCurrent() {
+    if (m_current.isEmpty() || !m_win->isVisible()) return;   // a window that was never shown has no real layout to keep
+    const QByteArray st = m_win->saveState(1);
+    if (presetNames().contains(m_current)) settings::savePresetLayout(m_current, st);
+    else settings::saveWorkspaceState(m_current, st);
+}
+
+void WorkspaceManager::resetCurrent() {
+    if (presetNames().contains(m_current)) {
+        settings::removePresetLayout(m_current);
+        applyPreset(m_current);
+        emit changed();
+    } else if (!m_current.isEmpty()) {
+        const QByteArray st = settings::workspaceState(m_current);
+        if (!st.isEmpty()) m_win->restoreState(st, 1);
+    }
+}
 
 QStringList WorkspaceManager::presetNames() { return {"Drawing", "Illustration", "Animation"}; }
 QStringList WorkspaceManager::customNames() const { return settings::workspaceNames(); }
 
 bool WorkspaceManager::apply(const QString& name) {
+    if (!presetNames().contains(name) && !customNames().contains(name)) return false;
+    if (name != m_current) saveCurrent();                       // keep the arrangement of the one we are leaving
     if (presetNames().contains(name)) {
-        applyPreset(name);
+        const QByteArray mine = settings::presetLayout(name);
+        if (mine.isEmpty() || !m_win->restoreState(mine, 1)) applyPreset(name);
     } else if (customNames().contains(name)) {
         const QByteArray st = settings::workspaceState(name);
         if (st.isEmpty() || !m_win->restoreState(st, 1)) return false;
@@ -90,7 +115,7 @@ void WorkspaceManager::saveCurrentAs(const QString& name) {
 bool WorkspaceManager::deleteCustom(const QString& name) {
     if (!customNames().contains(name)) return false;
     settings::removeWorkspace(name);
-    if (m_current == name) apply("Drawing");
+    if (m_current == name) { m_current.clear(); apply("Drawing"); }   // don't re-save the layout we just deleted
     emit changed();
     return true;
 }

@@ -4,6 +4,7 @@
 
 #include "TestEnv.h"
 #include "Core/Settings.h"
+#include "UI/Workspaces.h"
 #include "Graphics/Compositor.h"
 #include "UI/MainWindow.h"
 
@@ -27,6 +28,7 @@ class TestUiWorkflow : public QObject {
 
 private slots:
     void init() {
+        for (const QString& n : WorkspaceManager::presetNames()) settings::removePresetLayout(n);   // tests must not inherit a saved layout
         w = std::make_unique<MainWindow>();
         CompositionSettings cs; cs.width = 400; cs.height = 300;
         w->newDocument(cs);
@@ -328,6 +330,31 @@ private slots:
         QVERIFY(left.red() < right.red());
         w->document()->undoStack()->undo();
         QCOMPARE(v->shapes[0].fill.type, Paint::Solid);
+    }
+
+    void panelsCanBeStackedAndEachWorkspaceRemembersItsArrangement() {
+        auto* ws = w->workspaces();
+        QVERIFY(ws->apply("Illustration"));
+        auto* opt = w->findChild<QDockWidget*>("dock.options");
+        auto* lay = w->findChild<QDockWidget*>("dock.layers");
+        auto* sty = w->findChild<QDockWidget*>("dock.style");
+        // Put Tool Options directly above Layers (right-hand column).
+        w->splitDockWidget(lay, opt, Qt::Vertical);
+        w->show(); QApplication::processEvents();
+        QCOMPARE(w->dockWidgetArea(opt), w->dockWidgetArea(lay));
+        QVERIFY(opt->geometry().bottom() <= lay->geometry().top() + 4);
+        const Qt::DockWidgetArea optArea = w->dockWidgetArea(opt);
+        // Leave and come back: the arrangement is kept.
+        QVERIFY(ws->apply("Drawing"));
+        QVERIFY(ws->apply("Illustration"));
+        QApplication::processEvents();
+        QCOMPARE(w->dockWidgetArea(opt), optArea);
+        QVERIFY(opt->geometry().bottom() <= lay->geometry().top() + 4);
+        // Reset restores the factory layout (Tool Options back on the left).
+        ws->resetCurrent();
+        QApplication::processEvents();
+        QCOMPARE(w->dockWidgetArea(opt), Qt::LeftDockWidgetArea);
+        QVERIFY(sty);
     }
 
     void workspacesRearrangePanelsAndPersistCustomLayouts() {

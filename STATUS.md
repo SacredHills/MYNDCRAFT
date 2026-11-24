@@ -2,7 +2,7 @@
 
 **Current phase:** 2 — Traditional animation (implemented and tested, see below); Phase 1 complete before it
 **Build:** Linux x86-64, GCC 13.3, Qt 6.4.2, CMake 3.28 — builds with no warnings.
-**Tests:** 8 CTest suites, 121 test cases, all passing (also clean under AddressSanitizer + UBSan).
+**Tests:** 8 CTest suites, 130 test cases, all passing (also clean under AddressSanitizer + UBSan).
 **Other platforms:** Windows and macOS are built and tested in CI on every push (see bottom). The Windows portable build was run by hand by the project owner; the macOS build has not been run by a person. No installers.
 
 ## Phase 1 acceptance check
@@ -134,3 +134,11 @@ QPainter) and add a frame cache before the GPU/3D work.
 `.github/workflows/build.yml` builds and runs the tests on Linux, Windows (MSVC, Qt 6.8.3, vcpkg libzip) and
 macOS. The Windows job also uploads a portable zip (windeployqt) after a headless `--screenshot` smoke test.
 No installers (MSI/DMG/AppImage/DEB/RPM) exist.
+
+## Timeline frame selection, copy/paste and panel layout
+- Drag across timeline cells (or Shift+click) to select a range of frames on a layer; right-click offers Copy / Cut / Paste Frames.
+- Paste overwrites starting at the current frame (playhead), preserves gaps, grows the composition if needed, and is one undo step.
+  Paste makes independent drawing copies; Paste (Reuse Same Drawings), Ctrl+Shift+V, shares drawings when pasting on the same layer.
+- Frame selection is only on the timeline (the exposure sheet has no multi-cell selection).
+- Panels can be nested/stacked anywhere; each workspace (built-in or custom) remembers its arrangement when you switch away and on exit.
+  "Reset Current Workspace" restores the factory layout. Verified headless only; not hand-tested on Windows.

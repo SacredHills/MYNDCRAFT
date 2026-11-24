@@ -13,6 +13,17 @@
 
 namespace mynd {
 
+// Frames copied from an animation layer: exposures (relative to the copied range, gaps preserved) plus
+// the pixels of every drawing they use, so a paste works on any animation layer.
+struct FrameClip {
+    int length = 0;
+    QVector<Exposure> exposures;
+    QVector<DrawingMeta> drawings;
+    QHash<QUuid, QImage> images;
+    QUuid sourceLayer;
+    bool isEmpty() const { return length <= 0; }
+};
+
 enum class ToolId {
     Select, DirectSelect, Brush, Pencil, Eraser, Pen, Line, Rectangle, Ellipse, Polygon,
     Bucket, Gradient, Eyedropper, Hand, Zoom, Smudge, FreeTransform, Text
@@ -92,6 +103,21 @@ public:
     QUuid newDrawing(bool copyVisible);
     // Straight-ahead workflow: step to the next frame and start a fresh drawing there.
     QUuid newDrawingOnNextFrame(bool copyVisible);
+    // ---- Frame selection and copy/paste (animation layers) ----
+    // The selected frame range on the active animation layer. Moving the playhead any other way, or
+    // activating another layer, clears it. With no selection the "selection" is the current frame.
+    void setFrameSelection(const QUuid& layer, int first, int last);   // also puts the playhead on `last`
+    void clearFrameSelection();
+    bool hasFrameSelection() const { return !m_selLayer.isNull() && m_selFirst >= 0; }
+    QUuid frameSelectionLayer() const { return m_selLayer; }
+    // Range that copy / cut / delete act on (selection, or just the current frame).
+    void selectedFrameRange(int* first, int* last) const;
+    bool copyFrames(bool cut);
+    // Pastes at the current frame, overwriting that many frames. `linked` reuses the copied drawings
+    // (same pixels, shared edits) when pasting back onto the layer they came from; otherwise every
+    // pasted drawing is an independent copy.
+    bool pasteFrames(bool linked);
+    const FrameClip& frameClip() const { return m_clip; }
     // Jump to the previous/next exposure that shows a drawing on the active animation layer.
     bool gotoDrawing(int direction);
 
@@ -112,6 +138,8 @@ signals:
     void brushChanged();
     void viewTogglesChanged();
     void onionChanged();
+    void frameSelectionChanged();
+    void clipChanged();
     void message(const QString& text);
 
 private:
@@ -124,6 +152,10 @@ private:
     TextContent m_textStyle;
     VectorStyle m_style;
     Playback* m_playback = nullptr;
+    QUuid m_selLayer;
+    int m_selFirst = -1, m_selLast = -1;
+    bool m_selInternal = false;
+    FrameClip m_clip;
     Compositor::OnionSkin m_onion;
 };
 

@@ -41,6 +41,17 @@ AnimationActions::AnimationActions(EditorSession* s, QWidget* dialogParent) : QO
     newDrawingNextFrame = mk("newDrawingNextFrame", tr("Next Frame with New Drawing"), QKeySequence("Ctrl+Alt+N"));
     connect(newDrawingNextFrame, &QAction::triggered, this, [this] { m_s->newDrawingOnNextFrame(false); });
 
+    copyFrames = mk("copyFrames", tr("Copy Frames"), QKeySequence::Copy);
+    connect(copyFrames, &QAction::triggered, this, [this] { m_s->copyFrames(false); });
+    cutFrames = mk("cutFrames", tr("Cut Frames"), QKeySequence::Cut);
+    connect(cutFrames, &QAction::triggered, this, [this] { m_s->copyFrames(true); });
+    pasteFrames = mk("pasteFrames", tr("Paste Frames"), QKeySequence::Paste);
+    connect(pasteFrames, &QAction::triggered, this, [this] { m_s->pasteFrames(false); });
+    pasteLinked = mk("pasteLinked", tr("Paste Frames (Reuse Same Drawings)"), QKeySequence("Ctrl+Shift+V"));
+    connect(pasteLinked, &QAction::triggered, this, [this] { m_s->pasteFrames(true); });
+    connect(m_s, &EditorSession::clipChanged, this, &AnimationActions::refresh);
+    connect(m_s, &EditorSession::frameSelectionChanged, this, &AnimationActions::refresh);
+
     extend = mk("extend", tr("Extend Exposure by 1 Frame"), QKeySequence("Ctrl+="));
     connect(extend, &QAction::triggered, this, [=, this] {
         const int f = frame();
@@ -59,8 +70,10 @@ AnimationActions::AnimationActions(EditorSession* s, QWidget* dialogParent) : QO
     });
     deleteFrame = mk("deleteFrame", tr("Delete Frame (Close Gap)"), QKeySequence("Ctrl+Del"));
     connect(deleteFrame, &QAction::triggered, this, [=, this] {
-        const int f = frame();
-        m_s->editActiveAnimation(tr("Delete Frame"), [&](AnimationState& s) { s.removeFrames(f, 1); return true; });
+        int a, b;
+        m_s->selectedFrameRange(&a, &b);
+        m_s->editActiveAnimation(b > a ? tr("Delete Frames") : tr("Delete Frame"), [&](AnimationState& s) { s.removeFrames(a, b - a + 1); return true; });
+        m_s->clearFrameSelection();
     });
     makeBlank = mk("makeBlank", tr("Make Exposure Blank"));
     connect(makeBlank, &QAction::triggered, this, [=, this] {
@@ -190,6 +203,10 @@ void AnimationActions::refresh() {
     markKey->setChecked(exposed && marker == PoseMarker::Key);
     markBreakdown->setChecked(exposed && marker == PoseMarker::Breakdown);
     markInbetween->setChecked(exposed && marker == PoseMarker::Inbetween);
+    copyFrames->setEnabled(m_s->activeAnimationLayer() != nullptr);
+    cutFrames->setEnabled(anim);
+    pasteFrames->setEnabled(anim && !m_s->frameClip().isEmpty());
+    pasteLinked->setEnabled(anim && !m_s->frameClip().isEmpty());
     const bool hasDoc = m_s->doc() != nullptr;
     for (QAction* a : {firstFrame, prevFrame, nextFrame, lastFrame, playPause, stopPlayback, workIn, workOut, workClear}) a->setEnabled(hasDoc);
     prevDrawing->setEnabled(anim); nextDrawing->setEnabled(anim);
@@ -197,6 +214,8 @@ void AnimationActions::refresh() {
 
 void AnimationActions::fillMenu(QMenu* m) {
     m->addActions({newLayer, newDrawing, duplicateDrawing, newDrawingNextFrame});
+    m->addSeparator();
+    m->addActions({copyFrames, cutFrames, pasteFrames, pasteLinked});
     m->addSeparator();
     m->addActions({extend, shorten, insertBlank, deleteFrame, makeBlank, duplicateExposure, loopExposures});
     m->addSeparator();
@@ -212,6 +231,8 @@ void AnimationActions::fillMenu(QMenu* m) {
 }
 
 void AnimationActions::fillContextMenu(QMenu* m) {
+    m->addActions({copyFrames, cutFrames, pasteFrames, pasteLinked});
+    m->addSeparator();
     m->addActions({newDrawing, duplicateDrawing});
     m->addSeparator();
     m->addActions({extend, shorten, insertBlank, deleteFrame, makeBlank, duplicateExposure, loopExposures});

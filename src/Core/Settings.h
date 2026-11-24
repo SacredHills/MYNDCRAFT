@@ -24,6 +24,9 @@ void removeWorkspace(const QString& name);
 
 QByteArray windowGeometry();
 void setWindowGeometry(const QByteArray& g);
+QByteArray presetLayout(const QString& name);   // user's rearranged layout of a built-in workspace
+void savePresetLayout(const QString& name, const QByteArray& state);
+void removePresetLayout(const QString& name);
 QString lastWorkspace();
 void setLastWorkspace(const QString& n);
 

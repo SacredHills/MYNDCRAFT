@@ -40,6 +40,9 @@ void removeWorkspace(const QString& n) { s().remove("workspaces/" + n); }
 
 QByteArray windowGeometry() { return s().value("window/geometry").toByteArray(); }
 void setWindowGeometry(const QByteArray& g) { s().setValue("window/geometry", g); }
+QByteArray presetLayout(const QString& n) { return s().value("presetLayouts/" + n).toByteArray(); }
+void savePresetLayout(const QString& n, const QByteArray& st) { s().setValue("presetLayouts/" + n, st); }
+void removePresetLayout(const QString& n) { s().remove("presetLayouts/" + n); }
 QString lastWorkspace() { return s().value("window/workspace", "Drawing").toString(); }
 void setLastWorkspace(const QString& n) { s().setValue("window/workspace", n); }
 

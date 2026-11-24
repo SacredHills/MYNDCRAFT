@@ -208,6 +208,7 @@ bool MainWindow::maybeSave() {
 void MainWindow::closeEvent(QCloseEvent* e) {
     if (!maybeSave()) { e->ignore(); return; }
     settings::setWindowGeometry(saveGeometry());
+    m_workspaces->saveCurrent();
     m_autosave->detach(true);  // clean exit: nothing to recover
     e->accept();
 }
@@ -512,8 +513,7 @@ void MainWindow::buildMenus() {
     });
     auto* resetWs = win->addAction(tr("Reset Current Workspace"));
     connect(resetWs, &QAction::triggered, this, [this] {
-        const QString c = m_workspaces->current();
-        m_workspaces->apply(WorkspaceManager::presetNames().contains(c) ? c : QString("Drawing"));
+        m_workspaces->resetCurrent();
     });
     win->addSeparator();
     for (auto* d : m_docks) win->addAction(d->toggleViewAction());

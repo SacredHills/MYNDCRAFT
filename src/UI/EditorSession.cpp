@@ -54,6 +54,8 @@ EditorSession::EditorSession(QObject* parent) : QObject(parent) {
 void EditorSession::setDocument(Document* d) {
     m_doc = d;
     m_playback->setDocument(d);
+    clearFrameSelection();
+    if (d) connect(d, &Document::frameChanged, this, [this] { if (!m_selInternal) clearFrameSelection(); });
     m_selected.clear();
     m_activeLayer = {};
     if (d) {
@@ -81,6 +83,7 @@ void EditorSession::setDocument(Document* d) {
 void EditorSession::setActiveLayer(const QUuid& id) {
     if (id == m_activeLayer) return;
     m_activeLayer = id;
+    if (!m_selLayer.isNull() && m_selLayer != id) clearFrameSelection();
     m_selected.clear();
     emit activeLayerChanged(id);
     emit selectionChanged();
@@ -195,6 +198,93 @@ QUuid EditorSession::newDrawingOnNextFrame(bool copyVisible) {
     const int cur = m_doc->currentFrame();
     m_doc->setCurrentFrame(next);
     return m_doc->createDrawing(l->id, next, copyVisible, cur);   // optionally start from the drawing we just left
+}
+
+void EditorSession::setFrameSelection(const QUuid& layer, int first, int last) {
+    if (!m_doc) return;
+    const int hi = m_doc->durationFrames() - 1;
+    first = qBound(0, first, hi); last = qBound(0, last, hi);
+    m_selLayer = layer;
+    m_selFirst = std::min(first, last);
+    m_selLast = std::max(first, last);
+    m_selInternal = true;
+    if (m_doc->currentFrame() != last) m_doc->setCurrentFrame(last);
+    m_selInternal = false;
+    emit frameSelectionChanged();
+}
+
+void EditorSession::clearFrameSelection() {
+    if (m_selLayer.isNull() && m_selFirst < 0) return;
+    m_selLayer = {};
+    m_selFirst = m_selLast = -1;
+    emit frameSelectionChanged();
+}
+
+void EditorSession::selectedFrameRange(int* first, int* last) const {
+    if (hasFrameSelection() && m_selLayer == m_activeLayer) { *first = m_selFirst; *last = m_selLast; return; }
+    *first = *last = m_doc ? m_doc->currentFrame() : 0;
+}
+
+bool EditorSession::copyFrames(bool cut) {
+    Layer* l = activeAnimationLayer();
+    if (!m_doc || !l) { emit message(tr("Select an animation layer to copy frames.")); return false; }
+    if (cut && l->props.locked) { emit message(tr("The active layer is locked.")); return false; }
+    int a, b;
+    selectedFrameRange(&a, &b);
+    FrameClip clip;
+    clip.length = b - a + 1;
+    clip.sourceLayer = l->id;
+    QSet<QUuid> used;
+    for (const Exposure& e : l->anim.exposures) {
+        const int s = std::max(e.start, a), t = std::min(e.end(), b + 1);
+        if (t <= s) continue;
+        Exposure c = e; c.start = s - a; c.length = t - s;
+        clip.exposures.append(c);
+        if (!e.drawing.isNull()) used.insert(e.drawing);
+    }
+    for (const DrawingMeta& dm : l->anim.drawings) {
+        if (!used.contains(dm.id)) continue;
+        clip.drawings.append(dm);
+        if (const QImage* img = l->drawingImage(dm.id)) clip.images[dm.id] = img->copy();   // deep copy: later edits must not change the clip
+    }
+    m_clip = clip;
+    emit clipChanged();
+    if (cut) {
+        editActiveAnimation(tr("Cut Frames"), [&](AnimationState& s) { s.clearRange(a, b - a + 1); return true; });
+        clearFrameSelection();
+    }
+    return true;
+}
+
+bool EditorSession::pasteFrames(bool linked) {
+    Layer* l = activeAnimationLayer();
+    if (!m_doc || !l) { emit message(tr("Select an animation layer to paste frames into.")); return false; }
+    if (l->props.locked) { emit message(tr("The active layer is locked.")); return false; }
+    if (m_clip.isEmpty()) { emit message(tr("Nothing copied yet.")); return false; }
+    const int at = m_doc->currentFrame();
+    AnimationState s = l->anim;
+    QHash<QUuid, QUuid> map;          // clip drawing id -> drawing id on this layer
+    for (const DrawingMeta& dm : m_clip.drawings) {
+        if (linked && m_clip.sourceLayer == l->id && s.drawing(dm.id)) { map[dm.id] = dm.id; continue; }
+        const QUuid id = QUuid::createUuid();
+        s.drawings.push_back({id, s.nextDrawingName()});
+        QImage img = m_clip.images.value(dm.id);
+        l->drawingImages[id] = img.isNull() ? m_doc->newRasterImage() : img.copy();   // inert until exposed; kept for undo/redo
+        map[dm.id] = id;
+    }
+    s.clearRange(at, m_clip.length);
+    for (const Exposure& e : m_clip.exposures) {
+        Exposure c = e;
+        c.start = at + e.start;
+        c.drawing = e.drawing.isNull() ? QUuid() : map.value(e.drawing);
+        s.exposures.append(c);
+    }
+    s.normalize();
+    if (s == l->anim) return false;
+    m_doc->editAnimation(l->id, s, linked ? tr("Paste Frames (Linked)") : tr("Paste Frames"));
+    setFrameSelection(l->id, at, at + m_clip.length - 1);
+    if (m_doc->currentFrame() != at) { m_selInternal = true; m_doc->setCurrentFrame(at); m_selInternal = false; }
+    return true;
 }
 
 bool EditorSession::gotoDrawing(int direction) {

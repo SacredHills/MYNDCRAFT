@@ -42,6 +42,7 @@ TimelineView::TimelineView(EditorSession* s, AnimationActions* a, QWidget* paren
         refresh();
     });
     connect(s, &EditorSession::activeLayerChanged, this, [this] { viewport()->update(); });
+    connect(s, &EditorSession::frameSelectionChanged, this, [this] { viewport()->update(); });
     rebuildRows();
 }
 
@@ -180,6 +181,23 @@ void TimelineView::paintEvent(QPaintEvent*) {
     }
     p.restore();
 
+    // ---- selected frames ----
+    if (m_s->hasFrameSelection()) {
+        const int sr = rowOfLayer(m_s->frameSelectionLayer());
+        int a, b;
+        m_s->selectedFrameRange(&a, &b);
+        if (sr >= 0 && m_s->frameSelectionLayer() == m_s->activeLayerId()) {
+            const QRect sel(xOfFrame(a), kRulerH + sr * kRowH - vs, (b - a + 1) * m_cellW, kRowH);
+            p.save();
+            p.setClipRect(QRect(kNameW, kRulerH, viewport()->width() - kNameW, viewport()->height() - kRulerH));
+            p.fillRect(sel, QColor(255, 255, 255, 60));
+            p.setPen(QPen(QColor(255, 230, 90), 2));
+            p.setBrush(Qt::NoBrush);
+            p.drawRect(sel.adjusted(1, 1, -1, -1));
+            p.restore();
+        }
+    }
+
     // ---- name column ----
     p.fillRect(QRect(0, kRulerH, kNameW, viewport()->height() - kRulerH), palette().color(QPalette::Window));
     p.save();
@@ -268,12 +286,39 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
         m_resizeFrame = ex.start;
         return;
     }
-    if (pt.x() >= kNameW) { m_s->playback()->pause(); d->setCurrentFrame(frameAtX(pt.x())); }
+    if (pt.x() >= kNameW) {
+        m_s->playback()->pause();
+        const int f = std::clamp(frameAtX(pt.x()), 0, d->durationFrames() - 1);
+        const Layer* l = r >= 0 ? m_rows[r].layer : nullptr;
+        if (l && l->type == LayerType::Animation) {
+            // Click selects a frame; Shift+click extends from the previous anchor; dragging selects a range.
+            if ((e->modifiers() & Qt::ShiftModifier) && m_s->hasFrameSelection() && m_s->frameSelectionLayer() == l->id) {
+                int a, b;
+                m_s->selectedFrameRange(&a, &b);
+                m_anchor = d->currentFrame() == b ? a : b;       // keep the end that is not under the playhead
+            } else if ((e->modifiers() & Qt::ShiftModifier) && d->currentFrame() != f && l->id == m_s->activeLayerId()) {
+                m_anchor = d->currentFrame();                    // Shift+click from the playhead with no selection
+            } else {
+                m_anchor = f;
+            }
+            m_dragLayer = l->id;
+            m_drag = SelectRange;
+            m_s->setFrameSelection(l->id, m_anchor, f);
+        } else {
+            m_s->clearFrameSelection();
+            d->setCurrentFrame(f);
+        }
+    }
 }
 
 void TimelineView::mouseMoveEvent(QMouseEvent* e) {
     const QPoint pt = e->position().toPoint();
     if (m_drag == Scrub) { scrubTo(pt.x()); return; }
+    if (m_drag == SelectRange) {
+        if (Document* d = m_s->doc())
+            m_s->setFrameSelection(m_dragLayer, m_anchor, std::clamp(frameAtX(pt.x()), 0, d->durationFrames() - 1));
+        return;
+    }
     if (m_drag == Resize) {
         const int f = int(std::lround(double(pt.x() - kNameW + horizontalScrollBar()->value()) / m_cellW));
         m_resizeNewEnd = std::max(m_resizeStart + 1, f);
@@ -319,7 +364,16 @@ void TimelineView::contextMenuEvent(QContextMenuEvent* e) {
     const QPoint pt = e->pos();
     const int r = rowAtY(pt.y());
     if (r >= 0) m_s->setActiveLayer(m_rows[r].layer->id);
-    if (pt.x() >= kNameW && r >= 0) if (Document* d = m_s->doc()) d->setCurrentFrame(frameAtX(pt.x()));
+    if (pt.x() >= kNameW && r >= 0) if (Document* d = m_s->doc()) {
+        const int f = std::clamp(frameAtX(pt.x()), 0, d->durationFrames() - 1);
+        int a, b;
+        m_s->selectedFrameRange(&a, &b);
+        const bool insideSelection = m_s->hasFrameSelection() && f >= a && f <= b;
+        if (!insideSelection) {                         // right-click outside the selection selects that frame
+            if (m_rows[r].layer->type == LayerType::Animation) m_s->setFrameSelection(m_rows[r].layer->id, f, f);
+            else d->setCurrentFrame(f);
+        }
+    }
     QMenu menu(this);
     m_a->fillContextMenu(&menu);
     menu.exec(e->globalPos());

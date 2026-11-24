@@ -55,7 +55,9 @@ private:
     QVector<Row> m_rows;
     QMetaObject::Connection m_c1, m_c2, m_c3, m_c4, m_c5;
     int m_cellW = 16;
-    enum Drag { None, Scrub, Resize } m_drag = None;
+    enum Drag { None, Scrub, Resize, SelectRange } m_drag = None;
+    int m_anchor = 0;
+    QUuid m_dragLayer;
     // resize state
     QUuid m_resizeLayer; int m_resizeStart = 0, m_resizeEnd = 0, m_resizeNewEnd = 0, m_resizeFrame = 0;
 };

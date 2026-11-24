@@ -21,6 +21,8 @@ public:
     bool apply(const QString& name);        // preset or custom
     void saveCurrentAs(const QString& name);
     bool deleteCustom(const QString& name);
+    void saveCurrent();                     // remember the panel arrangement of the workspace being left
+    void resetCurrent();                    // built-ins: back to the factory layout; custom: reload saved
 
 signals:
     void changed();
