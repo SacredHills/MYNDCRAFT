@@ -33,7 +33,11 @@ QJsonObject layerToJson(const Layer& l) {
     o["opacity"] = l.props.opacity;
     o["blend"] = blendModeKey(l.props.blend);
     if (l.type == LayerType::Raster) o["asset"] = rasterAssetName(l.id);
-    if (l.type == LayerType::Vector) o["shapes"] = shapesToJson(l.shapes);
+    if (l.type == LayerType::Vector) {
+        // While the end shapes are being edited the two lists are swapped in memory; the file always has start/end the right way round.
+        o["shapes"] = shapesToJson(l.editingEnd ? l.morphShapes : l.shapes);
+        if (!(l.editingEnd ? l.shapes : l.morphShapes).isEmpty()) o["morphShapes"] = shapesToJson(l.editingEnd ? l.shapes : l.morphShapes);
+    }
     if (l.type == LayerType::Text) o["text"] = l.textContent.toJson();
     if (l.type == LayerType::Animation) o["animation"] = l.anim.toJson();
     if (!l.tracks.isEmpty()) o["tracks"] = tracksToJson(l.tracks);
@@ -193,6 +197,7 @@ bool ProjectIO::save(Document& doc, const QString& path, QString* error, bool ke
 }
 
 bool ProjectIO::migrate(QJsonObject&, int fromVersion, QString* error) {
+    // v3 -> v4 also added shape tweens (morphShapes, the "shape.morph" property).
     // v3 -> v4 added the symbol library and symbol-instance layers, also optional.
     // v2 -> v3 added per-layer property tracks (transform/opacity keyframes), also optional.
     // v1 -> v2 added animation layers, drawings and timeline settings. Every new field is optional with
@@ -266,6 +271,7 @@ LayerPtr layerFromJson(const QJsonObject& o, zip_t* z, const Document& doc, QStr
         }
     } else if (t == LayerType::Vector) {
         if (!shapesFromJson(o["shapes"].toArray(), l->shapes, err)) return nullptr;
+        if (o.contains("morphShapes") && !shapesFromJson(o["morphShapes"].toArray(), l->morphShapes, err)) return nullptr;
     } else if (t == LayerType::Text) {
         if (!TextContent::fromJson(o["text"].toObject(), l->textContent, err)) return nullptr;
     } else if (t == LayerType::Animation) {

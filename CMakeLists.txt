@@ -39,6 +39,7 @@ add_library(myndcore STATIC
   src/Scene/TextContent.cpp
   src/Scene/Animation.cpp
   src/Scene/Property.cpp
+  src/Scene/ShapeMorph.cpp
   src/Scene/Playback.cpp
   src/Scene/Layer.cpp
   src/Scene/Document.cpp

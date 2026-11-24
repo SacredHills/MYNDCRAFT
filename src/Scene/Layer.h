@@ -56,6 +56,10 @@ public:
     LayerProps props;
     QImage raster;          // Raster layers: canvas-sized ARGB32_Premultiplied
     ShapeList shapes;       // Vector layers: bottom -> top
+    // Shape tween: the end shapes (paired with `shapes` by position). The animatable property "shape.morph" (0-100 %)
+    // blends between them. While `editingEnd` is set the two lists are swapped so the tools edit the end shapes.
+    ShapeList morphShapes;
+    bool editingEnd = false;
     TextContent textContent; // Text layers
     // Animation layers: exposure timing plus the pixels of every drawing (canvas-sized ARGB32_Premultiplied).
     // Images stay in the map even when no exposure references them, so undo can bring them back.
@@ -80,6 +84,9 @@ public:
     QImage* drawingImage(const QUuid& id);
     // Transform/opacity evaluated at `frame` (identity when nothing is set).
     LayerXform xformAt(double frame) const { return evaluateTransform(tracks, frame); }
+    // The shapes to draw at `frame` (the morph blend for shape tweens, otherwise `shapes`).
+    ShapeList shapesAt(double frame) const;
+    bool hasShapeTween() const { return type == LayerType::Vector && !morphShapes.isEmpty(); }
     // Bounds of what the layer draws at `frame`, in its own (untransformed) space: opaque pixels, shapes, text,
     // or the union of a group's children (each mapped through its own transform). Empty when there is nothing.
     QRectF contentBounds(int frame, const QSize& canvas, const struct SymbolResolver* syms = nullptr) const;

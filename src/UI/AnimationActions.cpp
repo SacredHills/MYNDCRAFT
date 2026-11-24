@@ -1,5 +1,6 @@
 #include "UI/AnimationActions.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
 #include <QLabel>
@@ -109,6 +110,42 @@ AnimationActions::AnimationActions(EditorSession* s, QWidget* dialogParent) : QO
         o.rotateDir = rot->currentIndex() == 0 ? 0 : rot->currentIndex() == 1 ? 1 : -1;
         o.spins = spins->value();
         if (!m_s->createTween(l->id, from->value() - 1, to->value() - 1, o)) emit m_s->message(tr("Choose a start frame before the end frame, inside the composition."));
+    });
+    createShapeTweenAction = mk("createShapeTween", tr("Create Shape Tween…"));
+    connect(createShapeTweenAction, &QAction::triggered, this, [this] {
+        const Layer* l = m_s->activeLayer();
+        Document* d = m_s->doc();
+        if (!l || !d) return;
+        if (l->type != LayerType::Vector || l->shapes.isEmpty()) { emit m_s->message(tr("Shape tweens need a vector layer with shapes on it.")); return; }
+        if (l->hasShapeTween()) { emit m_s->message(tr("This layer already has a shape tween.")); return; }
+        int a = d->currentFrame(), b = std::min(d->durationFrames() - 1, a + 24);
+        QDialog dlg(m_parent);
+        dlg.setWindowTitle(tr("Create Shape Tween"));
+        auto* f = new QFormLayout(&dlg);
+        auto* from = new QSpinBox; from->setRange(1, d->durationFrames()); from->setValue(a + 1);
+        auto* to = new QSpinBox; to->setRange(1, d->durationFrames()); to->setValue(b + 1);
+        auto* easy = new QCheckBox(tr("Easy Ease"));
+        easy->setChecked(true);
+        f->addRow(tr("From frame"), from); f->addRow(tr("To frame"), to); f->addRow(easy);
+        auto* hint = new QLabel(tr("The current shapes are the START. A copy becomes the END shape and opens for editing: reshape it with the\ntools, then choose Edit End Shape again to return. Points are paired in order."));
+        hint->setWordWrap(true);
+        f->addRow(hint);
+        auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        f->addRow(bb);
+        connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        if (dlg.exec() != QDialog::Accepted) return;
+        if (!m_s->createShapeTween(l->id, from->value() - 1, to->value() - 1, easy->isChecked()))
+            emit m_s->message(tr("Choose a start frame before the end frame, inside the composition."));
+    });
+    editEndShapeAction = mk("editEndShape", tr("Edit End Shape"));
+    editEndShapeAction->setCheckable(true);
+    connect(editEndShapeAction, &QAction::triggered, this, [this] {
+        if (const Layer* l = m_s->activeLayer()) m_s->toggleEditEndShape(l->id);
+    });
+    removeShapeTweenAction = mk("removeShapeTween", tr("Remove Shape Tween"));
+    connect(removeShapeTweenAction, &QAction::triggered, this, [this] {
+        if (const Layer* l = m_s->activeLayer()) m_s->removeShapeTween(l->id);
     });
     removeTweenAction = mk("removeTween", tr("Remove Tween at Current Frame"));
     connect(removeTweenAction, &QAction::triggered, this, [this] {
@@ -272,6 +309,7 @@ AnimationActions::AnimationActions(EditorSession* s, QWidget* dialogParent) : QO
             connect(m_s->doc(), &Document::frameChanged, this, &AnimationActions::refresh);
             connect(m_s->doc(), &Document::animationChanged, this, &AnimationActions::refresh);
             connect(m_s->doc(), &Document::layerTreeChanged, this, &AnimationActions::refresh);
+            connect(m_s->doc(), &Document::layerPropsChanged, this, &AnimationActions::refresh);
         }
         refresh();
     });
@@ -288,6 +326,14 @@ AnimationActions::AnimationActions(EditorSession* s, QWidget* dialogParent) : QO
 }
 
 void AnimationActions::refresh() {
+    {
+        const Layer* vl = m_s->activeLayer();
+        const bool vec = vl && vl->type == LayerType::Vector && !vl->props.locked;
+        createShapeTweenAction->setEnabled(vec && !vl->shapes.isEmpty() && !vl->hasShapeTween());
+        editEndShapeAction->setEnabled(vec && vl->hasShapeTween());
+        editEndShapeAction->setChecked(vl && vl->editingEnd);
+        removeShapeTweenAction->setEnabled(vec && vl->hasShapeTween());
+    }
     const bool anim = onAnimLayer();
     for (QAction* a : {newDrawing, duplicateDrawing, newDrawingNextFrame, insertBlank, deleteFrame, loopExposures, holdDrawing}) a->setEnabled(anim);
     bool exposed = false;
@@ -336,7 +382,7 @@ void AnimationActions::fillMenu(QMenu* m) {
     interp->addActions({keyLinear, keyHold, keyEaseIn, keyEaseOut, keyEaseBoth});
     m->addAction(deleteKeys);
     m->addSeparator();
-    m->addActions({createTweenAction, removeTweenAction});
+    m->addActions({createTweenAction, removeTweenAction, createShapeTweenAction, editEndShapeAction, removeShapeTweenAction});
 }
 
 void AnimationActions::fillKeyframeMenu(QMenu* m) {

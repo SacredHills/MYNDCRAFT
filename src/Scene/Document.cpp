@@ -328,6 +328,13 @@ void Document::commitRasterPatch(const QUuid& layerId, const QRect& rect, const 
 
 namespace mynd {
 
+void Document::setShapeTween(const QUuid& layerId, const ShapeList& shapes, const ShapeList& morph, bool editingEnd, const QString& text) {
+    Layer* l = findLayer(layerId);
+    if (!l || l->type != LayerType::Vector) return;
+    if (l->shapes == shapes && l->morphShapes == morph && l->editingEnd == editingEnd) return;
+    m_undo.push(new ShapeTweenCommand(this, layerId, l->shapes, l->morphShapes, l->editingEnd, shapes, morph, editingEnd, text));
+}
+
 // ---------------- Symbols ----------------
 const SymbolDef* Document::findSymbol(const QUuid& id) const {
     for (const auto& d : m_symbols) if (d.id == id) return &d;

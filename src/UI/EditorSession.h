@@ -164,7 +164,12 @@ public:
         int spins = 1;             // full turns when rotateDir != 0
     };
     bool createTween(const QUuid& layer, int startFrame, int endFrame, const TweenOptions& o);
-    bool removeTween(const QUuid& layer, int startFrame, int endFrame);   // removes the keys of those four properties in the span
+    bool removeTween(const QUuid& layer, int startFrame, int endFrame);
+    // Shape tween on a vector layer: the layer's shapes are the start shapes, a copy becomes the end shapes and is put
+    // into edit mode (tools then change the END shape). "shape.morph" is keyed 0 % -> 100 % over the span.
+    bool createShapeTween(const QUuid& layer, int startFrame, int endFrame, bool easyEase);
+    bool toggleEditEndShape(const QUuid& layer);           // switch between editing the start and the end shapes
+    bool removeShapeTween(const QUuid& layer);              // keeps the start shapes   // removes the keys of those four properties in the span
     bool deleteSelectedKeys();
     bool moveSelectedKeys(int deltaFrames);
     bool easeSelectedKeys(EasePreset preset, bool incoming = true, bool outgoing = true);

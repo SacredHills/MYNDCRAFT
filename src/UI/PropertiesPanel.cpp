@@ -193,6 +193,10 @@ void PropertiesPanel::refresh() {
     const QPalette pal = palette();
     for (const PropertyDef& d : layerPropertyDefs()) {
         Row& r = m_rows[d.id];
+        const bool shown = d.id != "shape.morph" || (l && l->hasShapeTween());      // the morph row only exists for shape tweens
+        for (QWidget* w : {static_cast<QWidget*>(r.watch), static_cast<QWidget*>(r.label), static_cast<QWidget*>(r.key),
+                           static_cast<QWidget*>(r.prev), static_cast<QWidget*>(r.next)}) if (w) w->setVisible(shown);
+        for (QDoubleSpinBox* sp : r.spins) sp->setVisible(shown);
         const auto tit = l ? l->tracks.constFind(d.id) : PropertyTracks::const_iterator();
         const PropertyTrack* tr = l && tit != l->tracks.constEnd() ? &tit.value() : nullptr;
         const bool animated = tr && tr->animated();

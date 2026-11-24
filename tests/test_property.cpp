@@ -7,6 +7,7 @@
 #include "Graphics/Compositor.h"
 #include "Scene/Document.h"
 #include "Scene/Property.h"
+#include "Scene/ShapeMorph.h"
 
 using namespace mynd;
 
@@ -335,6 +336,25 @@ private slots:
         QCOMPARE(QColor(Compositor::render(*d, d->canvasRect(), o).pixel(25, 5)), QColor(Qt::green));
         o.frame = 10;
         QCOMPARE(QColor(Compositor::render(*d, d->canvasRect(), o).pixel(85, 5)), QColor(Qt::green));
+    }
+
+    void shapeMorphPairsPointsAndPadsShorterPaths() {
+        const VectorShape rect = VectorShape::makeRect(QRectF(0, 0, 100, 100));          // 4 points
+        VectorShape tri = VectorShape::makePolygon(QPointF(300, 50), 50, 3, 0);         // 3 points
+        QCOMPARE(morphShape(rect, tri, 0.0).bounds().center().x() < 120, true);
+        QCOMPARE(morphShape(rect, tri, 1.0).bounds().center().x() > 250, true);
+        const VectorShape mid = morphShape(rect, tri, 0.5);
+        QCOMPARE(mid.nodes.size(), 4);                                                    // the triangle was padded, not the rect cut
+        const double cx = mid.bounds().center().x();
+        QVERIFY(cx > 120 && cx < 250);
+        // identical shapes stay identical at every t
+        const VectorShape same = morphShape(rect, rect, 0.37);
+        QCOMPARE(same.nodes.size(), rect.nodes.size());
+        for (int i = 0; i < rect.nodes.size(); ++i) QVERIFY(QLineF(same.nodes[i].pos, rect.nodes[i].pos).length() < 1e-9);
+        // extra shapes without a partner pop in at the halfway point
+        ShapeList a{rect}, b{rect, tri};
+        QCOMPARE(morphShapes(a, b, 0.2).size(), 1);
+        QCOMPARE(morphShapes(a, b, 0.8).size(), 2);
     }
 
     void spatialTangentsCurveThePathAndSurviveSaveAndLoad() {

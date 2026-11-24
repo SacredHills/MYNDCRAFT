@@ -572,6 +572,48 @@ bool EditorSession::removeTween(const QUuid& layer, int a, int b) {
     return true;
 }
 
+bool EditorSession::createShapeTween(const QUuid& layer, int a, int b, bool easyEase) {
+    Layer* l = editableTracksLayer(this, layer);
+    if (!l || !m_doc || l->type != LayerType::Vector || l->shapes.isEmpty() || l->hasShapeTween()) return false;
+    if (a < 0 || b <= a || b >= m_doc->durationFrames()) return false;
+    PropertyTracks t = l->tracks;
+    const PropertyDef* d = findPropertyDef("shape.morph");
+    PropertyTrack& trk = t["shape.morph"];
+    trk.base = PropValue::of(0);
+    trk.setKey(*d, a, PropValue::of(0));
+    trk.setKey(*d, b, PropValue::of(100));
+    if (easyEase) { trk.applyEase(a, EasePreset::EaseInOut, false, true); trk.applyEase(b, EasePreset::EaseInOut, true, false); }
+    m_doc->undoStack()->beginMacro(tr("Create Shape Tween"));
+    m_doc->setShapeTween(layer, l->shapes, l->shapes, true, tr("Create Shape Tween"));   // end shapes start as a copy; edit them now
+    m_doc->editTracks(layer, t, tr("Shape Morph Keys"));
+    m_doc->undoStack()->endMacro();
+    clearSelection();
+    emit message(tr("Editing the END shape. Change it with the tools, then turn off Edit End Shape (Animation menu)."));
+    return true;
+}
+
+bool EditorSession::toggleEditEndShape(const QUuid& layer) {
+    Layer* l = editableTracksLayer(this, layer);
+    if (!l || !l->hasShapeTween()) return false;
+    m_doc->setShapeTween(layer, l->morphShapes, l->shapes, !l->editingEnd, l->editingEnd ? tr("Edit Start Shape") : tr("Edit End Shape"));
+    clearSelection();
+    return true;
+}
+
+bool EditorSession::removeShapeTween(const QUuid& layer) {
+    Layer* l = editableTracksLayer(this, layer);
+    if (!l || !l->hasShapeTween()) return false;
+    const ShapeList start = l->editingEnd ? l->morphShapes : l->shapes;
+    PropertyTracks t = l->tracks;
+    t.remove("shape.morph");
+    m_doc->undoStack()->beginMacro(tr("Remove Shape Tween"));
+    m_doc->setShapeTween(layer, start, {}, false, tr("Remove Shape Tween"));
+    m_doc->editTracks(layer, t, tr("Remove Shape Morph"));
+    m_doc->undoStack()->endMacro();
+    clearSelection();
+    return true;
+}
+
 bool EditorSession::deleteSelectedKeys() {
     if (!m_doc || m_keySel.isEmpty()) return false;
     const auto groups = groupKeys(m_keySel);

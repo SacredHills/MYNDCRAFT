@@ -107,6 +107,9 @@ public:
     void editTracks(const QUuid& layerId, const PropertyTracks& after, const QString& text, const QString& mergeKey = {});
     void emitTracksChanged(const QUuid& layerId);
 
+    // Shape tween state of a vector layer (end shapes + whether they are being edited). Undoable.
+    void setShapeTween(const QUuid& layerId, const ShapeList& shapes, const ShapeList& morph, bool editingEnd, const QString& text);
+
     // ---- Symbols (reusable artwork with its own timeline) ----
     const QVector<SymbolDef>& symbols() const { return m_symbols; }
     const SymbolDef* findSymbol(const QUuid& id) const override;

@@ -5,6 +5,7 @@
 
 #include "TestEnv.h"
 #include "Core/Exporter.h"
+#include "Core/ProjectIO.h"
 #include "Core/Settings.h"
 #include "UI/MainWindow.h"
 #include "UI/GraphEditor.h"
@@ -618,6 +619,51 @@ private slots:
         // remove the first tween: keys in its span are deleted
         QVERIFY(s->removeTween(layerId, 0, 20));
         QVERIFY(!L()->tracks.contains("transform.rotation") || L()->tracks["transform.rotation"].keys.isEmpty());
+    }
+
+    // ------------------------------------------------------------ Shape tweens
+    void shapeTweenMorphsBetweenStartAndEndShapesAndSurvivesSaving() {
+        // a vector layer with a rectangle at the left
+        const QUuid v = s->addLayerAboveActive(LayerType::Vector, "Shape");
+        Layer* vl = doc->findLayer(v);
+        ShapeList sl; sl.append(VectorShape::makeRect(QRectF(20, 100, 60, 60)));
+        sl[0].fill.color = Qt::red; sl[0].stroke.enabled = false;
+        doc->setShapes(v, sl, "add");
+        s->setActiveLayer(v);
+        QVERIFY(s->createShapeTween(v, 0, 20, false));
+        QVERIFY(vl->hasShapeTween());
+        QVERIFY(vl->editingEnd);
+        QVERIFY(w->animation()->editEndShapeAction->isChecked());
+        QCOMPARE(vl->tracks["shape.morph"].keys.size(), 2);
+        // while editing the end shape, move it to the right and turn it blue
+        ShapeList end = vl->shapes;
+        end[0].translate({200, 0});
+        end[0].fill.color = Qt::blue;
+        doc->setShapes(v, end, "edit end");
+        QVERIFY(s->toggleEditEndShape(v));                                   // back to the start shape
+        QVERIFY(!vl->editingEnd);
+        QCOMPARE(vl->shapes[0].bounds().left() < 25, true);                  // start is still at the left
+        QCOMPARE(px(0, 40, 130), QColor(Qt::red));                           // frame 0: start shape
+        QCOMPARE(px(20, 240, 130), QColor(Qt::blue));                        // frame 20: end shape (moved 200 right)
+        const QColor mid = px(10, 140, 130);                                 // halfway: 100 px right, colour mixed
+        QVERIFY(mid.red() > 80 && mid.blue() > 80 && mid.red() < 180);
+        QVERIFY(px(10, 40, 130) != QColor(Qt::red));                         // it has left the start position
+        // the file keeps start and end the right way round
+        QTemporaryDir dir;
+        QString err;
+        QVERIFY2(ProjectIO::save(*doc, dir.filePath("t.studio"), &err), qPrintable(err));
+        auto r = ProjectIO::load(dir.filePath("t.studio"));
+        QVERIFY2(r.doc, qPrintable(r.error));
+        const Layer* ll = r.doc->findLayer(v);
+        QVERIFY(ll && ll->hasShapeTween());
+        QVERIFY(ll->shapes[0].bounds().left() < 25);
+        QVERIFY(ll->morphShapes[0].bounds().left() > 200);
+        // undo the whole creation in one step
+        QVERIFY(s->removeShapeTween(v));
+        QVERIFY(!vl->hasShapeTween());
+        QVERIFY(!vl->tracks.contains("shape.morph"));
+        doc->undoStack()->undo();
+        QVERIFY(vl->hasShapeTween());
     }
 
     // ------------------------------------------------------------ Symbols

@@ -43,6 +43,9 @@ const QVector<PropertyDef>& layerPropertyDefs() {
         PropertyDef op = mkDef("opacity", "Opacity", PropType::Float, PropValue::of(100), 0, 100, {"%"}, "%", 1);
         op.group = "Layer";
         v.push_back(op);
+        PropertyDef mo = mkDef("shape.morph", "Shape Morph", PropType::Float, PropValue::of(0), 0, 100, {"%"}, "%", 1);
+        mo.group = "Shape";
+        v.push_back(mo);
         return v;
     }();
     return defs;

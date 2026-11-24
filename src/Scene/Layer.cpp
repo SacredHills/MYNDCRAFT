@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "Scene/ShapeMorph.h"
+
 namespace mynd {
 
 namespace {
@@ -119,6 +121,14 @@ static QRectF childrenBounds(const std::vector<LayerPtr>& kids, int frame, const
     return r;
 }
 
+ShapeList Layer::shapesAt(double frame) const {
+    if (!hasShapeTween() || editingEnd) return shapes;
+    const double m = valueOf(tracks, *findPropertyDef("shape.morph"), frame).c[0] / 100.0;
+    if (m <= 0) return shapes;
+    if (m >= 1) return morphShapes;
+    return mynd::morphShapes(shapes, morphShapes, m);
+}
+
 QRectF Layer::contentBounds(int frame, const QSize& canvas, const SymbolResolver* syms) const {
     switch (type) {
     case LayerType::Raster:
@@ -128,7 +138,7 @@ QRectF Layer::contentBounds(int frame, const QSize& canvas, const SymbolResolver
     }
     case LayerType::Vector: {
         QRectF r;
-        for (const auto& s : shapes) r = r.united(s.bounds());
+        for (const auto& s : shapesAt(frame)) r = r.united(s.bounds());
         return r;
     }
     case LayerType::Text: return textContent.bounds();
@@ -153,6 +163,7 @@ LayerPtr Layer::cloneExact() const {
     c->props = props;
     c->raster = raster.copy();
     c->shapes = shapes;
+    c->morphShapes = morphShapes; c->editingEnd = editingEnd;
     c->textContent = textContent;
     c->anim = anim;
     c->tracks = tracks;
@@ -171,6 +182,7 @@ LayerPtr Layer::cloneWithNewIds() const {
     c->props = props;
     c->raster = raster.copy();
     c->shapes = shapes;
+    c->morphShapes = morphShapes; c->editingEnd = editingEnd;
     c->textContent = textContent;
     c->anim = anim;
     c->tracks = tracks;

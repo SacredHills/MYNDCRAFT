@@ -144,6 +144,15 @@ bool TextStateCommand::mergeWith(const QUndoCommand* other) {
     return true;
 }
 
+ShapeTweenCommand::ShapeTweenCommand(Document* d, const QUuid& layer, const ShapeList& bs, const ShapeList& bm, bool be,
+                                     const ShapeList& as, const ShapeList& am, bool ae, const QString& text)
+    : m_doc(d), m_layer(layer), m_bs(bs), m_bm(bm), m_as(as), m_am(am), m_be(be), m_ae(ae) { setText(text); }
+void ShapeTweenCommand::apply(const ShapeList& s, const ShapeList& m, bool e) {
+    if (Layer* l = m_doc->findLayer(m_layer)) { l->shapes = s; l->morphShapes = m; l->editingEnd = e; m_doc->emitPropsChanged(m_layer); m_doc->emitContentChanged({}); }
+}
+void ShapeTweenCommand::redo() { apply(m_as, m_am, m_ae); }
+void ShapeTweenCommand::undo() { apply(m_bs, m_bm, m_be); }
+
 // ---------------- Symbols ----------------
 SymbolLibraryCommand::SymbolLibraryCommand(Document* d, const QVector<SymbolDef>& b, const QVector<SymbolDef>& a, const QString& text)
     : m_doc(d), m_before(b), m_after(a) { setText(text); }

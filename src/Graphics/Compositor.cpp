@@ -129,7 +129,7 @@ void Compositor::drawLayerContent(QPainter& p, const Layer& l, const QRect& regi
         drawAnimationLayer(p, l, region, ctx, opacity);
     } else if (plain) {
         // Fast path: no isolation needed.
-        if (l.type == LayerType::Vector) drawShapes(p, l.shapes);
+        if (l.type == LayerType::Vector) drawShapes(p, l.shapesAt(ctx.frame));
         else if (l.type == LayerType::Text) l.textContent.draw(p);
         else if (l.type == LayerType::Symbol) drawSymbol(p, l, region, canvas, ctx);
         else drawGroup(p, l, region, canvas, ctx);
@@ -141,7 +141,7 @@ void Compositor::drawLayerContent(QPainter& p, const Layer& l, const QRect& regi
         bp.setRenderHint(QPainter::Antialiasing);
         bp.translate(-region.topLeft());
         bp.setClipRect(region);
-        if (l.type == LayerType::Vector) drawShapes(bp, l.shapes);
+        if (l.type == LayerType::Vector) drawShapes(bp, l.shapesAt(ctx.frame));
         else if (l.type == LayerType::Text) l.textContent.draw(bp);
         else if (l.type == LayerType::Symbol) drawSymbol(bp, l, region, canvas, ctx);
         else drawGroup(bp, l, region, canvas, ctx);
