@@ -47,6 +47,14 @@ void CanvasView::setDocument(Document* d) {
     m_tool = createTool(m_session->tool(), m_session, this);
     if (d) {
         m_conn = connect(d, &Document::contentChanged, this, &CanvasView::onContentChanged);
+        clearFrameCache();
+        connect(d, &Document::frameChanged, this, [this] { m_frameJustChanged = true; });   // (sent right before the contentChanged of the same step)
+        for (auto sig : {&Document::layerTreeChanged, &Document::timingChanged, &Document::symbolsChanged, &Document::contextChanged})
+            connect(d, sig, this, [this] { clearFrameCache(); });
+        connect(d, &Document::layerPropsChanged, this, [this] { clearFrameCache(); });
+        connect(d, &Document::animationChanged, this, [this] { clearFrameCache(); });
+        connect(d, &Document::tracksChanged, this, [this] { clearFrameCache(); });
+        connect(d, &Document::scene3DChanged, this, [this] { clearFrameCache(); });
         connect(d, &Document::layerTreeChanged, this, [this] { update(); });
         m_center = QPointF(d->comp().width / 2.0, d->comp().height / 2.0);
         m_rotation = 0;
@@ -73,8 +81,29 @@ void CanvasView::rebuildCache() {
     update();
 }
 
+void CanvasView::clearFrameCache() {
+    m_frameCache.clear(); m_frameOrder.clear(); m_frameCacheBytes = 0;
+}
+
 void CanvasView::onContentChanged(const QRect& r) {
     if (!m_doc) return;
+    const bool fromFrame = m_frameJustChanged && r.isEmpty();
+    m_frameJustChanged = false;
+    if (!fromFrame) clearFrameCache();
+    else if (m_session->playback()->isPlaying() && m_cache.size() == m_doc->canvasSize()) {
+        const int f = m_doc->currentFrame();
+        auto it = m_frameCache.constFind(f);
+        if (it != m_frameCache.constEnd() && it->size() == m_doc->canvasSize()) { m_cache = *it; ++m_frameHits; update(); return; }
+        m_cache = Compositor::render(*m_doc, m_doc->canvasRect(), renderOptions());
+        const qint64 bytes = m_cache.sizeInBytes();
+        while (!m_frameOrder.isEmpty() && m_frameCacheBytes + bytes > (qint64(768) << 20)) {
+            const int old = m_frameOrder.takeFirst();
+            m_frameCacheBytes -= m_frameCache.take(old).sizeInBytes();
+        }
+        m_frameCache.insert(f, m_cache); m_frameOrder << f; m_frameCacheBytes += bytes;
+        update();
+        return;
+    }
     if (m_cache.size() != m_doc->canvasSize() || r.isEmpty()) { rebuildCache(); return; }
     const QRect rr = r.adjusted(-2, -2, 2, 2).intersected(m_doc->canvasRect());
     if (rr.isEmpty()) return;

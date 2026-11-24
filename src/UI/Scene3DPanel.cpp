@@ -5,6 +5,7 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include "UI/ScrubSpinBox.h"
+#include "UI/LightCheckStyle.h"
 #include <QDropEvent>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -94,6 +95,7 @@ Scene3DPanel::Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent)
     auto* nt = new NodeTree;
     nt->onDrop = [this](const QUuid& n, const QUuid& p) { dropOn(n, p); };
     m_tree = nt;
+    m_tree->setStyle(new LightCheckStyle); m_tree->style()->setParent(m_tree);
     m_tree->setHeaderHidden(true);
     m_tree->setDragDropMode(QAbstractItemView::InternalMove);
     m_tree->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -223,7 +225,9 @@ Scene3DPanel::Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent)
         const QUuid id(it->data(0, Qt::UserRole).toString());
         const bool vis = it->checkState(0) == Qt::Checked;
         Layer* l = m_s->active3DLayer();
+        m_inItemEdit = true;
         if (l && !l->props.locked) m_s->doc()->editScene3D(l->id, [&](Scene3D& sc) { Node3D* n = sc.node(id); if (!n || n->visible == vis) return false; n->visible = vis; return true; }, vis ? tr("Show Node") : tr("Hide Node"));
+        m_inItemEdit = false;
     });
     connect(m_tree, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint& p) {
         QMenu m;
@@ -482,6 +486,10 @@ void Scene3DPanel::editMaterial(const QString& text, const QString& key, const s
 }
 
 void Scene3DPanel::rebuildTree() {
+    if (m_inItemEdit) {   // clearing the tree now would delete the item whose checkbox change is being handled (crash)
+        if (!m_treeRebuildQueued) { m_treeRebuildQueued = true; QMetaObject::invokeMethod(this, [this] { m_treeRebuildQueued = false; rebuildTree(); }, Qt::QueuedConnection); }
+        return;
+    }
     const Layer* l = m_s->active3DLayer();
     m_updating = true;
     m_tree->clear();

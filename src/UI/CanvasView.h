@@ -84,6 +84,17 @@ private:
     Document* m_doc = nullptr;
     std::unique_ptr<Tool> m_tool;
     QImage m_cache;
+    // Playback frame cache: frames rendered while playing are kept so later loops just show them (like a RAM preview). Any edit drops it.
+    QHash<int, QImage> m_frameCache;
+    QList<int> m_frameOrder;
+    qint64 m_frameCacheBytes = 0;
+    bool m_frameJustChanged = false;
+    void clearFrameCache();
+public:
+    int frameCacheHits() const { return m_frameHits; }
+    int frameCacheSize() const { return int(m_frameCache.size()); }
+private:
+    int m_frameHits = 0;
     QMetaObject::Connection m_conn;
     double m_zoom = 1.0, m_rotation = 0.0;
     QPointF m_center;  // document point shown at the widget center

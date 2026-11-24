@@ -11,6 +11,7 @@
 #include <functional>
 
 #include "UI/Icons.h"
+#include "UI/LightCheckStyle.h"
 #include "UI/Scene3DActions.h"
 
 namespace mynd {
@@ -38,6 +39,8 @@ LayerPanel::LayerPanel(EditorSession* s, QWidget* parent) : QWidget(parent), m_s
     lay->setContentsMargins(4, 4, 4, 4);
 
     m_tree = new LayerTree(this);
+    m_tree->setStyle(new LightCheckStyle);   // (the style outlives the tree's use of it: it is parented below)
+    m_tree->style()->setParent(m_tree);
     m_tree->setColumnCount(3);
     m_tree->setHeaderLabels({tr("Layer"), tr("Lock"), tr("3D")});
     m_tree->header()->setStretchLastSection(false);

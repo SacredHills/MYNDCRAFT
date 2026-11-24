@@ -12,6 +12,7 @@
 #include "UI/GraphEditor.h"
 #include "UI/MainWindow.h"
 #include "UI/Panels.h"
+#include "UI/CanvasView.h"
 #include "UI/ScrubSpinBox.h"
 #include "UI/TimelinePanel.h"
 #include "Scene3D/Anim3D.h"
@@ -413,6 +414,69 @@ private slots:
                 w->workspaces()->apply(n); QApplication::processEvents();
                 QCOMPARE(snap(), first[n]);
             }
+    }
+
+    void togglingANodeCheckboxInTheScenePanelDoesNotUseFreedMemory() {
+        buildScene();
+        const QUuid vec = doc->addLayer(LayerType::Vector, "Vec");
+        a->makeLayer3D(vec);                                           // a card node as well
+        s->setActiveLayer(s->activeLayerId());
+        QApplication::processEvents();
+        auto* tree = w->scene3dPanel()->tree();
+        QVERIFY(tree->topLevelItemCount() >= 4);
+        for (int round = 0; round < 2; ++round)
+            for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+                QTreeWidgetItem* it = tree->topLevelItem(i);
+                const bool on = it->checkState(0) == Qt::Checked;
+                {   // a real click on the check indicator
+                    tree->scrollToItem(it);
+                    const QRect r = tree->visualItemRect(it);
+                    QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, QPoint(r.left() + 8 + 0 * i, r.center().y()));
+                    if (tree->topLevelItem(i)->checkState(0) == (on ? Qt::Checked : Qt::Unchecked)) it->setCheckState(0, on ? Qt::Unchecked : Qt::Checked);
+                }
+                QApplication::processEvents();
+                px(10, 10);                                              // render with the change
+                vp->repaint();
+                QCOMPARE(tree->topLevelItem(i)->checkState(0), on ? Qt::Unchecked : Qt::Checked);
+            }
+        // the same for the visibility / lock boxes of the layers behind it (scene layer and card source)
+        auto* ltree = w->findChild<LayerPanel*>()->tree();
+        for (int col = 0; col < 2; ++col)
+            for (int round = 0; round < 2; ++round) {
+                QTreeWidgetItemIterator li(ltree);
+                QList<QUuid> ids;
+                while (*li) { ids << QUuid((*li)->data(0, Qt::UserRole + 1).toString()); ++li; }
+                for (const QUuid& id : ids) {
+                    QTreeWidgetItemIterator f(ltree);
+                    while (*f && QUuid((*f)->data(0, Qt::UserRole + 1).toString()) != id) ++f;
+                    if (!*f) continue;
+                    (*f)->setCheckState(col, (*f)->checkState(col) == Qt::Checked ? Qt::Unchecked : Qt::Checked);
+                    QApplication::processEvents();
+                    px(10, 10);
+                    vp->repaint();
+                }
+            }
+        doc->undoStack()->undo();
+        QApplication::processEvents();
+        px(10, 10);
+    }
+
+    void playbackShowsCachedFramesOnLaterLoopsAndAnEditDropsThem() {
+        const QUuid L = doc->addLayer(LayerType::Vector, "V");
+        auto* cv = w->findChild<CanvasView*>();
+        QVERIFY(cv);
+        QApplication::processEvents();
+        s->playback()->play();
+        QVERIFY(s->playback()->isPlaying());
+        for (int f = 1; f < 10; ++f) { doc->setCurrentFrame(f); }
+        QCOMPARE(cv->frameCacheSize(), 9);
+        const int hits0 = cv->frameCacheHits();
+        for (int f = 1; f < 10; ++f) { doc->setCurrentFrame(f - 1 >= 1 ? f - 1 : 20); doc->setCurrentFrame(f); }
+        QVERIFY(cv->frameCacheHits() > hits0);
+        LayerProps p = doc->findLayer(L)->props; p.opacity = 0.5;
+        doc->setLayerProps(L, p);                                   // any edit: the old frames are no longer right
+        QCOMPARE(cv->frameCacheSize(), 0);
+        s->playback()->pause();
     }
 
     void rotateAndScaleGizmosWork() {

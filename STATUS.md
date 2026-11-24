@@ -287,6 +287,9 @@ Limitations (honest list):
 - Fix: unchecking a 3D layer crashed (use-after-free on a reference into a deleted card node). Ids are now passed by value; regression test run under ASAN.
 - Transform/inspector number fields can be dragged horizontally (Shift fine, Ctrl coarse; click to type). Covers 3D inspector fields and 2D property fields. Tested with synthetic mouse events only.
 - Not done: context menu on timeline layer rows.
+- Check boxes in the Layers panel and the 3D hierarchy are drawn light (light box, dark tick).
+- Playback: frames shown while playing are kept in a RAM cache (up to ~768 MB), so the second and later loops show them without re-rendering; any edit drops the cache. The FIRST pass still renders every frame live, so a heavy comp can still drop frames then (measured here: ~14 ms/frame compositing for 8 full-HD layers; your machine may differ). No background pre-render yet. Not measured on Windows.
+- 3D Scene panel node checkbox: the list is no longer rebuilt while its own check event is being handled. I could not reproduce a crash from the node checkboxes in tests (with or without this change), so if it still crashes on the new build please tell me exactly what was clicked.
 - Fix: workspaces came back different depending on the previous one (Qt leaves panels a saved layout doesn't mention where they were, and hidden panels weren't remembered). Every restore now starts from all panels undocked, and hidden panels are stored with the layout (old saved layouts still load). Test cycles all workspaces and compares panel visibility/placement. Not hand-tested on Windows.
 
 ## Next tasks

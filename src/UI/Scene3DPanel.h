@@ -60,6 +60,7 @@ private:
     EditorSession* m_s;
     Scene3DActions* m_a;
     QTreeWidget* m_tree;
+    bool m_inItemEdit = false, m_treeRebuildQueued = false;   // a tree item's own change signal is running: do not delete it
     bool m_updating = false;
     QGroupBox *m_gXform, *m_gMat, *m_gLight, *m_gCam, *m_gScene;
     QDoubleSpinBox *m_pos[3], *m_rot[3], *m_scl[3];
