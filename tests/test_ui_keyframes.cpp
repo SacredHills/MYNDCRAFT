@@ -714,6 +714,31 @@ private slots:
         QVERIFY(vl->hasShapeTween());
     }
 
+    void theShapeMorphCanBeMadeByDraggingVisiblePointsWithTheSelectTool() {
+        const QUuid v = s->addLayerAboveActive(LayerType::Vector, "Shape");
+        Layer* vl = doc->findLayer(v);
+        ShapeList sl; sl.append(VectorShape::makeRect(QRectF(100, 100, 60, 60)));
+        sl[0].fill.color = Qt::red; sl[0].stroke.enabled = false;
+        doc->setShapes(v, sl, "add");
+        s->setActiveLayer(v);
+        s->setTool(ToolId::Select);
+        QVERIFY(s->createShapeTween(v, 0, 20, false));                       // now editing the END shape
+        cv->actualPixels(); cv->panBy({0, 0}); QApplication::processEvents();
+        // the point is only grabbed once the shape is selected: click the shape, then drag its top-right point
+        QTest::mouseClick(cv, Qt::LeftButton, {}, view(130, 130));
+        QCOMPARE(s->selectedShapes().size(), 1);
+        const QPointF corner = vl->shapes[0].nodes[1].pos;                   // top-right
+        drag(corner, corner + QPointF(80, -40));
+        QVERIFY(s->toggleEditEndShape(v));                                   // back to the start shape: it must not have changed
+        QCOMPARE(vl->shapes[0].nodes[1].pos, corner);
+        QVERIFY(vl->morphShapes[0].nodes[1].pos.x() > corner.x() + 70);      // only that point moved in the end shape
+        QCOMPARE(vl->morphShapes[0].nodes[0].pos, vl->shapes[0].nodes[0].pos);
+        // halfway through the tween that point is halfway there
+        const ShapeList mid = vl->shapesAt(10);
+        QVERIFY(std::abs(mid[0].nodes[1].pos.x() - (corner.x() + 40)) < 2);
+        QVERIFY(std::abs(mid[0].nodes[1].pos.y() - (corner.y() - 20)) < 2);
+    }
+
     // ------------------------------------------------------------ Symbols
     void symbolsConvertEditAndPlayThroughTheUi() {
         s->setActiveLayer(layerId);

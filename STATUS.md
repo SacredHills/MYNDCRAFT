@@ -295,6 +295,15 @@ Limitations (honest list):
 - 3D Scene panel node checkbox: the list is no longer rebuilt while its own check event is being handled. I could not reproduce a crash from the node checkboxes in tests (with or without this change), so if it still crashes on the new build please tell me exactly what was clicked.
 - Fix: workspaces came back different depending on the previous one (Qt leaves panels a saved layout doesn't mention where they were, and hidden panels weren't remembered). Every restore now starts from all panels undocked, and hidden panels are stored with the layout (old saved layouts still load). Test cycles all workspaces and compares panel visibility/placement. Not hand-tested on Windows.
 
+## Round of fixes after the docking change (implemented, headless-tested; not yet hand-tested on Windows)
+- **Workspace on restart:** on a fresh start the saved layout was restored onto panels the docking library had not been told about yet, so it was rejected and the app fell back to the factory Drawing layout. The panels are now registered first. Settings are flushed to disk right after each change. Test closes the window and starts a new one.
+- **Double-click in the timeline** adds a keyframe: on a property row for that property, on a layer's own row for all of its properties (one undo step; the layer expands to show them). Double-click on an existing key or on an animation layer's own row does nothing.
+- **Canvas background:** View > Canvas Background (White / Black / Transparent / Custom). Undoable, saved with the project, shows the checkerboard; New Document and Export Animation already had a transparent option.
+- **Color & style** moved into a strip at the bottom of the tool bar (the "Color & Style" window no longer exists, so older saved layouts simply lose that panel).
+- **Vector anchor points:** with the Select tool, the points of the selected shape(s) are always drawn and can be grabbed and moved directly (before: only while holding Ctrl or after double-clicking). This is also what makes the shape morph usable: Animation > Create Shape Tween… leaves you editing the END shape; click the shape, drag its points, then turn off Edit End Shape. Test does this with real mouse drags.
+- **Not done: GPU.** Everything (2D compositing and the 3D viewport) still renders on the CPU, and the 3D renderer uses one thread. A GPU backend (QRhi) is a large separate piece of work and could not be verified without a GPU here, so nothing was half-added.
+- **Not done: keyframing many shapes freely** (more than a start and an end shape, edited by just moving points at a later frame, as in After Effects). The current shape tween has exactly two shapes.
+
 ## Next tasks
 1. Phase 8: unified 2D/3D composition (awaiting go-ahead).
 2. Visual tween spans in the timeline, swapping an instance's symbol, per-instance Movie Clip play/stop; FBX animation; clip blocks on the timeline.
