@@ -1,5 +1,7 @@
 #include "Scene3D/Scene3D.h"
 
+#include <limits>
+
 #include <QBuffer>
 #include <QDataStream>
 #include <QJsonArray>
@@ -72,6 +74,19 @@ QVector3D eulerFromMatrix(const QMatrix4x4& m) {
     else { x = std::atan2(-m12, m11); z = 0; }
     const double d = 180.0 / M_PI;
     return QVector3D(float(x * d), float(y * d), float(z * d));
+}
+
+QVector3D eulerNear(const QVector3D& e, const QVector3D& ref) {
+    auto unwrap = [](float v, float r) { return v + 360.0f * std::round((r - v) / 360.0f); };
+    const QVector3D alts[2] = {e, QVector3D(e.x() + 180.0f, 180.0f - e.y(), e.z() + 180.0f)};
+    QVector3D best = e;
+    float bestD = std::numeric_limits<float>::max();
+    for (const QVector3D& a : alts) {
+        const QVector3D c(unwrap(a.x(), ref.x()), unwrap(a.y(), ref.y()), unwrap(a.z(), ref.z()));
+        const float d = (c - ref).lengthSquared();
+        if (d < bestD) { bestD = d; best = c; }
+    }
+    return best;
 }
 
 void decomposeMatrix(const QMatrix4x4& m, QVector3D* t, QVector3D* eulerDeg, QVector3D* s) {

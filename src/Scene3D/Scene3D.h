@@ -184,6 +184,10 @@ struct Scene3D {
 
 // Euler (degrees, same convention as Node3D) <-> matrix helpers.
 QVector3D eulerFromMatrix(const QMatrix4x4& m);
+// The same orientation as `e` written as the Euler triple (degrees) closest to `ref`. A rotation has two Euler triples per turn
+// (x,y,z) and (x+180, 180-y, z+180); picking the wrong one, or one a whole turn away, makes keyframes between two poses swing through a
+// large detour (a camera that rolls although only yaw/pitch were keyed).
+QVector3D eulerNear(const QVector3D& e, const QVector3D& ref);
 void decomposeMatrix(const QMatrix4x4& m, QVector3D* t, QVector3D* eulerDeg, QVector3D* s);
 
 // Primitive meshes so a scene can be built (and tested) without importing anything.

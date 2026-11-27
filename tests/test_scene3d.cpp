@@ -28,6 +28,27 @@ class TestScene3D : public QObject {
         return s.addNode(l);
     }
 private slots:
+    void rotatingPastNinetyDegreesKeepsTheNearbyEulerAnglesSoKeyframesDoNotDetour() {
+        // a camera yawed to 80 degrees, then turned another 40 degrees about the world Y axis (what the rotate gizmo does)
+        Node3D cam; cam.rotation = {-10, 80, 0};
+        QMatrix4x4 R; R.rotate(40, 0, 1, 0);
+        QMatrix4x4 nw = R * cam.localMatrix();
+        QVector3D t, raw, sc;
+        decomposeMatrix(nw, &t, &raw, &sc);
+        // the raw decomposition lands on the far-away equivalent triple (what used to be keyed), which would make a 0 -> 1 interpolation swing and roll
+        QVERIFY(std::abs(raw.z()) > 90);
+        const QVector3D near = eulerNear(raw, cam.rotation);
+        QVERIFY2((near - QVector3D(-10, 120, 0)).length() < 0.01, qPrintable(QString("%1 %2 %3").arg(near.x()).arg(near.y()).arg(near.z())));
+        Node3D a; a.rotation = near;
+        for (int i = 0; i < 16; ++i) QVERIFY(std::abs(a.localMatrix().constData()[i] - nw.constData()[i]) < 1e-3);   // still the same orientation
+        // halfway between the two keyed poses is a pure yaw of 100 degrees with no roll
+        const QVector3D mid = (cam.rotation + near) * 0.5f;
+        QVERIFY(std::abs(mid.z()) < 0.01 && std::abs(mid.y() - 100) < 0.01);
+        // whole turns are unwrapped too
+        QVERIFY((eulerNear(QVector3D(0, 10, 0), QVector3D(0, 370, 355)) - QVector3D(0, 370, 360)).length() < 0.01);
+    }
+
+private slots:
     void eulerRoundTripsThroughMatrices() {
         for (QVector3D e : {QVector3D(10, 20, 30), QVector3D(-45, 60, 170), QVector3D(0, 89, 0), QVector3D(30, 0, -80)}) {
             Node3D n; n.rotation = e; n.position = {1, 2, 3}; n.scale = {2, 3, 4};

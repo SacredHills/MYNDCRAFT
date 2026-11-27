@@ -378,7 +378,8 @@ public:
             QMatrix4x4 nw; nw.translate(m_origin); nw = nw * R * withoutTranslation(m_startWorld);
             const QMatrix4x4 local = pinv * nw;
             QVector3D t, e, sck; decomposeMatrix(local, &t, &e, &sck);
-            fn = [id, e](Scene3D& s) { Node3D* n = s.node(id); if (!n || n->rotation == e) return false; n->rotation = e; return true; };
+            // the same orientation, written as the Euler angles nearest to the current ones (keyframes then interpolate the short way)
+            fn = [id, e0 = e](Scene3D& s) { Node3D* n = s.node(id); if (!n) return false; const QVector3D e = eulerNear(e0, n->rotation); if (n->rotation == e) return false; n->rotation = e; return true; };
             break;
         }
         case Viewport3D::Mode::Scale: {
