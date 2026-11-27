@@ -40,6 +40,7 @@ public:
     QUuid duplicateSelected();
     bool setSceneCamera(const QUuid& node);
     bool reparentNode(const QUuid& node, const QUuid& newParent);
+    bool moveNode(const QUuid& node, const QUuid& newParent, const QUuid& ref, bool after);
     void refresh();
 signals:
     void sceneLayerActivated();      // a 3D layer was created or activated: the main window shows the 3D panels

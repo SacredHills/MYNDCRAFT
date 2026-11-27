@@ -425,6 +425,41 @@ private slots:
         w->workspaces()->resetCurrent();                                // leave the stored layouts clean for other tests
     }
 
+    void draggingInTheObjectListReordersAndOnlyGroupsTakeThingsInside() {
+        const QUuid cube = buildScene();
+        const QUuid grp = a->createGroup();
+        QUuid other;
+        for (const Node3D& n : scene()->nodes) if (n.kind == NodeKind::Mesh && n.id != cube) { other = n.id; break; }
+        if (other.isNull()) { a->createGroup(); for (const Node3D& n : scene()->nodes) if (n.kind == NodeKind::Group && n.id != grp) other = n.id; }
+        QVERIFY(!other.isNull());
+        auto* panel = w->scene3dPanel();
+        auto parentOf = [&](const QUuid& id) { return scene()->node(id)->parent; };
+        auto indexOf = [&](const QUuid& id) { int i = 0; for (const Node3D& n : scene()->nodes) { if (n.id == id) return i; ++i; } return -1; };
+        // dropping ON a plain object does not make it a folder: the dragged one lands beside it
+        if (scene()->node(other)->kind != NodeKind::Group) {
+            panel->dropOn(cube, other, 0);
+            QVERIFY(parentOf(cube) == parentOf(other));
+            QCOMPARE(indexOf(cube), indexOf(other) + 1);
+        }
+        // above and below any row
+        panel->dropOn(cube, other, 1);
+        QCOMPARE(indexOf(cube) + 1, indexOf(other));
+        panel->dropOn(cube, other, 2);
+        QCOMPARE(indexOf(cube), indexOf(other) + 1);
+        // a group does take it inside; above it takes it out again, next to the group
+        panel->dropOn(cube, grp, 0);
+        QVERIFY(parentOf(cube) == grp);
+        panel->dropOn(cube, grp, 1);
+        QVERIFY(parentOf(cube) == parentOf(grp));
+        QCOMPARE(indexOf(cube) + 1, indexOf(grp));
+        // empty space: last root node
+        panel->dropOn(cube, QUuid(), 0);
+        QCOMPARE(indexOf(cube), int(scene()->nodes.size()) - 1);
+        // and it undoes
+        doc->undoStack()->undo();
+        QVERIFY(indexOf(cube) != int(scene()->nodes.size()) - 1);
+    }
+
     void foldedGroupsStayFoldedWhenOtherObjectsAreSelected() {
         const QUuid cube = buildScene();
         const QUuid grp = a->createGroup();
@@ -741,10 +776,10 @@ private slots:
     void hierarchyDragAndDropReparentsAndDeleteDuplicateWork() {
         const QUuid cube = buildScene();
         const QUuid grp = a->createGroup();
-        w->scene3dPanel()->dropOn(cube, grp);
+        w->scene3dPanel()->dropOn(cube, grp, 0);
         QCOMPARE(scene()->node(cube)->parent, grp);
         QCOMPARE(w->scene3dPanel()->tree()->topLevelItemCount(), 3);          // group, light, camera (cube moved under the group)
-        w->scene3dPanel()->dropOn(grp, cube);                                  // would be a cycle: refused
+        w->scene3dPanel()->dropOn(grp, cube, 0);                                  // would be a cycle: refused
         QVERIFY(scene()->node(grp)->parent.isNull());
         s->setSelectedNode(grp);
         const QUuid dup = a->duplicateSelected();

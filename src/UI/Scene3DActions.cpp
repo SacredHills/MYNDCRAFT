@@ -344,4 +344,10 @@ bool Scene3DActions::reparentNode(const QUuid& node, const QUuid& newParent) {
     return m_s->doc()->editScene3D(l->id, [&](Scene3D& s) { return s.reparent(node, newParent); }, tr("Reparent Node"));
 }
 
+bool Scene3DActions::moveNode(const QUuid& node, const QUuid& newParent, const QUuid& ref, bool after) {
+    Layer* l = m_s->active3DLayer();
+    if (!l || l->props.locked) return false;
+    return m_s->doc()->editScene3D(l->id, [&](Scene3D& s) { return s.moveNode(node, newParent, ref, after); }, tr("Move Node"));
+}
+
 }  // namespace mynd

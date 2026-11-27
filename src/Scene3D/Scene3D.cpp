@@ -328,6 +328,18 @@ bool Scene3D::reparent(const QUuid& id, const QUuid& newParent) {
     decomposeMatrix(local, &n->position, &n->rotation, &n->scale);
     return true;
 }
+bool Scene3D::moveNode(const QUuid& id, const QUuid& newParent, const QUuid& ref, bool after) {
+    if (id == ref || !node(id)) return false;
+    if (!ref.isNull()) { const Node3D* r = node(ref); if (!r || r->parent != newParent || isAncestor(id, ref)) return false; }
+    if (node(id)->parent != newParent && !reparent(id, newParent)) return false;
+    auto at = [&](const QUuid& u) { return std::find_if(nodes.begin(), nodes.end(), [&](const Node3D& n) { return n.id == u; }); };
+    const Node3D moved = *at(id);
+    nodes.erase(at(id));
+    if (ref.isNull()) { nodes.push_back(moved); return true; }
+    auto it = at(ref);
+    nodes.insert(after ? it + 1 : it, moved);
+    return true;
+}
 QUuid Scene3D::firstCamera() const {
     for (const auto& n : nodes) if (n.kind == NodeKind::Camera) return n.id;
     return {};

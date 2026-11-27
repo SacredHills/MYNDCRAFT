@@ -36,14 +36,21 @@ namespace {
 
 class NodeTree : public QTreeWidget {
 public:
-    std::function<void(const QUuid&, const QUuid&)> onDrop;
+    // dragged node, node dropped next to / onto (null = empty area), where: 0 on it, 1 above it, 2 below it
+    std::function<void(const QUuid&, const QUuid&, int)> onDrop;
 protected:
     void dropEvent(QDropEvent* e) override {
         QTreeWidgetItem* src = currentItem();
         QTreeWidgetItem* dst = itemAt(e->position().toPoint());
+        int where = 0;
+        switch (dropIndicatorPosition()) {
+        case QAbstractItemView::AboveItem: where = 1; break;
+        case QAbstractItemView::BelowItem: where = 2; break;
+        default: where = 0; break;
+        }
         e->ignore();                                     // the tree is rebuilt from the scene; Qt must not move items itself
         if (!src) return;
-        onDrop(QUuid(src->data(0, Qt::UserRole).toString()), dst ? QUuid(dst->data(0, Qt::UserRole).toString()) : QUuid());
+        onDrop(QUuid(src->data(0, Qt::UserRole).toString()), dst ? QUuid(dst->data(0, Qt::UserRole).toString()) : QUuid(), dst ? where : 0);
     }
 };
 
@@ -95,7 +102,7 @@ Scene3DPanel::Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent)
 
     auto* split = new QSplitter(Qt::Vertical);
     auto* nt = new NodeTree;
-    nt->onDrop = [this](const QUuid& n, const QUuid& p) { dropOn(n, p); };
+    nt->onDrop = [this](const QUuid& n, const QUuid& t, int w) { dropOn(n, t, w); };
     m_tree = nt;
     m_tree->setStyle(new LightCheckStyle); m_tree->style()->setParent(m_tree);
     m_tree->setHeaderHidden(true);
@@ -378,8 +385,16 @@ bool Scene3DPanel::setBaseTexture(const QImage& image) {
     }, tr("Set Texture"));
 }
 
-void Scene3DPanel::dropOn(const QUuid& node, const QUuid& newParent) {
-    m_a->reparentNode(node, newParent);
+// Only groups are folders: dropping ON a group puts the node inside it; dropping on anything else, or above/below any row, places the node
+// next to that row (same parent, before or after it). Dropping on empty space makes it a last root node.
+void Scene3DPanel::dropOn(const QUuid& node, const QUuid& target, int where) {
+    Layer* l = m_s->active3DLayer();
+    if (!l || !l->scene3d) return;
+    if (target.isNull()) { m_a->moveNode(node, QUuid(), QUuid(), false); return; }
+    const Node3D* t = l->scene3d->node(target);
+    if (!t) return;
+    if (where == 0 && t->kind == NodeKind::Group) { m_a->moveNode(node, target, QUuid(), false); return; }
+    m_a->moveNode(node, t->parent, target, where != 1);
 }
 
 void Scene3DPanel::editScene(const QString& text, const QString& key, const std::function<bool(Scene3D&)>& fn) {

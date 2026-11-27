@@ -46,7 +46,7 @@ public:
     QListWidget* placementList() const { return m_placeList; }
     QGroupBox* clipGroup() const { return m_gClips; }
     bool addSelectedClipToTimeline();                              // what "Add to Timeline" does
-    void dropOn(const QUuid& node, const QUuid& newParent);      // what a drag & drop in the tree does
+    void dropOn(const QUuid& node, const QUuid& target, int where);      // what a drag & drop in the tree does
     bool setBaseTexture(const QImage& img);                       // what "Texture…" does after the file is read
 
 private:

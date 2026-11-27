@@ -173,6 +173,9 @@ struct Scene3D {
     void removeNode(const QUuid& id);
     // Re-parents keeping the world transform; refuses cycles.
     bool reparent(const QUuid& id, const QUuid& newParent);
+    // Moves `id` under `newParent` (keeping its world transform) and places it among its new siblings right before (or, with `after`, right
+    // after) `ref`; a null `ref` puts it last. Refuses cycles and `ref` == `id`.
+    bool moveNode(const QUuid& id, const QUuid& newParent, const QUuid& ref, bool after);
     // World-space bounds of all visible meshes. Returns false for an empty scene.
     bool worldBounds(QVector3D* mn, QVector3D* mx) const;
     QUuid firstCamera() const;
