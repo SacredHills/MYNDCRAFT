@@ -404,6 +404,27 @@ private slots:
         QCOMPARE(sb.value(), 12.0);                        // 20 px x 1 step x 0.1, from the value at the start of the drag
     }
 
+    void theWorkspaceAndItsArrangementComeBackWhenTheAppIsOpenedAgain() {
+        w->workspaces()->apply("Animation");
+        QApplication::processEvents();
+        w->dock("history")->toggleView(false);                          // a personal change to the arrangement
+        QApplication::processEvents();
+        QVERIFY(w->dock("history")->isClosed());
+        doc->markSaved();
+        w->close();                                                     // saves the layout and the name of the workspace
+        QApplication::processEvents();
+        w.reset();
+        w = std::make_unique<MainWindow>();                             // second start: restored before the window is ever shown
+        QCOMPARE(w->workspaces()->current(), QString("Animation"));
+        QVERIFY(w->dock("history")->isClosed());
+        w->show();
+        QVERIFY(QTest::qWaitForWindowExposed(w.get()));
+        QVERIFY(w->dock("history")->isClosed());
+        QVERIFY(w->dock("timeline")->isVisible());
+        s = w->session(); doc = w->document(); a = w->scene3d(); vp = w->viewport3d();
+        w->workspaces()->resetCurrent();                                // leave the stored layouts clean for other tests
+    }
+
     void workspacesComeBackIdenticallyWhateverWasShownBefore() {
         auto snap = [&] {
             QStringList out;

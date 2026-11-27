@@ -35,16 +35,16 @@ QStringList workspaceNames() {
     return k;
 }
 QByteArray workspaceState(const QString& n) { return s().value("workspaces/" + n).toByteArray(); }
-void saveWorkspaceState(const QString& n, const QByteArray& st) { s().setValue("workspaces/" + n, st); }
+void saveWorkspaceState(const QString& n, const QByteArray& st) { s().setValue("workspaces/" + n, st); s().sync(); }
 void removeWorkspace(const QString& n) { s().remove("workspaces/" + n); }
 
 QByteArray windowGeometry() { return s().value("window/geometry").toByteArray(); }
-void setWindowGeometry(const QByteArray& g) { s().setValue("window/geometry", g); }
+void setWindowGeometry(const QByteArray& g) { s().setValue("window/geometry", g); s().sync(); }
 QByteArray presetLayout(const QString& n) { return s().value("presetLayouts/" + n).toByteArray(); }
-void savePresetLayout(const QString& n, const QByteArray& st) { s().setValue("presetLayouts/" + n, st); }
+void savePresetLayout(const QString& n, const QByteArray& st) { s().setValue("presetLayouts/" + n, st); s().sync(); }
 void removePresetLayout(const QString& n) { s().remove("presetLayouts/" + n); }
 QString lastWorkspace() { return s().value("window/workspace", "Drawing").toString(); }
-void setLastWorkspace(const QString& n) { s().setValue("window/workspace", n); }
+void setLastWorkspace(const QString& n) { s().setValue("window/workspace", n); s().sync(); }
 
 QString autosaveDir() {
     QString base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);

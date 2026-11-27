@@ -31,9 +31,13 @@ QByteArray WorkspaceManager::captureLayout() {
 
 bool WorkspaceManager::restoreLayout(const QByteArray& bytes) {
     if (!bytes.startsWith(kMagic)) return false;
-    if (!m_mgr->restoreState(bytes.mid(kMagic.size()))) return false;
+    // A saved layout can only be put back onto panels the docking system knows. On the first start of the app none has been placed
+    // yet, so build the standard arrangement first; restoring then moves them where they were.
+    for (CDockWidget* d : m_docks) if (d && !m_mgr->dockWidgetsMap().contains(d->objectName())) { applyPreset("Drawing"); break; }
+    const bool ok = m_mgr->restoreState(bytes.mid(kMagic.size()));
+    if (!ok) return false;
     for (CDockWidget* d : m_docks) {                       // the canvas can never be gone
-        if (d && d->objectName() == "dock.canvas" && (d->isClosed() || !d->isVisible())) { return false; }
+        if (d && d->objectName() == "dock.canvas" && (d->isClosed() || (m_win->isVisible() && !d->isVisible()))) { return false; }   // before the first show nothing is visible yet
     }
     return true;
 }
