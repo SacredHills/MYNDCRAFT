@@ -206,30 +206,45 @@ public:
         const QUuid id = m_v->m_s->selectedNode();
         const Node3D* n = sc.node(id);
         if (!n) return;
-        // bounding box of the node's meshes (including descendants)
+        // Bounding box of the node's meshes (including descendants), measured in the node's OWN frame and drawn through its world matrix,
+        // so it turns and moves with the object instead of growing into a larger axis-aligned box. Skinned (animated) meshes are measured
+        // from their deformed vertices so the box follows the pose that is on screen.
+        const QMatrix4x4 selWorld = sc.worldMatrix(id);
+        bool invertible = false;
+        const QMatrix4x4 toLocal = selWorld.inverted(&invertible);
         QVector3D lo(1e30f, 1e30f, 1e30f), hi(-1e30f, -1e30f, -1e30f); bool any = false;
-        std::function<void(const QUuid&)> walk = [&](const QUuid& i) {
+        auto grow = [&](const QVector3D& q) {
+            lo = QVector3D(std::min(lo.x(), q.x()), std::min(lo.y(), q.y()), std::min(lo.z(), q.z()));
+            hi = QVector3D(std::max(hi.x(), q.x()), std::max(hi.y(), q.y()), std::max(hi.z(), q.z()));
+            any = true;
+        };
+        std::function<void(const QUuid&, int)> walk = [&](const QUuid& i, int depth) {
+            if (depth > 128) return;
             const Node3D* c = sc.node(i);
             if (c && c->kind == NodeKind::Mesh) {
                 auto it = sc.meshes.find(c->mesh);
                 if (it != sc.meshes.end()) {
-                    QVector3D a, b; it->second->bounds(&a, &b);
-                    const QMatrix4x4 w = sc.worldMatrix(i);
-                    for (int k = 0; k < 8; ++k) {
-                        const QVector3D q = w.map(QVector3D(k & 1 ? b.x() : a.x(), k & 2 ? b.y() : a.y(), k & 4 ? b.z() : a.z()));
-                        lo = QVector3D(std::min(lo.x(), q.x()), std::min(lo.y(), q.y()), std::min(lo.z(), q.z()));
-                        hi = QVector3D(std::max(hi.x(), q.x()), std::max(hi.y(), q.y()), std::max(hi.z(), q.z()));
-                        any = true;
+                    std::shared_ptr<const Mesh> skinned;
+                    if (it->second->positions.size() <= 400000) skinned = skinnedMeshFor(sc, *c);       // (huge skinned meshes: rest-pose box)
+                    if (skinned) {
+                        for (const QVector3D& v : skinned->positions) grow(invertible ? toLocal.map(v) : v);
+                    } else {
+                        QVector3D a, b; it->second->bounds(&a, &b);
+                        const QMatrix4x4 m = invertible ? toLocal * sc.worldMatrix(i) : sc.worldMatrix(i);
+                        for (int k = 0; k < 8; ++k) grow(m.map(QVector3D(k & 1 ? b.x() : a.x(), k & 2 ? b.y() : a.y(), k & 4 ? b.z() : a.z())));
                     }
                 }
             }
-            for (const QUuid& ch : sc.childrenOf(i)) walk(ch);
+            for (const QUuid& ch : sc.childrenOf(i)) walk(ch, depth + 1);
         };
-        walk(id);
+        walk(id, 0);
         if (any) {
             p.setPen(QPen(QColor(255, 170, 40), 1, Qt::DashLine));
             const int edges[12][2] = {{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
-            auto corner = [&](int k) { return QVector3D(k & 1 ? hi.x() : lo.x(), k & 2 ? hi.y() : lo.y(), k & 4 ? hi.z() : lo.z()); };
+            auto corner = [&](int k) {
+                const QVector3D l(k & 1 ? hi.x() : lo.x(), k & 2 ? hi.y() : lo.y(), k & 4 ? hi.z() : lo.z());
+                return invertible ? selWorld.map(l) : l;
+            };
             for (auto& e : edges) {
                 QPointF a, b;
                 if (projectToScreen(cam, corner(e[0]), sz, &a) && projectToScreen(cam, corner(e[1]), sz, &b)) p.drawLine(a, b);

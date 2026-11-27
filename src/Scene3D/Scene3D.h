@@ -59,9 +59,13 @@ struct Material {
     QColor emissive{0, 0, 0};
     bool doubleSided = false;
     bool unlit = false;                  // flat: base colour (times texture) is shown as is, lights are ignored
+    // Texture repeat: the texture is tiled `repeatU` x `repeatV` times over the surface (the image always wraps around), and shifted by
+    // `offsetU/offsetV` (in tiles). 1 / 1 / 0 / 0 = the texture once, as the model's UVs say.
+    double repeatU = 1.0, repeatV = 1.0, offsetU = 0.0, offsetV = 0.0;
     bool operator==(const Material& o) const {
         return id == o.id && name == o.name && baseColor == o.baseColor && baseTexture == o.baseTexture && metallic == o.metallic &&
-               roughness == o.roughness && emissive == o.emissive && doubleSided == o.doubleSided && unlit == o.unlit;
+               roughness == o.roughness && emissive == o.emissive && doubleSided == o.doubleSided && unlit == o.unlit &&
+               repeatU == o.repeatU && repeatV == o.repeatV && offsetU == o.offsetU && offsetV == o.offsetV;
     }
 };
 

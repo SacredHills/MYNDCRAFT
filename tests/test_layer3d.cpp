@@ -97,6 +97,54 @@ class TestLayer3D : public QObject {
     }
     static bool nonWhite(const QColor& c) { return c.red() < 235 || c.green() < 235 || c.blue() < 235; }
 
+    void textureRepeatTilesTheImageAndSurvivesSaving() {
+        CompositionSettings cs; cs.width = 160; cs.height = 100; cs.durationFrames = 2; cs.background = Qt::white;
+        Document d(cs);
+        const QUuid scene = d.addScene3DLayer("Scene");
+        QUuid mat;
+        d.editScene3D(scene, [&](Scene3D& sc) {
+            QImage tex(64, 1, QImage::Format_ARGB32);                       // left half red, right half blue
+            for (int x = 0; x < 64; ++x) tex.setPixelColor(x, 0, x < 32 ? Qt::red : Qt::blue);
+            const QUuid tid = QUuid::createUuid(); sc.textures[tid] = tex;
+            Material m; m.id = QUuid::createUuid(); m.name = "Tiled"; m.baseColor = Qt::white; m.baseTexture = tid; m.unlit = true; m.doubleSided = true;
+            mat = m.id; sc.materials.push_back(m);
+            auto plane = makeCardPlane(3.2, 2); plane->parts = {{0, int(plane->indices.size()), mat}}; sc.meshes[plane->id] = plane;
+            Node3D n; n.kind = NodeKind::Mesh; n.name = "Plane"; n.mesh = plane->id; sc.addNode(n);
+            Node3D cam; cam.kind = NodeKind::Camera; cam.position = {0, 0, float(1.0 / std::tan(22.5 * M_PI / 180.0))};
+            sc.activeCamera = sc.addNode(cam);
+            return true; }, "Build");
+        auto render = [&](const Document& doc) {
+            const Layer* l = doc.findLayer(scene);
+            RenderOptions o; o.threads = 1;
+            return renderScene(*l->scene3d, sceneCamera(*l->scene3d, 1.6), QSize(160, 100), o);
+        };
+        auto isRedPx = [](const QColor& c) { return c.red() > 200 && c.blue() < 60; };
+        auto isBluePx = [](const QColor& c) { return c.blue() > 200 && c.red() < 60; };
+        // once: red on the left half, blue on the right
+        QImage img = render(d);
+        QVERIFY(isRedPx(img.pixelColor(40, 50)) && isBluePx(img.pixelColor(120, 50)));
+        // repeated twice across: red, blue, red, blue
+        d.editScene3D(scene, [&](Scene3D& sc) { sc.material(mat)->repeatU = 2; return true; }, "Repeat");
+        img = render(d);
+        QVERIFY(isRedPx(img.pixelColor(20, 50)));
+        QVERIFY(isBluePx(img.pixelColor(60, 50)));
+        QVERIFY(isRedPx(img.pixelColor(100, 50)));
+        QVERIFY(isBluePx(img.pixelColor(140, 50)));
+        // shifting by half a tile swaps the colours
+        d.editScene3D(scene, [&](Scene3D& sc) { sc.material(mat)->offsetU = 0.5; return true; }, "Offset");
+        img = render(d);
+        QVERIFY(isBluePx(img.pixelColor(20, 50)) && isRedPx(img.pixelColor(60, 50)));
+        // saved and reopened
+        QTemporaryDir dir; QString err;
+        QVERIFY2(ProjectIO::save(d, dir.filePath("t.studio"), &err), qPrintable(err));
+        LoadResult r = ProjectIO::load(dir.filePath("t.studio"));
+        QVERIFY2(r.doc, qPrintable(r.error));
+        const Material* back = r.doc->findLayer(scene)->scene3d->material(mat);
+        QVERIFY(back);
+        QCOMPARE(back->repeatU, 2.0); QCOMPARE(back->repeatV, 1.0); QCOMPARE(back->offsetU, 0.5);
+        QVERIFY(meanDiff(render(*r.doc), img) < 0.01);
+    }
+
 private slots:
     void theMultithreadedRendererGivesExactlyTheSameImageAsOneThreadAndIsFaster() {
         Comp c = buildComp();

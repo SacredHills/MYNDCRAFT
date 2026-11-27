@@ -218,6 +218,15 @@ ImportResult importGltfData(const QByteArray& data, const QString& baseDir, cons
         m.roughness = std::clamp(pbr["roughnessFactor"].toDouble(1.0), 0.0, 1.0);
         const QJsonObject bt = pbr["baseColorTexture"].toObject();
         if (bt.contains("index")) m.baseTexture = textureFor(bt["index"].toInt(-1));
+        {   // KHR_texture_transform: scale + offset (rotation is not supported). glTF's v points down and ours up, so v' = v*sy + (1 - sy - oy).
+            const QJsonObject tt = bt["extensions"].toObject()["KHR_texture_transform"].toObject();
+            const QJsonArray sc = tt["scale"].toArray(), of = tt["offset"].toArray();
+            const double sx = sc.size() == 2 ? sc[0].toDouble(1) : 1, sy = sc.size() == 2 ? sc[1].toDouble(1) : 1;
+            const double ox = of.size() == 2 ? of[0].toDouble(0) : 0, oy = of.size() == 2 ? of[1].toDouble(0) : 0;
+            if (std::isfinite(sx) && std::isfinite(sy) && std::isfinite(ox) && std::isfinite(oy)) {
+                m.repeatU = sx; m.repeatV = sy; m.offsetU = ox; m.offsetV = 1.0 - sy - oy;
+            }
+        }
         const QJsonArray em = mo["emissiveFactor"].toArray();
         if (em.size() == 3) m.emissive = QColor::fromRgbF(toSrgb(em[0].toDouble()), toSrgb(em[1].toDouble()), toSrgb(em[2].toDouble()));
         m.doubleSided = mo["doubleSided"].toBool(false);

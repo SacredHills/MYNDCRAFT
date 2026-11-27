@@ -425,6 +425,61 @@ private slots:
         w->workspaces()->resetCurrent();                                // leave the stored layouts clean for other tests
     }
 
+    void foldedGroupsStayFoldedWhenOtherObjectsAreSelected() {
+        const QUuid cube = buildScene();
+        const QUuid grp = a->createGroup();
+        doc->editScene3D(s->activeLayerId(), [&](Scene3D& sc) { return sc.reparent(cube, grp); }, "Into group");
+        QApplication::processEvents();
+        auto* tree = w->scene3dPanel()->tree();
+        auto itemOf = [&](const QUuid& id) -> QTreeWidgetItem* {
+            for (QTreeWidgetItemIterator it(tree); *it; ++it) if ((*it)->data(0, Qt::UserRole).toString() == id.toString()) return *it;
+            return nullptr;
+        };
+        QVERIFY(itemOf(grp) && itemOf(grp)->isExpanded());
+        tree->collapseItem(itemOf(grp));
+        QVERIFY(!itemOf(grp)->isExpanded());
+        // clicking other objects (selection changes rebuild the list) must not open the group again
+        for (int round = 0; round < 3; ++round)
+            for (const Node3D& n : scene()->nodes) if (n.id != cube) { s->setSelectedNode(n.id); QApplication::processEvents(); QVERIFY(!itemOf(grp)->isExpanded()); }
+        // opening it again is remembered as well
+        tree->expandItem(itemOf(grp));
+        s->setSelectedNode(scene()->activeCamera);
+        QApplication::processEvents();
+        QVERIFY(itemOf(grp)->isExpanded());
+    }
+
+    void theSelectionBoxTurnsAndMovesWithTheObjectInsteadOfStretching() {
+        const QUuid cube = buildScene();
+        doc->editScene3D(s->activeLayerId(), [&](Scene3D& sc) { sc.node(cube)->rotation = {0, 45, 0}; sc.node(cube)->position = {0.5f, 0.5f, 0}; return true; }, "Turn");
+        QApplication::processEvents();
+        auto orangeNear = [&](const QImage& img, QPointF p, int r) {
+            for (int y = int(p.y()) - r; y <= int(p.y()) + r; ++y) for (int x = int(p.x()) - r; x <= int(p.x()) + r; ++x) {
+                if (!img.rect().contains(x, y)) continue;
+                const QColor c = img.pixelColor(x, y);
+                if (c.red() > 200 && c.green() > 120 && c.green() < 220 && c.blue() < 120) return true;
+            }
+            return false;
+        };
+        auto check = [&](const char* what) {
+            QImage img = vp->canvas()->grab().toImage();
+            QSize sz; const RenderCamera cam = vp->currentCamera(&sz);
+            const QMatrix4x4 world = scene()->worldMatrix(cube);
+            // a point in the middle of each of the four vertical edges of the OBJECT's own box: the dashed line must pass there
+            int hits = 0;
+            for (int k = 0; k < 4; ++k) {
+                const QVector3D local((k & 1) ? 0.5f : -0.5f, 0.0f, (k & 2) ? 0.5f : -0.5f);
+                QPointF sp;
+                if (projectToScreen(cam, world.map(local), sz, &sp) && orangeNear(img, sp, 3)) ++hits;
+            }
+            QVERIFY2(hits >= 3, what);
+        };
+        check("rotated 45 degrees");
+        // moving it: the box goes along
+        doc->editScene3D(s->activeLayerId(), [&](Scene3D& sc) { sc.node(cube)->position = {-0.8f, 0.5f, 0.4f}; sc.node(cube)->rotation = {20, 70, 10}; return true; }, "Move");
+        QApplication::processEvents();
+        check("moved and tilted");
+    }
+
     void workspacesComeBackIdenticallyWhateverWasShownBefore() {
         auto snap = [&] {
             QStringList out;
@@ -704,6 +759,29 @@ private slots:
         QCOMPARE(px(200, 150), QColor(Qt::white));
         doc->undoStack()->redo();
         QVERIFY(s->active3DLayer() || px(200, 150).red() > 150);
+    }
+
+    void textureRepeatCanBeSetInTheMaterialPanelAndUndone() {
+        const QUuid cube = buildScene();
+        Scene3DPanel* p = w->scene3dPanel();
+        QImage tex(4, 4, QImage::Format_ARGB32); tex.fill(QColor(0, 200, 0));
+        QVERIFY(p->setBaseTexture(tex));
+        QApplication::processEvents();
+        const QUuid mid = scene()->meshes.at(scene()->node(cube)->mesh)->parts[0].material;
+        QVERIFY(p->repeatField(0)->isEnabled());
+        QCOMPARE(p->repeatField(0)->value(), 1.0);
+        p->repeatField(0)->setValue(4.0);
+        p->repeatField(1)->setValue(2.5);
+        QCOMPARE(scene()->material(mid)->repeatU, 4.0);
+        QCOMPARE(scene()->material(mid)->repeatV, 2.5);
+        p->offsetField(0)->setValue(0.25);
+        QCOMPARE(scene()->material(mid)->offsetU, 0.25);
+        doc->undoStack()->undo();
+        QCOMPARE(scene()->material(mid)->offsetU, 0.0);
+        QApplication::processEvents();
+        QCOMPARE(p->repeatField(0)->value(), 4.0);                          // the panel follows
+        doc->undoStack()->undo(); doc->undoStack()->undo();
+        QCOMPARE(scene()->material(mid)->repeatU, 1.0);
     }
 
     void texturesCanBeAssignedRenderAndSurviveSaving() {

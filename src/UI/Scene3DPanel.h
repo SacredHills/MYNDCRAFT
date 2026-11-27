@@ -1,6 +1,8 @@
 #pragma once
 #include <QColor>
 #include <QTreeWidget>
+#include <QSet>
+#include <QUuid>
 #include <QWidget>
 
 #include "UI/EditorSession.h"
@@ -28,6 +30,8 @@ public:
     QTreeWidget* tree() const { return m_tree; }
     QDoubleSpinBox* posField(int axis) const { return m_pos[axis]; }
     QDoubleSpinBox* roughnessField() const { return m_rough; }
+    QDoubleSpinBox* repeatField(int axis) const { return axis == 0 ? m_repU : m_repV; }
+    QDoubleSpinBox* offsetField(int axis) const { return axis == 0 ? m_offU : m_offV; }
     QDoubleSpinBox* intensityField() const { return m_intensity; }
     QToolButton* stopwatch(const QString& what) const { for (const KeyRow& r : m_keyRows) if (r.what == what) return r.watch; return nullptr; }
     QToolButton* keyButton(const QString& what) const { for (const KeyRow& r : m_keyRows) if (r.what == what) return r.key; return nullptr; }
@@ -60,6 +64,7 @@ private:
     EditorSession* m_s;
     Scene3DActions* m_a;
     QTreeWidget* m_tree;
+    QSet<QUuid> m_collapsed;                                  // groups the user folded: they stay folded when the list is rebuilt
     bool m_inItemEdit = false, m_treeRebuildQueued = false;   // a tree item's own change signal is running: do not delete it
     bool m_updating = false;
     QGroupBox *m_gXform, *m_gMat, *m_gLight, *m_gCam, *m_gScene;
@@ -67,6 +72,7 @@ private:
     QComboBox* m_matCombo;
     QPushButton *m_baseColor, *m_emissive, *m_texture, *m_clearTexture;
     QDoubleSpinBox *m_rough, *m_metal;
+    QDoubleSpinBox *m_repU, *m_repV, *m_offU, *m_offV;
     QCheckBox* m_double;
     QComboBox* m_lightType;
     QPushButton* m_lightColor;

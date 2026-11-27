@@ -1,5 +1,7 @@
 #include "UI/Scene3DPanel.h"
 
+#include <QScrollBar>
+
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
@@ -157,6 +159,16 @@ Scene3DPanel::Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent)
     m_texture = new QPushButton(tr("Texture…")); m_clearTexture = new QPushButton(tr("Remove"));
     th->addWidget(m_texture); th->addWidget(m_clearTexture);
     fm->addRow(tr("Base texture"), th);
+    // texture repeat: how many times the image tiles across the surface, and where it starts
+    m_repU = spin(-10000, 10000, 0.25, 3, this); m_repV = spin(-10000, 10000, 0.25, 3, this);
+    m_offU = spin(-10000, 10000, 0.05, 3, this); m_offV = spin(-10000, 10000, 0.05, 3, this);
+    const QString repTip = tr("How many times the texture repeats across the surface (1 = once). Drag or type; negative mirrors it.");
+    m_repU->setToolTip(repTip); m_repV->setToolTip(repTip);
+    m_offU->setToolTip(tr("Shifts the texture, in tiles")); m_offV->setToolTip(tr("Shifts the texture, in tiles"));
+    auto* rh = new QHBoxLayout; rh->addWidget(m_repU); rh->addWidget(m_repV);
+    fm->addRow(tr("Repeat (U, V)"), rh);
+    auto* oh = new QHBoxLayout; oh->addWidget(m_offU); oh->addWidget(m_offV);
+    fm->addRow(tr("Offset (U, V)"), oh);
     il->addWidget(m_gMat);
 
     m_gLight = new QGroupBox(tr("Light"));
@@ -216,6 +228,13 @@ Scene3DPanel::Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent)
     lay->addWidget(split, 1);
 
     // ---- wiring ----
+    auto foldState = [this](QTreeWidgetItem* it, bool open) {
+        if (m_updating || !it) return;
+        const QUuid id(it->data(0, Qt::UserRole).toString());
+        if (open) m_collapsed.remove(id); else m_collapsed.insert(id);
+    };
+    connect(m_tree, &QTreeWidget::itemExpanded, this, [foldState](QTreeWidgetItem* it) { foldState(it, true); });
+    connect(m_tree, &QTreeWidget::itemCollapsed, this, [foldState](QTreeWidgetItem* it) { foldState(it, false); });
     connect(m_tree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* it, QTreeWidgetItem*) {
         if (m_updating) return;
         m_s->setSelectedNode(it ? QUuid(it->data(0, Qt::UserRole).toString()) : QUuid());
@@ -253,6 +272,15 @@ Scene3DPanel::Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent)
         if (img.isNull()) { QMessageBox::warning(this, tr("Texture"), tr("That image could not be read.")); return; }
         setBaseTexture(img);
     });
+    auto matField = [this](QDoubleSpinBox* b, const QString& text, const QString& key, double Material::*field) {
+        connect(b, &QDoubleSpinBox::valueChanged, this, [this, text, key, field](double v) {
+            if (!m_updating) editMaterial(text, key, [v, field](Material& m) { if (m.*field == v) return false; m.*field = v; return true; });
+        });
+    };
+    matField(m_repU, tr("Texture Repeat"), "m3d:repu", &Material::repeatU);
+    matField(m_repV, tr("Texture Repeat"), "m3d:repv", &Material::repeatV);
+    matField(m_offU, tr("Texture Offset"), "m3d:offu", &Material::offsetU);
+    matField(m_offV, tr("Texture Offset"), "m3d:offv", &Material::offsetV);
     connect(m_clearTexture, &QPushButton::clicked, this, [this] { editMaterial(tr("Remove Texture"), {}, [](Material& m) { if (m.baseTexture.isNull()) return false; m.baseTexture = QUuid(); return true; }); });
 
     // light
@@ -491,6 +519,7 @@ void Scene3DPanel::rebuildTree() {
         return;
     }
     const Layer* l = m_s->active3DLayer();
+    const int scroll = m_tree->verticalScrollBar()->value();
     m_updating = true;
     m_tree->clear();
     if (l) {
@@ -506,11 +535,12 @@ void Scene3DPanel::rebuildTree() {
                 it->setCheckState(0, n->visible ? Qt::Checked : Qt::Unchecked);
                 if (id == m_s->selectedNode()) m_tree->setCurrentItem(it);
                 add(id, it, depth + 1);
-                it->setExpanded(true);
+                it->setExpanded(!m_collapsed.contains(id));
             }
         };
         add(QUuid(), nullptr, 0);
     }
+    m_tree->verticalScrollBar()->setValue(scroll);
     m_updating = false;
 }
 
@@ -550,6 +580,8 @@ void Scene3DPanel::refreshInspector() {
                 m_baseC = m->baseColor; m_emisC = m->emissive;
                 paintColor(m_baseColor, m_baseC); paintColor(m_emissive, m_emisC);
                 setSpin(m_rough, m->roughness); setSpin(m_metal, m->metallic);
+                setSpin(m_repU, m->repeatU); setSpin(m_repV, m->repeatV); setSpin(m_offU, m->offsetU); setSpin(m_offV, m->offsetV);
+                for (QDoubleSpinBox* b : {m_repU, m_repV, m_offU, m_offV}) b->setEnabled(!m->baseTexture.isNull());
                 m_double->setChecked(m->doubleSided);
                 m_clearTexture->setEnabled(!m->baseTexture.isNull());
                 m_texture->setText(m->baseTexture.isNull() ? tr("Texture…") : tr("Change…"));

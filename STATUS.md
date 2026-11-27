@@ -314,6 +314,12 @@ Limitations (honest list):
 - Measured in the 2-core sandbox: 1200x720 scene with 15 spheres and a card, 143 ms single-threaded vs 88 ms banded. Expect more on a machine with more cores; not measured on Windows.
 - Not threaded yet: 2D compositing, drawing tools, playback frame generation and model import still run on the UI thread, so the interface can still stall during heavy work. `RenderOptions::threads` forces a thread count (1 = old behaviour).
 
+## 3D fixes: folded groups, selection box, texture repeat (implemented, headless-tested; not yet hand-tested on Windows)
+- **Folded groups** in the 3D Scene list stay folded when other objects are selected (the list used to re-expand everything on every rebuild); scroll position is kept too.
+- **Selection box** is measured in the selected object's own frame and drawn through its world matrix, so it turns and moves with the object instead of becoming a bigger axis-aligned box. Skinned (animated) meshes are measured from their deformed vertices (meshes over 400k vertices fall back to the rest-pose box, to keep the viewport responsive).
+- **Texture repeat:** Material panel has Repeat (U, V) and Offset (U, V) for the base texture (drag or type; negative mirrors). Stored in the project, applied by the renderer (the image already wrapped), undoable. glTF `KHR_texture_transform` scale/offset on the base colour texture is imported (its rotation is not).
+- Only the base colour texture exists as a texture slot, so repeat applies to it only.
+
 ## Next tasks
 1. Phase 8: unified 2D/3D composition (awaiting go-ahead).
 2. Visual tween spans in the timeline, swapping an instance's symbol, per-instance Movie Clip play/stop; FBX animation; clip blocks on the timeline.

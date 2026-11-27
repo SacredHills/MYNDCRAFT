@@ -121,6 +121,7 @@ struct ShadeMat {
     bool doubleSided;
     bool unlit = false;
     const QImage* tex = nullptr;
+    float repU = 1, repV = 1, offU = 0, offV = 0;     // texture repeat / offset
 };
 
 QVector3D rgb(const QColor& c) { return QVector3D(float(c.redF()), float(c.greenF()), float(c.blueF())); }
@@ -146,7 +147,7 @@ Frag shade(const ShadeMat& m, QVector3D P, QVector3D N, const QVector2D& uv, boo
     QVector3D base = m.base;
     float alpha = m.alpha;
     if (m.tex && hasUv) {
-        const QVector4D t = sampleTex(*m.tex, uv.x(), uv.y());
+        const QVector4D t = sampleTex(*m.tex, uv.x() * m.repU + m.offU, uv.y() * m.repV + m.offV);
         base = QVector3D(base.x() * t.x(), base.y() * t.y(), base.z() * t.z());
         alpha *= t.w();
     }
@@ -367,6 +368,7 @@ QImage renderScene(const Scene3D& s, const RenderCamera& cam, const QSize& size,
             if (mat) {
                 sm.base = rgb(mat->baseColor); sm.alpha = float(mat->baseColor.alphaF()); sm.emissive = rgb(mat->emissive);
                 sm.metallic = float(mat->metallic); sm.roughness = float(mat->roughness); sm.doubleSided = mat->doubleSided; sm.unlit = mat->unlit;
+                sm.repU = float(mat->repeatU); sm.repV = float(mat->repeatV); sm.offU = float(mat->offsetU); sm.offV = float(mat->offsetV);
                 auto t = tex.find(mat->baseTexture);
                 if (t != tex.end()) sm.tex = &t->second;
             } else { sm.base = QVector3D(0.78f, 0.78f, 0.78f); sm.alpha = 1; sm.metallic = 0; sm.roughness = 0.6f; sm.doubleSided = false; }

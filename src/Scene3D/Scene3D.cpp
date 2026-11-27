@@ -429,6 +429,8 @@ QJsonObject Scene3D::toJson() const {
         j["id"] = m.id.toString(QUuid::WithoutBraces); j["name"] = m.name; j["baseColor"] = colorStr(m.baseColor);
         if (!m.baseTexture.isNull()) j["texture"] = m.baseTexture.toString(QUuid::WithoutBraces);
         j["metallic"] = m.metallic; j["roughness"] = m.roughness; j["emissive"] = colorStr(m.emissive); j["doubleSided"] = m.doubleSided; if (m.unlit) j["unlit"] = true;
+        if (m.repeatU != 1.0 || m.repeatV != 1.0) { j["repeatU"] = m.repeatU; j["repeatV"] = m.repeatV; }
+        if (m.offsetU != 0.0 || m.offsetV != 0.0) { j["offsetU"] = m.offsetU; j["offsetV"] = m.offsetV; }
         ma.append(j);
     }
     o["materials"] = ma;
@@ -516,6 +518,11 @@ bool Scene3D::fromJson(const QJsonObject& o, Scene3D& out, QString* err) {
         m.emissive = colorFrom(j["emissive"].toString(), Qt::black);
         m.doubleSided = j["doubleSided"].toBool(false);
         m.unlit = j["unlit"].toBool(false);
+        auto finite = [](double v, double def, double lo, double hi) { return std::isfinite(v) ? std::clamp(v, lo, hi) : def; };
+        m.repeatU = finite(j["repeatU"].toDouble(1.0), 1.0, -10000.0, 10000.0);
+        m.repeatV = finite(j["repeatV"].toDouble(1.0), 1.0, -10000.0, 10000.0);
+        m.offsetU = finite(j["offsetU"].toDouble(0.0), 0.0, -10000.0, 10000.0);
+        m.offsetV = finite(j["offsetV"].toDouble(0.0), 0.0, -10000.0, 10000.0);
         out.materials.push_back(m);
     }
     out.clips.clear(); out.placements.clear(); out.skins.clear();
