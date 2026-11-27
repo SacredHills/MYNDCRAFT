@@ -322,31 +322,38 @@ void LayerPanel::ungroupActive() {
 }
 
 // =============================================================== Style panel
-static void setSwatch(QToolButton* b, const QColor& c) { b->setIcon(icons::colorSwatch(c, 24)); b->setIconSize({24, 24}); }
+static void setSwatch(QToolButton* b, const QColor& c) { const int n = std::max(10, b->width() - 4); b->setIcon(icons::colorSwatch(c, n)); b->setIconSize({n, n}); }
 
-// A compact strip that sits at the bottom of the tool bar (like the swatches at the bottom of a toolbox).
+// A narrow strip at the bottom of the tool bar, laid out like the toolbox of a paint program: overlapping foreground / background
+// swatches with a swap arrow, then fill and line (tick = used, swatch = its color) and the line width.
 StylePanel::StylePanel(EditorSession* s, QWidget* parent) : QWidget(parent), m_s(s) {
     setObjectName("styleStrip");
-    auto* g = new QGridLayout(this);
-    g->setContentsMargins(3, 4, 3, 4);
-    g->setSpacing(3);
-    m_fg = new QToolButton; m_fg->setToolTip(tr("Foreground color (brush, bucket, gradient start)"));
-    m_bg = new QToolButton; m_bg->setToolTip(tr("Background color (gradient end)"));
-    auto* swap = new QToolButton; swap->setText("⇄"); swap->setToolTip(tr("Swap colors (X)"));
-    swap->setAutoRaise(true);
-    g->addWidget(m_fg, 0, 0); g->addWidget(m_bg, 0, 1);
-    g->addWidget(swap, 1, 0, 1, 2);
-    m_fillOn = new QCheckBox(tr("Fill")); m_fillOn->setToolTip(tr("Vector shapes get a fill"));
-    m_fill = new QToolButton; m_fill->setToolTip(tr("Fill color of new vector shapes"));
-    m_strokeOn = new QCheckBox(tr("Line")); m_strokeOn->setToolTip(tr("Vector shapes get an outline"));
-    m_stroke = new QToolButton; m_stroke->setToolTip(tr("Outline color of new vector shapes"));
-    m_width = new QDoubleSpinBox; m_width->setRange(0.1, 500); m_width->setDecimals(1); m_width->setSuffix(" px");
-    m_width->setToolTip(tr("Outline width"));
-    g->addWidget(m_fillOn, 2, 0); g->addWidget(m_fill, 2, 1);
-    g->addWidget(m_strokeOn, 3, 0); g->addWidget(m_stroke, 3, 1);
-    g->addWidget(m_width, 4, 0, 1, 2);
-    for (QToolButton* b : {m_fg, m_bg, m_fill, m_stroke}) b->setFixedSize(30, 30);
-    setFixedWidth(88);
+    auto* v = new QVBoxLayout(this);
+    v->setContentsMargins(2, 4, 2, 4);
+    v->setSpacing(4);
+    auto* pair = new QWidget;                            // fg over bg, offset like overlapping cards
+    pair->setFixedSize(34, 34);
+    m_bg = new QToolButton(pair); m_bg->setGeometry(12, 12, 22, 22); m_bg->setToolTip(tr("Background color (gradient end)"));
+    m_fg = new QToolButton(pair); m_fg->setGeometry(0, 0, 22, 22); m_fg->setToolTip(tr("Foreground color (brush, bucket, gradient start)"));
+    auto* swap = new QToolButton(pair); swap->setGeometry(22, 0, 12, 12); swap->setText("⇄"); swap->setAutoRaise(true);
+    swap->setToolTip(tr("Swap colors (X)"));
+    QFont sf = swap->font(); sf.setPointSizeF(7); swap->setFont(sf);
+    m_fg->raise();
+    v->addWidget(pair, 0, Qt::AlignHCenter);
+    auto row = [&](QCheckBox*& on, QToolButton*& sw, const QString& tipOn, const QString& tipColor) {
+        auto* h = new QHBoxLayout; h->setContentsMargins(0, 0, 0, 0); h->setSpacing(1);
+        on = new QCheckBox; on->setToolTip(tipOn);
+        sw = new QToolButton; sw->setFixedSize(20, 20); sw->setToolTip(tipColor);
+        h->addWidget(on); h->addWidget(sw);
+        v->addLayout(h);
+    };
+    row(m_fillOn, m_fill, tr("Vector shapes get a fill"), tr("Fill color of new vector shapes"));
+    row(m_strokeOn, m_stroke, tr("Vector shapes get an outline"), tr("Outline color of new vector shapes"));
+    m_width = new QDoubleSpinBox; m_width->setRange(0.1, 500); m_width->setDecimals(1);
+    m_width->setButtonSymbols(QAbstractSpinBox::NoButtons); m_width->setAlignment(Qt::AlignCenter);
+    m_width->setToolTip(tr("Outline width in px"));
+    v->addWidget(m_width);
+    setFixedWidth(40);
 
     auto pick = [this](QToolButton* b, QColor cur, std::function<void(QColor)> apply) {
         connect(b, &QToolButton::clicked, this, [this, cur, apply, b] {
