@@ -346,3 +346,9 @@ No installers (MSI/DMG/AppImage/DEB/RPM) exist.
 
 ## Selection tools merged
 The Select tool (V) now covers Direct Selection and Transform Layer: on drawing/raster layers it transforms the whole layer (keyframeable); on vector/text layers it moves shapes, Alt+drag transforms the layer, Ctrl+drag edits points. The separate toolbar buttons and the A/W shortcuts were removed (internal tool classes remain). Verified by automated tests only; point editing via Ctrl is not yet exercised by a dedicated test.
+
+## Phase 8 finished: sorted translucency and render passes
+- **Translucent surfaces are sorted per triangle.** Cards and materials with alpha < 255 are no longer ordered per object: their triangles are collected and drawn far to near by depth along the view, so crossing or interleaved see-through surfaces blend correctly and independent of listing order (test with two crossing planes). Above 2,000,000 translucent triangles it falls back to per-object order to bound memory. Still bit-identical between 1 and N threads.
+- **Export passes** (PNG sequence only, Export Animation dialog): an alpha matte (`name_alpha_0001.png`, 8-bit grey) and a depth pass (`name_depth_0001.png`, 16-bit grey, white = nearest) plus `name_depth_range.txt` with each frame's real near/far distance in scene units.
+- **Depth pass limits (honest):** it covers 3D scene layers only (2D layers have no depth); the nearest opaque surface wins across scene layers; translucent surfaces and cards do not write depth; it is normalised per frame (so the range file is needed to recover distances), uses one sample per pixel (no anti-aliasing), and ignores group transforms/opacity. Not tested against any compositing app, only by the automated tests here.
+- **Not done:** blending cards with the 2D layers *below* the scene layer. A card blends against the 3D scene behind it only; the scene is rendered and cached independently of what lies beneath it.

@@ -15,6 +15,9 @@ struct ExportOptions {
     int lastFrame = 0;               // inclusive
     bool transparentBackground = false;
     int loopCount = 0;               // GIF only: 0 = loop forever
+    // PNG sequence only: extra passes written next to the colour frames.
+    bool alphaPass = false;          // base_alpha_0001.png: the coverage of the frame as a grayscale matte (white = opaque)
+    bool depthPass = false;          // base_depth_0001.png (16-bit, white = near) of the 3D layers + base_depth_range.txt with each frame's real near/far distances
     // Called after each frame with (framesDone, framesTotal); return false to cancel.
     std::function<bool(int, int)> progress;
 };

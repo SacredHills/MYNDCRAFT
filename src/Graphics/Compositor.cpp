@@ -1,3 +1,5 @@
+#include <limits>
+#include <cmath>
 #include "Graphics/Compositor.h"
 
 #include <mutex>
@@ -47,6 +49,46 @@ QImage Compositor::render(const Document& doc, const QRect& region, const Option
     collectCardSources(*doc.root(), cards);
     const Ctx ctx{opt.frame >= 0 ? opt.frame : doc.currentFrame(), &opt.onion, &doc, 0, opt.scene3dSupersample, &cards};
     drawGroup(p, *doc.root(), r, doc.canvasSize(), ctx);
+    return out;
+}
+
+static void collectVisibleScenes(const Layer& g, std::vector<const Layer*>& out) {
+    for (const auto& c : g.children) {
+        if (!c->props.visible) continue;
+        if (c->type == LayerType::Scene3D && c->scene3d) out.push_back(c.get());
+        if (c->isGroup()) collectVisibleScenes(*c, out);
+    }
+}
+
+QImage Compositor::renderDepth(const Document& doc, int frame, double* nearOut, double* farOut) {
+    const QSize size = doc.canvasSize();
+    QImage out(size, QImage::Format_Grayscale16);
+    out.fill(0);
+    if (size.isEmpty()) return out;
+    const float inf = std::numeric_limits<float>::infinity();
+    std::vector<float> best(size_t(size.width()) * size.height(), inf);
+    std::vector<const Layer*> scenes;
+    collectVisibleScenes(*doc.root(), scenes);
+    for (const Layer* l : scenes) {
+        const auto scene = sceneForDrawing(*l, frame, size, &doc, 1);
+        std::vector<float> d;
+        RenderOptions ro; ro.supersample = 1; ro.drawBackground = false; ro.distanceOut = &d;
+        renderScene(*scene, sceneCamera(*scene, double(size.width()) / size.height()), size, ro);
+        for (size_t i = 0; i < best.size() && i < d.size(); ++i) best[i] = std::min(best[i], d[i]);
+    }
+    float lo = inf, hi = 0;
+    for (float v : best) if (std::isfinite(v)) { lo = std::min(lo, v); hi = std::max(hi, v); }
+    if (nearOut) *nearOut = std::isfinite(lo) ? lo : 0;
+    if (farOut) *farOut = std::isfinite(lo) ? hi : 0;
+    if (!std::isfinite(lo)) return out;
+    const float span = std::max(hi - lo, 1e-6f);
+    for (int y = 0; y < size.height(); ++y) {
+        quint16* row = reinterpret_cast<quint16*>(out.scanLine(y));
+        for (int x = 0; x < size.width(); ++x) {
+            const float v = best[size_t(y) * size.width() + x];
+            row[x] = std::isfinite(v) ? quint16(std::lround(65535.0 * (hi - lo < 1e-6f ? 1.0 : 1.0 - double((v - lo) / span)) * 0.9 + 65535.0 * 0.1)) : 0;   // nearest = white, farthest surface = 10% grey, empty = black
+        }
+    }
     return out;
 }
 

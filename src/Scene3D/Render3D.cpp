@@ -1,6 +1,8 @@
 #include "Scene3D/Render3D.h"
 
 #include <QThread>
+#include <set>
+#include <limits>
 #include <QtConcurrent>
 
 #include <QPainter>
@@ -357,8 +359,9 @@ QImage renderScene(const Scene3D& s, const RenderCamera& cam, const QSize& size,
     for (const auto& [id, im] : s.textures) if (!im.isNull()) tex[id] = im.convertToFormat(QImage::Format_ARGB32);
 
     const QMatrix4x4 vp = cam.proj * cam.view;
-    // Opaque meshes first, then see-through ones (cards, translucent materials) from far to near, so overlapping translucent
-    // surfaces blend in a sensible order. (Per node, not per triangle: intersecting translucent meshes can still blend wrongly.)
+    // Opaque meshes first. See-through ones (cards, translucent materials) are collected as individual triangles and drawn afterwards from
+    // far to near by the triangle's depth along the view direction, so overlapping and even intersecting translucent surfaces blend in
+    // the right order. (A huge number of translucent triangles falls back to sorting per object, to bound memory.)
     auto translucent = [&](const Node3D& n) {
         if (!n.cardLayer.isNull()) return true;
         if (const Material* m = s.material(n.materialOverride)) return m->baseColor.alpha() < 255;
@@ -367,11 +370,21 @@ QImage renderScene(const Scene3D& s, const RenderCamera& cam, const QSize& size,
         return false;
     };
     std::vector<const Node3D*> order, late;
-    for (const auto& n : s.nodes) (translucent(n) ? late : order).push_back(&n);
+    size_t lateTriangles = 0;
+    for (const auto& n : s.nodes) {
+        if (!translucent(n)) { order.push_back(&n); continue; }
+        late.push_back(&n);
+        if (auto it = s.meshes.find(n.mesh); it != s.meshes.end()) lateTriangles += it->second->indices.size() / 3;
+    }
+    const bool sortTriangles = lateTriangles <= 2'000'000;
     std::sort(late.begin(), late.end(), [&](const Node3D* a, const Node3D* b) {
         return (s.worldMatrix(a->id).map(QVector3D(0, 0, 0)) - cam.eye).lengthSquared() > (s.worldMatrix(b->id).map(QVector3D(0, 0, 0)) - cam.eye).lengthSquared();
     });
     order.insert(order.end(), late.begin(), late.end());
+    struct TriJob { Vtx a, b, c; int mat; bool hasUv; float key; };
+    std::vector<TriJob> jobs;
+    std::vector<ShadeMat> jobMats;
+    std::set<const Node3D*> lateSet(late.begin(), late.end());
     for (const Node3D* np : order) {
         const Node3D& n = *np;
         if (n.kind != NodeKind::Mesh || !s.effectivelyVisible(n.id)) continue;
@@ -406,6 +419,23 @@ QImage renderScene(const Scene3D& s, const RenderCamera& cam, const QSize& size,
                 auto t = tex.find(mat->baseTexture);
                 if (t != tex.end()) sm.tex = &t->second;
             } else { sm.base = QVector3D(0.78f, 0.78f, 0.78f); sm.alpha = 1; sm.metallic = 0; sm.roughness = 0.6f; sm.doubleSided = false; }
+            if (sortTriangles && lateSet.count(np)) {          // see-through: queue its triangles for the sorted pass
+                jobMats.push_back(sm);
+                const int mi = int(jobMats.size()) - 1;
+                for (int i = part.firstIndex; i + 2 < part.firstIndex + part.indexCount; i += 3) {
+                    Vtx a = vs[mesh.indices[size_t(i)]], b = vs[mesh.indices[size_t(i) + 1]], c = vs[mesh.indices[size_t(i) + 2]];
+                    if (!hasN) {
+                        QVector3D fn = QVector3D::crossProduct(b.wpos - a.wpos, c.wpos - a.wpos);
+                        if (mirrored) fn = -fn;
+                        fn.normalize();
+                        a.nrm = b.nrm = c.nrm = fn;
+                    } else if (mirrored) { a.nrm = -a.nrm; b.nrm = -b.nrm; c.nrm = -c.nrm; }
+                    if (mirrored) std::swap(b, c);
+                    const QVector3D centre = (a.wpos + b.wpos + c.wpos) / 3.0f;
+                    jobs.push_back({a, b, c, mi, hasUv, -cam.view.map(centre).z()});     // distance in front of the camera
+                }
+                continue;
+            }
             auto drawTriangles = [&](Target& B) {
             for (int i = part.firstIndex; i + 2 < part.firstIndex + part.indexCount; i += 3) {
                 const uint32_t i0 = mesh.indices[size_t(i)], i1 = mesh.indices[size_t(i) + 1], i2 = mesh.indices[size_t(i) + 2];
@@ -429,6 +459,34 @@ QImage renderScene(const Scene3D& s, const RenderCamera& cam, const QSize& size,
             };
             if (bands.size() == 1) drawTriangles(bands[0]);
             else QtConcurrent::blockingMap(bands, drawTriangles);
+        }
+    }
+    if (!jobs.empty()) {
+        std::stable_sort(jobs.begin(), jobs.end(), [](const TriJob& x, const TriJob& y) { return x.key > y.key; });      // far to near
+        auto drawJobs = [&](Target& B) {
+            for (const TriJob& j : jobs) {
+                const QVector4D &c0 = j.a.clip, &c1 = j.b.clip, &c2 = j.c.clip;
+                if (c0.w() > 1e-7f && c1.w() > 1e-7f && c2.w() > 1e-7f) {
+                    const float y0s = (1 - (c0.y() / c0.w() * 0.5f + 0.5f)) * B.h, y1s = (1 - (c1.y() / c1.w() * 0.5f + 0.5f)) * B.h, y2s = (1 - (c2.y() / c2.w() * 0.5f + 0.5f)) * B.h;
+                    if (std::max({y0s, y1s, y2s}) < B.rowMin() - 1 || std::min({y0s, y1s, y2s}) > B.rowMax() + 1) continue;
+                }
+                drawClipped(B, j.a, j.b, j.c, jobMats[size_t(j.mat)], j.hasUv, cam.eye, lights, ambient);
+            }
+        };
+        if (bands.size() == 1) drawJobs(bands[0]);
+        else QtConcurrent::blockingMap(bands, drawJobs);
+    }
+    if (opt.distanceOut) {
+        const float inf = std::numeric_limits<float>::infinity();
+        std::vector<float>& out = *opt.distanceOut;
+        out.assign(size_t(size.width()) * size.height(), inf);
+        bool ok = false;
+        const QMatrix4x4 invProj = cam.proj.inverted(&ok);
+        if (ok) for (int y = 0; y < size.height(); ++y) for (int x = 0; x < size.width(); ++x) {
+            const float z = depth[size_t(y * ss + ss / 2) * W + size_t(x * ss + ss / 2)];     // NDC depth of the pixel's centre sample
+            if (z > 1.0f) continue;
+            const QVector4D v = invProj * QVector4D(0, 0, z, 1);
+            if (std::abs(v.w()) > 1e-12f) out[size_t(y) * size.width() + x] = std::abs(v.z() / v.w());
         }
     }
     if (ss == 1) return img;

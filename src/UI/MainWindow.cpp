@@ -874,11 +874,16 @@ void MainWindow::actExportAnimation() {
     first->setPrefix(tr("frame ")); last->setPrefix(tr("frame "));
     auto* transparent = new QCheckBox(tr("Transparent background"));
     auto* loops = new QSpinBox; loops->setRange(0, 65535); loops->setSpecialValueText(tr("forever"));
+    auto* alphaPass = new QCheckBox(tr("Also write an alpha matte (PNG sequence)"));
+    auto* depthPass = new QCheckBox(tr("Also write a depth pass of the 3D layers (PNG sequence)"));
+    depthPass->setToolTip(tr("16-bit grayscale, white = nearest. The real distance range of every frame is saved in a _depth_range.txt file."));
     form->addRow(tr("Format:"), fmt);
     form->addRow(tr("First frame:"), first);
     form->addRow(tr("Last frame:"), last);
     form->addRow(QString(), transparent);
     form->addRow(tr("GIF loops:"), loops);
+    form->addRow(QString(), alphaPass);
+    form->addRow(QString(), depthPass);
     auto* note = new QLabel(tr("Frames are numbered from the first one exported. Onion skin is never included. "
                                "No video encoder is built in; use the PNG sequence with ffmpeg for video."));
     note->setWordWrap(true); note->setMinimumWidth(360);
@@ -887,7 +892,8 @@ void MainWindow::actExportAnimation() {
     connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
     form->addRow(bb);
-    connect(fmt, &QComboBox::currentIndexChanged, &dlg, [loops](int i) { loops->setEnabled(i == 0); });
+    connect(fmt, &QComboBox::currentIndexChanged, &dlg, [=](int i) { loops->setEnabled(i == 0); alphaPass->setEnabled(i == 1); depthPass->setEnabled(i == 1); });
+    alphaPass->setEnabled(false); depthPass->setEnabled(false);
     if (dlg.exec() != QDialog::Accepted) return;
     if (last->value() < first->value()) { QMessageBox::warning(this, tr("Export Animation"), tr("The last frame comes before the first.")); return; }
 
@@ -898,6 +904,7 @@ void MainWindow::actExportAnimation() {
     exporter::ExportOptions o;
     o.firstFrame = first->value(); o.lastFrame = last->value();
     o.transparentBackground = transparent->isChecked(); o.loopCount = loops->value();
+    o.alphaPass = !gif && alphaPass->isChecked(); o.depthPass = !gif && depthPass->isChecked();
     QProgressDialog prog(tr("Exporting frames…"), tr("Cancel"), 0, o.lastFrame - o.firstFrame + 1, this);
     prog.setWindowModality(Qt::WindowModal); prog.setMinimumDuration(400);
     o.progress = [&prog](int done, int) { prog.setValue(done); QApplication::processEvents(); return !prog.wasCanceled(); };

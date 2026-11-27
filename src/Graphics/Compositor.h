@@ -34,6 +34,9 @@ public:
     };
     struct Ctx { int frame; const OnionSkin* onion; const SymbolResolver* syms = nullptr; int depth = 0; int ss3d = 1; const QSet<QUuid>* cards = nullptr; };
     static QImage render(const Document& doc, const QRect& region, const Options& opt);
+    // Depth pass of a frame: 16-bit grayscale, white = nearest, black = farthest or nothing 3D there. Made from every visible 3D scene layer
+    // (the nearest opaque surface wins; 2D layers have no depth). The range of real distances (scene units) is returned in *nearOut/*farOut.
+    static QImage renderDepth(const Document& doc, int frame, double* nearOut = nullptr, double* farOut = nullptr);
     static QImage render(const Document& doc) { return render(doc, doc.canvasRect(), Options{}); }
 
     // The 3D scene of `sceneLayer` at `frame` as it is drawn: animation applied and every card node showing the current content of its

@@ -255,6 +255,9 @@ bool writePngSequence(const Document& doc, const QString& dir, const QString& ba
     if (!QDir().mkpath(dir)) return fail("Could not create " + dir);
     const int count = opt.lastFrame - opt.firstFrame + 1;
     const int digits = std::max<int>(4, QString::number(count).size());
+    QString depthRanges = "# frame_number\tdocument_frame\tnear_distance\tfar_distance\n"
+                          "# depth pixel value 65535 = the nearest 3D surface of that frame (near_distance), about 6554 = the farthest (far_distance), 0 = no 3D surface.\n"
+                          "# Distances are in scene units in front of the camera; the value is linear in distance: v = 65535*(0.1 + 0.9*(far - d)/(far - near)).\n";
     for (int i = 0; i < count; ++i) {
         Compositor::Options co;
         co.includeBackground = !opt.transparentBackground;
@@ -264,7 +267,35 @@ bool writePngSequence(const Document& doc, const QString& dir, const QString& ba
         const QString file = QDir(dir).filePath(QString("%1_%2.png").arg(baseName).arg(i + 1, digits, 10, QChar('0')));
         if (!img.save(file, "PNG")) return fail("Could not write " + file);
         if (written) written->append(file);
+        const QString num = QString("%1").arg(i + 1, digits, 10, QChar('0'));
+        if (opt.alphaPass) {
+            Compositor::Options ao = co; ao.includeBackground = false;
+            const QImage rgba = Compositor::render(doc, doc.canvasRect(), ao).convertToFormat(QImage::Format_ARGB32);
+            QImage matte(rgba.size(), QImage::Format_Grayscale8);
+            for (int y = 0; y < rgba.height(); ++y) {
+                const QRgb* s = reinterpret_cast<const QRgb*>(rgba.constScanLine(y)); uchar* d = matte.scanLine(y);
+                for (int x = 0; x < rgba.width(); ++x) d[x] = uchar(qAlpha(s[x]));
+            }
+            const QString af = QDir(dir).filePath(QString("%1_alpha_%2.png").arg(baseName, num));
+            if (!matte.save(af, "PNG")) return fail("Could not write " + af);
+            if (written) written->append(af);
+        }
+        if (opt.depthPass) {
+            double dn = 0, df = 0;
+            const QImage dimg = Compositor::renderDepth(doc, co.frame, &dn, &df);
+            const QString df_ = QDir(dir).filePath(QString("%1_depth_%2.png").arg(baseName, num));
+            if (!dimg.save(df_, "PNG")) return fail("Could not write " + df_);
+            if (written) written->append(df_);
+            depthRanges += QString("%1\t%2\t%3\t%4\n").arg(i + 1).arg(co.frame).arg(dn, 0, 'f', 6).arg(df, 0, 'f', 6);
+        }
         if (opt.progress && !opt.progress(i + 1, count)) return fail("Export cancelled.");
+    }
+    if (opt.depthPass) {
+        QSaveFile f(QDir(dir).filePath(baseName + "_depth_range.txt"));
+        if (!f.open(QIODevice::WriteOnly)) return fail("Could not write the depth range file.");
+        f.write(depthRanges.toUtf8());
+        if (!f.commit()) return fail("Could not write the depth range file.");
+        if (written) written->append(QDir(dir).filePath(baseName + "_depth_range.txt"));
     }
     return true;
 }

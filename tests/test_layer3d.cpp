@@ -213,6 +213,47 @@ private slots:
     }
 
 private slots:
+    void translucentSurfacesThatCrossBlendTheSameWhicheverOrderTheyAreListedIn() {
+        auto render = [&](bool swap) {
+            Scene3D sc;
+            auto plane = makePlane(2.0); sc.meshes[plane->id] = plane;
+            auto mk = [&](QColor c, float rotY, const char* nm) {
+                Material m; m.id = QUuid::createUuid(); m.baseColor = c; m.unlit = true; m.doubleSided = true; sc.materials.push_back(m);
+                Node3D n; n.kind = NodeKind::Mesh; n.name = nm; n.mesh = plane->id; n.materialOverride = m.id; n.rotation = {90.0f, rotY, 0.0f}; return n;
+            };
+            Node3D a = mk(QColor(255, 0, 0, 128), 25.0f, "A"), b = mk(QColor(0, 0, 255, 128), -25.0f, "B");
+            if (swap) { sc.addNode(b); sc.addNode(a); } else { sc.addNode(a); sc.addNode(b); }
+            Node3D cam; cam.kind = NodeKind::Camera; cam.name = "Cam"; cam.position = {0.0f, 0.0f, 4.0f}; sc.activeCamera = sc.addNode(cam);
+            sc.background = Qt::white;
+            RenderOptions o; o.threads = 1;
+            return renderScene(sc, sceneCamera(sc, 1.0), QSize(120, 120), o);
+        };
+        const QImage x = render(false), y = render(true);
+        QVERIFY2(x == y, "listing order changed the blended result");
+        QVERIFY(x.pixelColor(60, 60) != QColor(Qt::white));
+    }
+
+    void theExportCanWriteAnAlphaMatteAndADepthPassNextToTheColourFrames() {
+        Comp c = buildComp();
+        QTemporaryDir dir; QVERIFY(dir.isValid());
+        exporter::ExportOptions o; o.firstFrame = 0; o.lastFrame = 1; o.alphaPass = true; o.depthPass = true;
+        QStringList files; QString err;
+        QVERIFY2(exporter::writePngSequence(*c.doc, dir.path(), "shot", o, &files, &err), qPrintable(err));
+        for (const char* f : {"shot_0001.png", "shot_alpha_0001.png", "shot_depth_0001.png", "shot_alpha_0002.png", "shot_depth_0002.png", "shot_depth_range.txt"})
+            QVERIFY2(QFileInfo::exists(dir.filePath(f)), f);
+        QImage depth(dir.filePath("shot_depth_0001.png"));
+        QCOMPARE(depth.format(), QImage::Format_Grayscale16);
+        const quint16 centre = reinterpret_cast<const quint16*>(depth.constScanLine(60))[100];
+        const quint16 corner = reinterpret_cast<const quint16*>(depth.constScanLine(2))[2];
+        QVERIFY2(centre > 6000, qPrintable(QString::number(centre)));
+        QCOMPARE(int(corner), 0);
+        const QImage alpha(dir.filePath("shot_alpha_0001.png"));
+        QCOMPARE(alpha.format(), QImage::Format_Grayscale8);
+        QCOMPARE(qGray(alpha.pixel(100, 60)), 255);
+        QFile r(dir.filePath("shot_depth_range.txt")); QVERIFY(r.open(QIODevice::ReadOnly));
+        QVERIFY(QString::fromUtf8(r.readAll()).contains("near_distance"));
+    }
+
     void theMultithreadedRendererGivesExactlyTheSameImageAsOneThreadAndIsFaster() {
         Comp c = buildComp();
         // a heavier scene: a grid of spheres plus the translucent card, so ordering of blended pixels matters
