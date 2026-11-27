@@ -292,6 +292,24 @@ private slots:
         QVERIFY(accepted > 100);                                                       // many mutations are harmless, so the importers are not just rejecting everything
     }
 
+    void aRunningImportCanBeCancelledAndReportsProgress() {
+        QTemporaryDir dir; QVERIFY(dir.isValid());
+        QFile o(dir.filePath("big.obj")); QVERIFY(o.open(QIODevice::WriteOnly));
+        QByteArray body;
+        for (int i = 0; i < 60000; ++i) body += "v " + QByteArray::number(i % 97) + " " + QByteArray::number(i % 89) + " 0\n";
+        body += "f 1 2 3\n";
+        o.write(body); o.close();
+        ImportControl stop; stop.cancel = true;
+        const ImportResult c = importModelFile(o.fileName(), 24.0, &stop);
+        QVERIFY(!c);
+        QVERIFY2(c.error.contains("cancelled"), qPrintable(c.error));
+        ImportControl go;
+        const ImportResult ok = importModelFile(o.fileName(), 24.0, &go);                // same file, not cancelled: imports
+        QVERIFY2(ok, qPrintable(ok.error));
+        QVERIFY(go.percent.load() > 0);                                                  // progress was reported
+        QVERIFY(!importCancelled());                                                     // the control is released after the call
+    }
+
     void dispatchByExtensionAndMissingFiles() {
         QVERIFY(!importModelFile("/nonexistent/thing.glb"));
         QTemporaryDir dir; QFile f(dir.filePath("x.stl")); f.open(QIODevice::WriteOnly); f.write("solid"); f.close();

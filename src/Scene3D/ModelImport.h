@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <QString>
 #include <QStringList>
 
@@ -17,9 +18,20 @@ struct ImportResult {
     explicit operator bool() const { return scene != nullptr; }
 };
 
+// Optional live control of a running import, shared with another thread: the importer reports how far it is and stops early (with the
+// error "Import cancelled.") soon after `cancel` is set. Importers poll it between meshes / lines / top-level records.
+struct ImportControl {
+    std::atomic<bool> cancel{false};
+    std::atomic<int> percent{0};          // 0..100, approximate
+};
+// Importers running on the calling thread read the control from here (set by importModelFile; null = none).
+void setImportControl(ImportControl* c);
+bool importCancelled();
+void importProgress(int percent);
+
 // `fps` converts animation times (seconds) to composition frames.
 qint64 maxModelFileBytes();                                                                       // largest model file accepted (64 GB sanity limit)
-ImportResult importModelFile(const QString& path, double fps = 24.0);                      // picks the importer from the extension
+ImportResult importModelFile(const QString& path, double fps = 24.0, ImportControl* control = nullptr);                      // picks the importer from the extension
 ImportResult importObjData(const QByteArray& data, const QString& baseDir, const QString& name);
 ImportResult importGltfData(const QByteArray& data, const QString& baseDir, const QString& name, double fps = 24.0);   // .gltf JSON or binary .glb
 ImportResult importFbxData(const QByteArray& data, const QString& baseDir, const QString& name);    // binary FBX 7.x

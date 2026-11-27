@@ -100,6 +100,10 @@ ImportResult importObjData(const QByteArray& data, const QString& baseDir, const
     int lineNo = 0;
     for (const QByteArray& rawLine : rawLines) {
         ++lineNo;
+        if ((lineNo & 0x3FFF) == 0) {
+            if (importCancelled()) { r.error = QObject::tr("Import cancelled."); return r; }
+            importProgress(int(90.0 * lineNo / std::max<qsizetype>(1, rawLines.size())));
+        }
         QString line = QString::fromUtf8(rawLine).trimmed();
         if (line.endsWith('\\')) { pending += line.chopped(1) + ' '; continue; }
         line = pending + line; pending.clear();

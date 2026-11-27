@@ -1,3 +1,7 @@
+#include <QTimer>
+#include <QProgressDialog>
+#include <QtConcurrent>
+#include <QFutureWatcher>
 #include "UI/Scene3DActions.h"
 
 #include <QFileDialog>
@@ -42,10 +46,7 @@ Scene3DActions::Scene3DActions(EditorSession* s, QWidget* dialogParent) : QObjec
     connect(importModel, &QAction::triggered, this, [this] {
         const QString path = QFileDialog::getOpenFileName(m_parent, tr("Import 3D Model"), QString(), modelFileFilter());
         if (path.isEmpty()) return;
-        QString err; QStringList warn;
-        if (importModelFile(path, &err, &warn).isNull()) { QMessageBox::warning(m_parent, tr("Import 3D Model"), err); return; }
-        if (!warn.isEmpty()) QMessageBox::information(m_parent, tr("Import 3D Model"), tr("Imported with notes:\n\n• %1").arg(warn.join("\n• ")));
-        else emit m_s->message(tr("Imported %1").arg(QFileInfo(path).fileName()));
+        importModelFileAsync(path);
     });
     connect(make3D, &QAction::triggered, this, [this](bool on) {
         const QUuid id = m_s->activeLayerId();
@@ -257,6 +258,45 @@ QUuid Scene3DActions::createCamera() {
 QUuid Scene3DActions::importModelFile(const QString& path, QString* error, QStringList* warnings) {
     if (!m_s->doc()) { if (error) *error = tr("No document is open."); return {}; }
     ImportResult r = mynd::importModelFile(path, m_s->doc()->comp().fps.fps());
+    return finishImport(path, r, error, warnings);
+}
+
+// Reading and decoding the model runs on a worker thread, so the program stays usable and a progress box with Cancel is shown; only the
+// final merge into the scene (fast) happens on the UI thread.
+void Scene3DActions::importModelFileAsync(const QString& path) {
+    if (!m_s->doc()) return;
+    if (m_importing) { emit m_s->message(tr("A model is already being imported.")); return; }
+    m_importing = true;
+    auto control = std::make_shared<ImportControl>();
+    const double fps = m_s->doc()->comp().fps.fps();
+    auto* watcher = new QFutureWatcher<ImportResult>(this);
+    auto* prog = new QProgressDialog(tr("Importing %1…").arg(QFileInfo(path).fileName()), tr("Cancel"), 0, 100, m_parent);
+    prog->setWindowTitle(tr("Import 3D Model"));
+    prog->setWindowModality(Qt::WindowModal);
+    prog->setMinimumDuration(300);
+    prog->setAutoClose(false); prog->setAutoReset(false);
+    auto* tick = new QTimer(prog);
+    connect(tick, &QTimer::timeout, prog, [prog, control] { prog->setValue(control->percent.load()); });
+    tick->start(100);
+    connect(prog, &QProgressDialog::canceled, this, [control] { control->cancel = true; });
+    connect(watcher, &QFutureWatcher<ImportResult>::finished, this, [this, watcher, prog, path, control] {
+        ImportResult r = watcher->result();
+        prog->close(); prog->deleteLater(); watcher->deleteLater();
+        m_importing = false;
+        QString err; QStringList warn;
+        if (!m_s->doc()) return;
+        if (finishImport(path, r, &err, &warn).isNull()) {
+            if (control->cancel) emit m_s->message(tr("Import cancelled"));
+            else QMessageBox::warning(m_parent, tr("Import 3D Model"), err);
+            return;
+        }
+        if (!warn.isEmpty()) QMessageBox::information(m_parent, tr("Import 3D Model"), tr("Imported with notes:\n\n• %1").arg(warn.join("\n• ")));
+        else emit m_s->message(tr("Imported %1").arg(QFileInfo(path).fileName()));
+    });
+    watcher->setFuture(QtConcurrent::run([path, fps, control] { return mynd::importModelFile(path, fps, control.get()); }));
+}
+
+QUuid Scene3DActions::finishImport(const QString& path, ImportResult& r, QString* error, QStringList* warnings) {
     if (!r) { if (error) *error = r.error; return {}; }
     if (warnings) *warnings = r.warnings;
     Document* d = m_s->doc();

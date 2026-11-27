@@ -177,6 +177,8 @@ ImportResult importFbxData(const QByteArray& data, const QString& baseDir, const
         if (!readNode(rd, wide, n, &nul, 0, &perr)) { r.error = QObject::tr("The FBX file is damaged: %1").arg(perr); return r; }
         if (nul) break;
         top.kids.push_back(std::move(n));
+        if (importCancelled()) { r.error = QObject::tr("Import cancelled."); return r; }
+        importProgress(int(60.0 * double(rd.pos) / double(std::max<qint64>(1, data.size()))));
     }
     const FNode* objects = top.find("Objects");
     const FNode* conns = top.find("Connections");
@@ -201,7 +203,12 @@ ImportResult importFbxData(const QByteArray& data, const QString& baseDir, const
 
     // materials
     std::map<qint64, QUuid> matIds;
+    int objDone = 0;
     for (const auto& o : objects->kids) {
+        if ((++objDone & 0xFF) == 0) {
+            if (importCancelled()) { r.error = QObject::tr("Import cancelled."); return r; }
+            importProgress(60 + int(35.0 * objDone / std::max<size_t>(1, objects->kids.size())));
+        }
         if (o.name != "Material") continue;
         Material m; m.id = QUuid::createUuid(); m.name = o.label().isEmpty() ? "Material" : o.label();
         const QVector3D dc = vec3P(o, "DiffuseColor", vec3P(o, "Diffuse", QVector3D(0.8f, 0.8f, 0.8f)));

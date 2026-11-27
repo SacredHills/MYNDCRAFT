@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <algorithm>
 
 namespace mynd {
 
@@ -14,7 +15,17 @@ QString modelFileFilter() {
 
 qint64 maxModelFileBytes() { return qint64(64) << 30; }   // sanity limit only; the file is memory-mapped, so what matters is free memory for the decoded model
 
-ImportResult importModelFile(const QString& path, double fps) {
+static thread_local ImportControl* t_control = nullptr;
+void setImportControl(ImportControl* c) { t_control = c; }
+bool importCancelled() { return t_control && t_control->cancel.load(std::memory_order_relaxed); }
+void importProgress(int percent) { if (t_control) t_control->percent.store(std::clamp(percent, 0, 100), std::memory_order_relaxed); }
+
+namespace {
+struct ControlScope { explicit ControlScope(ImportControl* c) { setImportControl(c); } ~ControlScope() { setImportControl(nullptr); } };
+}
+
+ImportResult importModelFile(const QString& path, double fps, ImportControl* control) {
+    ControlScope scope(control);
     ImportResult r;
     QFileInfo fi(path);
     if (!fi.exists() || !fi.isFile()) { r.error = QObject::tr("File not found: %1").arg(path); return r; }

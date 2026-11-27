@@ -29,7 +29,8 @@ public:
     QUuid createGroup();
     // Imports a model file into the active (or a new) 3D layer as one undo step. Adds a light and a camera when the scene has
     // none, so the model is visible in the composition straight away. Returns the new root node (null on failure).
-    QUuid importModelFile(const QString& path, QString* error, QStringList* warnings = nullptr);
+    QUuid importModelFile(const QString& path, QString* error, QStringList* warnings = nullptr);   // synchronous (scripts, tests)
+    void importModelFileAsync(const QString& path);                                                  // worker thread + progress/cancel box
     // "3D Layer": shows a 2D layer (raster, vector, text, animation, symbol, group) as a textured card inside a 3D scene layer of the same
     // composition, with a 3D position/rotation/scale, depth-correct against the scene's objects and seen through the scene camera. Uses a
     // scene layer next to the layer when there is one, otherwise creates one directly above it. Returns the card node (null on failure).
@@ -46,6 +47,8 @@ signals:
     void sceneLayerActivated();      // a 3D layer was created or activated: the main window shows the 3D panels
 
 private:
+    QUuid finishImport(const QString& path, ImportResult& r, QString* error, QStringList* warnings);
+    bool m_importing = false;
     EditorSession* m_s;
     QWidget* m_parent;
     QUuid add(const Node3D& n, const QString& text, std::shared_ptr<const Mesh> mesh = nullptr);

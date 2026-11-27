@@ -244,6 +244,8 @@ ImportResult importGltfData(const QByteArray& data, const QString& baseDir, cons
     std::vector<QUuid> meshIds(size_t(meshes.size()));
     int skippedPrims = 0;
     for (int mi = 0; mi < meshes.size(); ++mi) {
+        if (importCancelled()) { r.error = QObject::tr("Import cancelled."); return r; }
+        importProgress(10 + int(80.0 * mi / std::max(1, int(meshes.size()))));
         const QJsonObject mo = meshes[mi].toObject();
         auto mesh = std::make_shared<Mesh>();
         mesh->id = QUuid::createUuid();

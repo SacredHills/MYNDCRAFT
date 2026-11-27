@@ -3,6 +3,8 @@
 #include "Graphics/Compositor.h"
 
 #include <QButtonGroup>
+#include <QFutureWatcher>
+#include <QtConcurrent>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
@@ -125,6 +127,32 @@ public:
         *v = QVector3D::crossProduct(n, *u).normalized();
     }
 
+    // ---- background rendering of the scene picture ----
+    struct RenderKey {
+        quint64 rev = 0; QMatrix4x4 view, proj; QSize size;
+        bool operator==(const RenderKey& o) const { return rev == o.rev && view == o.view && proj == o.proj && size == o.size; }
+    };
+    QImage m_img; RenderKey m_imgKey; bool m_hasImg = false;
+    QFutureWatcher<QImage>* m_watch = nullptr;
+    RenderKey m_runKey, m_nextKey; bool m_running = false, m_haveNext = false;
+    std::shared_ptr<const Scene3D> m_nextScene; RenderCamera m_nextCam; RenderOptions m_nextOpt;
+    void requestRender(const std::shared_ptr<const Scene3D>& sc, const RenderCamera& cam, const QSize& size, const RenderOptions& ro, const RenderKey& key) {
+        if (m_running) {
+            if (m_runKey == key) return;                                  // already on its way
+            m_nextScene = sc; m_nextCam = cam; m_nextOpt = ro; m_nextKey = key; m_haveNext = true; return;
+        }
+        if (!m_watch) {
+            m_watch = new QFutureWatcher<QImage>(this);
+            connect(m_watch, &QFutureWatcher<QImage>::finished, this, [this] {
+                m_img = m_watch->result(); m_imgKey = m_runKey; m_hasImg = true; m_running = false;
+                if (m_haveNext) { m_haveNext = false; requestRender(m_nextScene, m_nextCam, m_nextKey.size, m_nextOpt, m_nextKey); m_nextScene.reset(); }
+                update();
+            });
+        }
+        m_running = true; m_runKey = key;
+        m_watch->setFuture(QtConcurrent::run([sc, cam, size, ro] { return renderScene(*sc, cam, size, ro); }));
+    }
+
     // ---- painting ----
     void paintEvent(QPaintEvent*) override {
         QPainter p(this);
@@ -148,7 +176,15 @@ public:
         {
             // cards show their 2D layer's current content, so the viewport draws the same scene the composition does
             const auto drawn = Compositor::sceneForDrawing(*l, m_v->m_s->doc()->currentFrame(), m_v->m_s->doc()->canvasSize(), m_v->m_s->doc());
-            p.drawImage(0, 0, renderScene(*drawn, cam, vr.size(), ro));
+            // The (heavy) software render runs on a worker so the interface never waits for it; the newest request wins. While it is
+            // running the previous picture stays on screen.
+            const RenderKey key{drawn->revision, cam.view, cam.proj, vr.size()};
+            if (m_hasImg && m_imgKey == key) {
+                p.drawImage(0, 0, m_img);
+            } else {
+                requestRender(drawn, cam, vr.size(), ro, key);
+                if (!m_img.isNull()) p.drawImage(0, 0, m_img.size() == vr.size() ? m_img : m_img.scaled(vr.size(), Qt::IgnoreAspectRatio, Qt::FastTransformation));
+            }
         }
         drawMarkers(p, sc, cam, vr.size());
         drawSelection(p, sc, cam, vr.size());

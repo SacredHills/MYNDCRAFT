@@ -355,3 +355,8 @@ The Select tool (V) now covers Direct Selection and Transform Layer: on drawing/
 
 ## Object list drag & drop
 - Dropping in the 3D object list now follows the drop line: **on a group** puts the object inside it; **above/below any row** (or on a non-group object) places it next to that row, same parent, in that order; empty space makes it the last root object. Only groups act as folders. World transform is kept when the parent changes. Tested by calling the panel's drop handler (the real mouse drag itself is not simulated).
+
+## Responsiveness
+- **Model import runs on a worker thread** with a progress box and Cancel (Import 3D Model). OBJ, FBX and glTF importers report progress and stop soon after Cancel (polled per 16k OBJ lines, per FBX top-level record / object batch, per glTF mesh); a cancelled import changes nothing. Only the final merge into the scene runs on the UI thread. Tested at the importer level (cancel flag + progress), not by clicking the dialog.
+- **The 3D viewport's software render runs on a worker**; the newest request wins and the previous picture stays up meanwhile, so orbiting/typing never blocks on a heavy scene.
+- **Still on the UI thread (honest):** the 2D canvas compositor (including a 3D scene layer drawn inside the composition) and playback frame rendering. Moving them needs a snapshot of the document for the worker, which is a bigger change; not done.
