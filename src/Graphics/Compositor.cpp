@@ -66,7 +66,7 @@ static const Layer* findInTree(const Layer& g, const QUuid& id) {
     return nullptr;
 }
 
-std::shared_ptr<const Scene3D> Compositor::sceneForDrawing(const Layer& l, int frame, const QSize& canvas, const SymbolResolver* syms) {
+std::shared_ptr<const Scene3D> Compositor::sceneForDrawing(const Layer& l, int frame, const QSize& canvas, const SymbolResolver* syms, int supersample) {
     std::shared_ptr<const Scene3D> base = l.sceneAt(frame);
     if (!base) return base;
     bool anyCard = false;
@@ -75,6 +75,25 @@ std::shared_ptr<const Scene3D> Compositor::sceneForDrawing(const Layer& l, int f
     const Layer* root = &l;
     while (root->parent) root = root->parent;
     auto s = std::make_shared<Scene3D>(*base);
+    const RenderCamera cam = sceneCamera(*base, double(canvas.width()) / canvas.height());
+    // How many times larger than the canvas a card appears on screen (width or height, times the render's supersampling): the card's
+    // picture is rendered that much bigger (0.5 steps, at most 4x and about 16 megapixels) so it stays sharp when scaled up or approached.
+    auto textureScale = [&](const Node3D& n) {
+        auto mit = base->meshes.find(n.mesh);
+        if (mit == base->meshes.end()) return 1.0;
+        QVector3D a, b; mit->second->bounds(&a, &b);
+        const QMatrix4x4 world = base->worldMatrix(n.id);
+        const QVector3D c[4] = {{a.x(), a.y(), a.z()}, {b.x(), a.y(), a.z()}, {b.x(), b.y(), a.z()}, {a.x(), b.y(), a.z()}};
+        QPointF q[4];
+        for (int i = 0; i < 4; ++i) if (!projectToScreen(cam, world.map(c[i]), canvas, &q[i])) return 1.0 * std::max(1, supersample);
+        auto len = [](QPointF u, QPointF v) { return QLineF(u, v).length(); };
+        const double w = std::max(len(q[0], q[1]), len(q[3], q[2])), hh = std::max(len(q[0], q[3]), len(q[1], q[2]));
+        double need = std::max(w / canvas.width(), hh / canvas.height()) * std::max(1, supersample);
+        if (!std::isfinite(need)) need = 1;
+        double sc = std::clamp(std::ceil(need * 2) / 2, 1.0, 4.0);
+        while (sc > 1.0 && double(canvas.width()) * sc * canvas.height() * sc > 16e6) sc -= 0.5;
+        return sc;
+    };
     quint64 h = 1469598103934665603ull;
     const QSet<QUuid> noCards;                                   // the layer shown on a card is drawn by the card only
     const Ctx ctx{frame, nullptr, syms, 1, 1, &noCards};
@@ -82,12 +101,14 @@ std::shared_ptr<const Scene3D> Compositor::sceneForDrawing(const Layer& l, int f
         if (n.cardLayer.isNull()) continue;
         const Layer* src = findInTree(*root, n.cardLayer);
         if (!src || src == &l || src->type == LayerType::Scene3D || !src->props.visible) { n.visible = false; continue; }
-        QImage img(canvas, QImage::Format_ARGB32_Premultiplied);
+        const double texScale = textureScale(n);
+        QImage img(QSize(std::max(1, int(std::lround(canvas.width() * texScale))), std::max(1, int(std::lround(canvas.height() * texScale)))), QImage::Format_ARGB32_Premultiplied);
         img.fill(Qt::transparent);
         {
             QPainter p(&img);
             p.setRenderHint(QPainter::Antialiasing);
             p.setRenderHint(QPainter::SmoothPixmapTransform);
+            p.scale(double(img.width()) / canvas.width(), double(img.height()) / canvas.height());
             // The layer's own 2D transform (anchor / position / scale / rotation, animated or not) is part of what the card shows, so a
             // layer keeps its 2D animation when it becomes a card; the card's 3D transform comes on top of it.
             const LayerXform xf = src->xformAt(frame);
@@ -114,6 +135,7 @@ std::shared_ptr<const Scene3D> Compositor::sceneForDrawing(const Layer& l, int f
         Material m;
         m.id = QUuid::createUuid(); m.name = "Card"; m.baseColor = QColor::fromRgbF(1, 1, 1, float(opacity)); m.baseTexture = tid;
         m.roughness = 1.0; m.doubleSided = true; m.unlit = !n.cardLit;
+        m.blendMode = int(src->props.blend);                  // the layer's blend mode, applied against what the scene has drawn behind the card
         n.materialOverride = m.id;
         s->materials.push_back(m);
     }
@@ -197,9 +219,9 @@ void Compositor::drawAnimationLayer(QPainter& p, const Layer& l, const QRect& re
 
 void Compositor::drawScene3D(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx) {
     if (!l.scene3d || canvas.isEmpty()) return;
-    const std::shared_ptr<const Scene3D> scene = sceneForDrawing(l, ctx.frame, canvas, ctx.syms);
     int ss = ctx.ss3d;
     if (ss <= 0) ss = (qint64(canvas.width()) * canvas.height() <= 1200000) ? 2 : 1;
+    const std::shared_ptr<const Scene3D> scene = sceneForDrawing(l, ctx.frame, canvas, ctx.syms, ss);
     // The software renderer draws the whole canvas, so keep the last few results: repaints of other layers, partial redraws and
     // scrubbing over frames where the scene did not change are free.
     struct Entry { quint64 rev; QSize size; int ss; QImage img; };

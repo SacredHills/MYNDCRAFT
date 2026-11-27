@@ -122,6 +122,7 @@ struct ShadeMat {
     bool unlit = false;
     const QImage* tex = nullptr;
     float repU = 1, repV = 1, offU = 0, offV = 0;     // texture repeat / offset
+    int blend = 0;                                    // see Material::blendMode
 };
 
 QVector3D rgb(const QColor& c) { return QVector3D(float(c.redF()), float(c.greenF()), float(c.blueF())); }
@@ -206,6 +207,37 @@ Vtx lerp(const Vtx& a, const Vtx& b, float t) {
     return {a.clip * (1 - t) + b.clip * t, a.wpos * (1 - t) + b.wpos * t, a.nrm * (1 - t) + b.nrm * t, a.uv * (1 - t) + b.uv * t};
 }
 
+// Blends a fragment (straight colour s, alpha as) onto the premultiplied backdrop pixel d with one of the layer blend modes; formulas as in
+// the W3C compositing spec (what Qt's 2D composition modes implement), so a card blends like the same layer in a flat composition.
+QRgb blendOnto(QRgb d, const QVector3D& s, float as, int mode) {
+    const float ab = qAlpha(d) / 255.0f;
+    const float db[3] = {qRed(d) / 255.0f, qGreen(d) / 255.0f, qBlue(d) / 255.0f};   // premultiplied
+    const float sc[3] = {s.x(), s.y(), s.z()};
+    float out[3], ao;
+    if (mode == 6) {                                              // Add: premultiplied sum, clamped
+        for (int i = 0; i < 3; ++i) out[i] = std::min(1.0f, sc[i] * as + db[i]);
+        ao = std::min(1.0f, as + ab);
+    } else {
+        ao = as + ab * (1 - as);
+        for (int i = 0; i < 3; ++i) {
+            const float cb = ab > 1e-6f ? std::min(1.0f, db[i] / ab) : 0.0f, cs = sc[i];
+            float B = cs;
+            switch (mode) {
+            case 1: B = cb * cs; break;
+            case 2: B = cb + cs - cb * cs; break;
+            case 3: { const float t = 2 * cb - 1; B = cb <= 0.5f ? cs * 2 * cb : cs + t - cs * t; break; }       // overlay = hard light with the roles swapped
+            case 4: B = std::min(cb, cs); break;
+            case 5: B = std::max(cb, cs); break;
+            case 7: B = std::abs(cb - cs); break;
+            default: break;
+            }
+            out[i] = (1 - ab) * as * cs + (1 - as) * db[i] + as * ab * B;
+        }
+    }
+    auto q = [](float v) { return std::clamp(int(v * 255 + 0.5f), 0, 255); };
+    return qRgba(q(out[0]), q(out[1]), q(out[2]), q(ao));
+}
+
 void rasterTriangle(Target& T, const Vtx& v0, const Vtx& v1, const Vtx& v2, const ShadeMat& mat, bool hasUv, const QVector3D& eye,
                     const std::vector<Light>& lights, const QVector3D& ambient) {
     const Vtx* v[3] = {&v0, &v1, &v2};
@@ -249,7 +281,9 @@ void rasterTriangle(Target& T, const Vtx& v0, const Vtx& v1, const Vtx& v2, cons
             const Frag f = shade(mat, P, N, uv, hasUv, !front, eye, lights, ambient);
             if (f.alpha <= 0.004f) continue;
             const int r = int(f.color.x() * 255 + 0.5f), g = int(f.color.y() * 255 + 0.5f), b = int(f.color.z() * 255 + 0.5f);
-            if (f.alpha >= 0.996f) {
+            if (mat.blend != 0) {                            // layer blend mode against what is behind; does not write depth
+                row[x] = blendOnto(row[x], f.color, f.alpha, mat.blend);
+            } else if (f.alpha >= 0.996f) {
                 row[x] = qRgba(r, g, b, 255);
                 drow[x] = z;
             } else {                                         // blended over what is there; does not write depth
@@ -368,7 +402,7 @@ QImage renderScene(const Scene3D& s, const RenderCamera& cam, const QSize& size,
             if (mat) {
                 sm.base = rgb(mat->baseColor); sm.alpha = float(mat->baseColor.alphaF()); sm.emissive = rgb(mat->emissive);
                 sm.metallic = float(mat->metallic); sm.roughness = float(mat->roughness); sm.doubleSided = mat->doubleSided; sm.unlit = mat->unlit;
-                sm.repU = float(mat->repeatU); sm.repV = float(mat->repeatV); sm.offU = float(mat->offsetU); sm.offV = float(mat->offsetV);
+                sm.blend = mat->blendMode; sm.repU = float(mat->repeatU); sm.repV = float(mat->repeatV); sm.offU = float(mat->offsetU); sm.offV = float(mat->offsetV);
                 auto t = tex.find(mat->baseTexture);
                 if (t != tex.end()) sm.tex = &t->second;
             } else { sm.base = QVector3D(0.78f, 0.78f, 0.78f); sm.alpha = 1; sm.metallic = 0; sm.roughness = 0.6f; sm.doubleSided = false; }

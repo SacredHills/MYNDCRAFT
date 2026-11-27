@@ -97,6 +97,73 @@ class TestLayer3D : public QObject {
     }
     static bool nonWhite(const QColor& c) { return c.red() < 235 || c.green() < 235 || c.blue() < 235; }
 
+private slots:
+    void aCardThatAppearsLargerThanTheCanvasKeepsItsDetail() {
+        Setup s = build(true);
+        // a 2 px wide black vertical line on white
+        VectorShape ln = VectorShape::makeRect(QRectF(79, 0, 2, 100)); ln.fill.color = Qt::black; ln.stroke.enabled = false;
+        s.doc->setShapes(s.art, {ln}, "line");
+        auto cardTexture = [&](double scale) {
+            s.doc->editScene3D(s.scene, [&](Scene3D& sc) { sc.node(s.card)->scale = {float(scale), float(scale), float(scale)}; return true; }, "Scale");
+            auto scene = Compositor::sceneForDrawing(*s.doc->findLayer(s.scene), 0, s.doc->canvasSize());
+            QSize best;
+            for (const auto& [id, img] : scene->textures) best = img.size();
+            return best;
+        };
+        QCOMPARE(cardTexture(1.0), QSize(160, 100));                       // as it appears on the canvas: canvas resolution
+        QCOMPARE(cardTexture(0.5), QSize(160, 100));                       // smaller never costs more
+        const QSize big = cardTexture(3.0);
+        QVERIFY2(big.width() >= 3 * 160 - 2 && big.width() <= 4 * 160, qPrintable(QString::number(big.width())));
+        // and the magnified line stays crisp: few in-between greys across the 3x wide line
+        auto soft = [&](double scale) {
+            s.doc->editScene3D(s.scene, [&](Scene3D& sc) { sc.node(s.card)->scale = {float(scale), float(scale), float(scale)}; return true; }, "Scale");
+            auto scene = Compositor::sceneForDrawing(*s.doc->findLayer(s.scene), 0, s.doc->canvasSize());
+            RenderOptions o; o.threads = 1;
+            const QImage img = renderScene(*scene, sceneCamera(*scene, 1.6), QSize(160, 100), o);
+            int mid = 0;
+            for (int x = 60; x < 100; ++x) { const int v = img.pixelColor(x, 50).red(); if (v > 30 && v < 225) ++mid; }
+            return mid;
+        };
+        QVERIFY2(soft(3.0) <= 4, qPrintable(QString::number(soft(3.0))));
+    }
+
+    void aCardUsesItsLayersBlendModeAgainstWhatIsBehindIt() {
+        Setup s = build(true);
+        // a mid-grey unlit wall behind the card
+        s.doc->editScene3D(s.scene, [&](Scene3D& sc) {
+            Material m; m.id = QUuid::createUuid(); m.name = "Wall"; m.baseColor = QColor(128, 128, 128); m.unlit = true; sc.materials.push_back(m);
+            auto wall = makeCardPlane(8, 6); wall->parts = {{0, int(wall->indices.size()), m.id}}; sc.meshes[wall->id] = wall;
+            Node3D n; n.kind = NodeKind::Mesh; n.name = "Wall"; n.mesh = wall->id; n.position = {0, 0, -0.5f}; sc.addNode(n);
+            return true; }, "Wall");
+        struct Case { BlendMode mode; QColor expect; };
+        const Case cases[] = {
+            {BlendMode::Normal, QColor(255, 0, 0)},
+            {BlendMode::Multiply, QColor(128, 0, 0)},
+            {BlendMode::Screen, QColor(255, 128, 128)},
+            {BlendMode::Add, QColor(255, 128, 128)},
+            {BlendMode::Darken, QColor(128, 0, 0)},
+            {BlendMode::Lighten, QColor(255, 128, 128)},
+            {BlendMode::Difference, QColor(127, 128, 128)},
+        };
+        auto shot = [&](int x, int y) {
+            const Layer* sl = s.doc->findLayer(s.scene);
+            auto scene = Compositor::sceneForDrawing(*sl, 0, s.doc->canvasSize());
+            RenderOptions o; o.threads = 1;
+            return renderScene(*scene, sceneCamera(*scene, 1.6), QSize(160, 100), o).pixelColor(x, y);
+        };
+        for (const Case& c : cases) {
+            LayerProps p = s.doc->findLayer(s.art)->props; p.blend = c.mode; s.doc->setLayerProps(s.art, p);
+            const QColor got = shot(80, 50);
+            QVERIFY2(std::abs(got.red() - c.expect.red()) <= 4 && std::abs(got.green() - c.expect.green()) <= 4 && std::abs(got.blue() - c.expect.blue()) <= 4,
+                     qPrintable(QString("mode %1: got %2 expected %3").arg(blendModeName(c.mode), got.name(), c.expect.name())));
+            QVERIFY2(std::abs(shot(150, 90).red() - 128) <= 2, "the wall outside the card is untouched");
+        }
+        // Overlay on a mid-grey wall: backdrop 0.5 -> cs * 2 * 0.5 = cs (red stays red)
+        LayerProps p = s.doc->findLayer(s.art)->props; p.blend = BlendMode::Overlay; s.doc->setLayerProps(s.art, p);
+        const QColor ov = shot(80, 50);
+        QVERIFY2(ov.red() > 250 && ov.green() < 6 && ov.blue() < 6, qPrintable(ov.name()));
+    }
+
     void textureRepeatTilesTheImageAndSurvivesSaving() {
         CompositionSettings cs; cs.width = 160; cs.height = 100; cs.durationFrames = 2; cs.background = Qt::white;
         Document d(cs);

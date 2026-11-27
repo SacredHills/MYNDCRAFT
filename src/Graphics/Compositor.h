@@ -37,8 +37,9 @@ public:
     static QImage render(const Document& doc) { return render(doc, doc.canvasRect(), Options{}); }
 
     // The 3D scene of `sceneLayer` at `frame` as it is drawn: animation applied and every card node showing the current content of its
-    // 2D layer (rendered at `canvas` size). Same pointer as sceneLayer.scene3d when nothing is animated and there are no cards.
-    static std::shared_ptr<const Scene3D> sceneForDrawing(const Layer& sceneLayer, int frame, const QSize& canvas, const SymbolResolver* syms = nullptr);
+    // 2D layer (rendered at `canvas` size, or larger when the card appears bigger than the canvas on screen, so it stays sharp; `supersample` is
+    // the scene render's anti-aliasing factor). Same pointer as sceneLayer.scene3d when nothing is animated and there are no cards.
+    static std::shared_ptr<const Scene3D> sceneForDrawing(const Layer& sceneLayer, int frame, const QSize& canvas, const SymbolResolver* syms = nullptr, int supersample = 1);
     // Layers (anywhere below `group`) that are shown through a card of some 3D scene layer and so are not drawn by themselves.
     static void collectCardSources(const Layer& group, QSet<QUuid>& out);
 

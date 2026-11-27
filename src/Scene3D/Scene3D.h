@@ -62,10 +62,13 @@ struct Material {
     // Texture repeat: the texture is tiled `repeatU` x `repeatV` times over the surface (the image always wraps around), and shifted by
     // `offsetU/offsetV` (in tiles). 1 / 1 / 0 / 0 = the texture once, as the model's UVs say.
     double repeatU = 1.0, repeatV = 1.0, offsetU = 0.0, offsetV = 0.0;
+    // How the surface is blended with what is already drawn behind it (0 Normal, 1 Multiply, 2 Screen, 3 Overlay, 4 Darken, 5 Lighten, 6 Add,
+    // 7 Difference: the same order as the 2D layer blend modes). Set for cards from their layer's blend mode while drawing; not saved.
+    int blendMode = 0;
     bool operator==(const Material& o) const {
         return id == o.id && name == o.name && baseColor == o.baseColor && baseTexture == o.baseTexture && metallic == o.metallic &&
                roughness == o.roughness && emissive == o.emissive && doubleSided == o.doubleSided && unlit == o.unlit &&
-               repeatU == o.repeatU && repeatV == o.repeatV && offsetU == o.offsetU && offsetV == o.offsetV;
+               repeatU == o.repeatU && repeatV == o.repeatV && offsetU == o.offsetU && offsetV == o.offsetV && blendMode == o.blendMode;
     }
 };
 
