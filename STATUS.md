@@ -274,8 +274,7 @@ Limitations (honest list):
 - **Rendering order.** The source layer is no longer drawn by itself; only the card shows it. See-through meshes (cards and translucent materials) are drawn
   after opaque ones and sorted far-to-near per object.
 - **Tests.** `test_layer3d` (8 core tests) and an end-to-end UI test; clean under ASAN/UBSAN.
-- **Limitations.** The layer's own 2D transform (position/rotation/scale tracks), blend mode and masks are not applied to the card: use the
-  card's 3D transform instead (opacity is applied). The card texture is the canvas size, so a card scaled up in 3D softens (it is not re-rendered at
+- **Limitations.** The layer's blend mode and masks are not applied to the card (opacity is; the layer's own 2D transform is, since Phase 8 work, see below). The card texture is the canvas size, so a card scaled up in 3D softens (it is not re-rendered at
   higher resolution) and edges are bilinear-filtered. Translucent surfaces are sorted per object, not per triangle, so crossing/intersecting
   translucent cards can blend in the wrong order. Cards are re-rendered whenever the scene is redrawn (a scene with many large cards will be slow
   on this CPU renderer). If the canvas size changes after a card was made, the card keeps its old shape. Cards of layers inside symbols are untested.
@@ -303,6 +302,12 @@ Limitations (honest list):
 - **Vector anchor points:** with the Select tool, the points of the selected shape(s) are always drawn and can be grabbed and moved directly (before: only while holding Ctrl or after double-clicking). This is also what makes the shape morph usable: Animation > Create Shape Tween… leaves you editing the END shape; click the shape, drag its points, then turn off Edit End Shape. Test does this with real mouse drags.
 - **Not done: GPU.** Everything (2D compositing and the 3D viewport) still renders on the CPU, and the 3D renderer uses one thread. A GPU backend (QRhi) is a large separate piece of work and could not be verified without a GPU here, so nothing was half-added.
 - **Not done: keyframing many shapes freely** (more than a start and an end shape, edited by just moving points at a later frame, as in After Effects). The current shape tween has exactly two shapes.
+
+## Phase 8 — Unified 2D/3D composition (started; headless-tested; not yet hand-tested on Windows)
+- Already in place from earlier phases: one layer tree holds hand-drawn animation, vector, text, raster, symbols and 3D scene layers; one document clock drives all of them (timeline, playback, graph editor); 3D scenes with a transparent background show the 2D layers below and 2D layers above draw over them; 2D layers can be placed inside a scene as depth-correct cards; save/reopen and PNG/GIF export go through the same compositor.
+- New: **a layer keeps its own 2D transform (anchor, position, scale, rotation, animated or not) when it is shown as a card**; the card's 3D transform is applied on top. Before, turning an animated layer into a 3D layer silently dropped its 2D animation.
+- New acceptance test (`test_layer3d`): one composition with a hand-drawn animation layer, a 3D cube scene, a vector layer shown as a card with 2D position animation, and text. It checks several frames, that everything animates together, that reopening a saved project renders identical frames, that exported PNG frames equal the editor's render, and that a transparent-background export keeps alpha only where there is content.
+- Still open for Phase 8: card blend modes and masks, card texture resolution (card is canvas-sized so a big zoom softens it), per-triangle sorting of overlapping translucent surfaces, 3D render passes (depth/alpha/shadow passes), and GPU rendering. The preview of heavy 3D scenes is still CPU-only.
 
 ## Next tasks
 1. Phase 8: unified 2D/3D composition (awaiting go-ahead).

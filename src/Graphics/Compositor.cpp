@@ -87,7 +87,22 @@ std::shared_ptr<const Scene3D> Compositor::sceneForDrawing(const Layer& l, int f
         {
             QPainter p(&img);
             p.setRenderHint(QPainter::Antialiasing);
-            drawLayerContent(p, *src, QRect(QPoint(0, 0), canvas), canvas, ctx, 1.0, BlendMode::Normal);
+            p.setRenderHint(QPainter::SmoothPixmapTransform);
+            // The layer's own 2D transform (anchor / position / scale / rotation, animated or not) is part of what the card shows, so a
+            // layer keeps its 2D animation when it becomes a card; the card's 3D transform comes on top of it.
+            const LayerXform xf = src->xformAt(frame);
+            QRect region(QPoint(0, 0), canvas);
+            if (!xf.isIdentity()) {
+                const QTransform m = xf.matrix(QPointF(canvas.width() / 2.0, canvas.height() / 2.0));
+                bool ok = false;
+                const QTransform inv = m.inverted(&ok);
+                if (!ok) region = QRect();                             // zero scale: nothing to show
+                else {
+                    region = inv.mapRect(QRectF(region)).toAlignedRect().adjusted(-2, -2, 2, 2).intersected(region);
+                    p.setWorldTransform(m, true);
+                }
+            }
+            if (!region.isEmpty()) drawLayerContent(p, *src, region, canvas, ctx, 1.0, BlendMode::Normal);
         }
         const double opacity = std::clamp(src->props.opacity * src->xformAt(frame).opacity, 0.0, 1.0);
         h ^= qHash(QByteArray::fromRawData(reinterpret_cast<const char*>(img.constBits()), qsizetype(img.sizeInBytes())), 0x9E3779B9u);

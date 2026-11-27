@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include "TestEnv.h"
+#include "Core/Exporter.h"
 #include "Core/ProjectIO.h"
 #include "Graphics/Compositor.h"
 #include "Scene/Document.h"
@@ -47,7 +48,94 @@ class TestLayer3D : public QObject {
     static bool isRed(const QColor& c) { return c.red() > 200 && c.green() < 60 && c.blue() < 60; }
     static bool isWhite(const QColor& c) { return c.red() > 245 && c.green() > 245 && c.blue() > 245; }
 
+    // ---- Phase 8: one composition holding traditional animation, vector art, text and 3D, animated together ----
+    // 200x120 canvas, 12 frames. Bottom to top: hand-drawn animation (a red square that turns blue at frame 6), a 3D scene (a cube, a light, a camera,
+    // transparent background) and, inside that scene, a vector layer as a card whose own 2D position slides 80 px to the right over the clip;
+    // text on top.
+    struct Comp { std::unique_ptr<Document> doc; QUuid anim, vec, scene, text, cube; };
+    Comp buildComp() {
+        CompositionSettings cs; cs.width = 200; cs.height = 120; cs.durationFrames = 12; cs.background = Qt::white;
+        Comp c;
+        c.doc = std::make_unique<Document>(cs);
+        Document& d = *c.doc;
+        c.anim = d.addAnimationLayer("Hand drawn");
+        const QUuid r = d.createDrawing(c.anim, 0, false);
+        { QPainter p(&d.findLayer(c.anim)->drawingImages[r]); p.fillRect(10, 80, 30, 30, Qt::red); }
+        const QUuid b = d.createDrawing(c.anim, 6, false);
+        { QPainter p(&d.findLayer(c.anim)->drawingImages[b]); p.fillRect(10, 80, 30, 30, Qt::blue); }
+        c.vec = d.addLayer(LayerType::Vector, "Vector");
+        VectorShape g = VectorShape::makeRect(QRectF(20, 10, 40, 30)); g.fill.color = QColor(0, 200, 0); g.stroke.enabled = false;
+        d.setShapes(c.vec, {g}, "art");
+        {   // 2D position animation: 0 -> 80 px over frames 0..10
+            Layer* l = d.findLayer(c.vec);
+            PropertyTracks t = l->tracks;
+            const PropertyDef* pd = findPropertyDef("transform.position");
+            PropertyTrack tr; tr.base = PropValue::of(0, 0);
+            tr.setKey(*pd, 0, PropValue::of(0, 0));
+            tr.setKey(*pd, 10, PropValue::of(80, 0));
+            t.insert("transform.position", tr);
+            d.editTracks(c.vec, t, "Slide");
+        }
+        c.scene = d.addScene3DLayer("Scene");
+        d.editScene3D(c.scene, [&](Scene3D& sc) {
+            auto cube = makeCube(1.0);
+            sc.meshes[cube->id] = cube;
+            Node3D n; n.kind = NodeKind::Mesh; n.name = "Cube"; n.mesh = cube->id; n.position = {0, 0, -3}; c.cube = sc.addNode(n);
+            auto mesh = makeCardPlane(2 * 1.6667, 2); mesh->parts = {{0, int(mesh->indices.size()), QUuid()}}; sc.meshes[mesh->id] = mesh;
+            Node3D card; card.kind = NodeKind::Mesh; card.name = "Card"; card.mesh = mesh->id; card.cardLayer = c.vec; sc.addNode(card);
+            Node3D l; l.kind = NodeKind::Light; l.lightType = LightType::Directional; l.rotation = {-30, -30, 0}; sc.addNode(l);
+            Node3D cam; cam.kind = NodeKind::Camera; cam.name = "Cam"; cam.position = {0, 0, float(1.0 / std::tan(22.5 * M_PI / 180.0))};
+            sc.activeCamera = sc.addNode(cam);
+            sc.background = QColor(0, 0, 0, 0);
+            return true; }, "Build");
+        TextContent tc; tc.text = "HELLO"; tc.pos = {120, 20}; tc.sizePx = 24; tc.color = Qt::black;
+        c.text = d.addTextLayer(tc, "Title");
+        d.undoStack()->clear();
+        return c;
+    }
+    static bool nonWhite(const QColor& c) { return c.red() < 235 || c.green() < 235 || c.blue() < 235; }
+
 private slots:
+    void oneCompositionMixesAnimationVectorTextAndThreeDAndAnimatesThemTogether() {
+        Comp c = buildComp();
+        const QImage f0 = render(*c.doc, 0), f6 = render(*c.doc, 6), f10 = render(*c.doc, 10);
+        // hand-drawn layer: red, then blue from frame 6
+        QVERIFY(isRed(f0.pixelColor(25, 95)));
+        QVERIFY(f6.pixelColor(25, 95).blue() > 200 && f6.pixelColor(25, 95).red() < 60);
+        // the 3D cube is in the middle of every frame and is not a flat white
+        for (const QImage* f : {&f0, &f6, &f10}) QVERIFY(nonWhite(f->pixelColor(100, 60)));
+        // the card (the vector layer with its OWN 2D position animation) slides right: green at (40,25) on frame 0, gone from there and found 80 px further on frame 10
+        auto green = [](const QColor& q) { return q.green() > 150 && q.red() < 80 && q.blue() < 80; };
+        QVERIFY(green(f0.pixelColor(40, 25)));
+        QVERIFY(!green(f10.pixelColor(40, 25)));
+        QVERIFY2(green(f10.pixelColor(120, 25)), qPrintable(f10.pixelColor(120, 25).name()));
+        // text sits above everything
+        bool text = false;
+        for (int y = 20; y < 45 && !text; ++y) for (int x = 120; x < 180; ++x) if (f0.pixelColor(x, y).red() < 90) { text = true; break; }
+        QVERIFY(text);
+        // save, reopen, render the entire composition again: identical frames
+        QTemporaryDir dir; QString err;
+        QVERIFY2(ProjectIO::save(*c.doc, dir.filePath("comp.studio"), &err), qPrintable(err));
+        LoadResult r = ProjectIO::load(dir.filePath("comp.studio"));
+        QVERIFY2(r.doc, qPrintable(r.error));
+        for (int f : {0, 3, 6, 10}) QVERIFY2(meanDiff(render(*r.doc, f), render(*c.doc, f)) < 0.01, qPrintable(QString::number(f)));
+        // and the final render: every frame of the reopened project exports exactly what the editor shows, 2D + 3D together
+        exporter::ExportOptions eo; eo.firstFrame = 0; eo.lastFrame = 11;
+        QStringList written;
+        QVERIFY2(exporter::writePngSequence(*r.doc, dir.path(), "out", eo, &written, &err), qPrintable(err));
+        QCOMPARE(written.size(), 12);
+        for (int f : {0, 6, 11}) {
+            QImage img(written[f]);
+            QVERIFY2(meanDiff(img.convertToFormat(QImage::Format_ARGB32), render(*c.doc, f).convertToFormat(QImage::Format_ARGB32)) < 0.5, qPrintable(QString::number(f)));
+        }
+        // with a transparent background, only the content is left (cube, card, drawing, text), the empty corner has no alpha
+        eo.transparentBackground = true; eo.firstFrame = eo.lastFrame = 0; written.clear();
+        QVERIFY2(exporter::writePngSequence(*r.doc, dir.path(), "alpha", eo, &written, &err), qPrintable(err));
+        const QImage a(written.first());
+        QCOMPARE(a.pixelColor(195, 115).alpha(), 0);
+        QVERIFY(a.pixelColor(100, 60).alpha() > 250);                           // the cube
+        QVERIFY(a.pixelColor(25, 95).alpha() > 250);                            // the hand-drawn square
+    }
     void aCardInFrontOfTheDefaultCameraLooksLikeTheFlatLayer() {
         Setup flat = build(false), card = build(true);
         const QImage a = render(*flat.doc), b = render(*card.doc);
