@@ -25,6 +25,7 @@ struct RenderCamera {
 struct RenderOptions {
     int supersample = 1;            // 1 = fastest (editing), 2 = anti-aliased (export / final preview)
     bool drawBackground = true;     // fill with Scene3D::background first
+    int threads = 0;                // 0 = one per core; 1 = single-threaded (the image is identical either way)
 };
 
 // The camera of a Camera node, or the scene's active camera when `cameraNode` is null; a default framing camera when

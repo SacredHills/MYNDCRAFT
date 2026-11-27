@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Test)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Test Concurrent)
 # libzip: pkg-config first (Linux/Homebrew; Debian's CMake package config is broken),
 # then the CMake package (vcpkg on Windows).
 find_package(PkgConfig QUIET)
@@ -65,7 +65,7 @@ add_library(myndcore STATIC
   src/Scene3D/ImportFbx.cpp
 )
 target_include_directories(myndcore PUBLIC src)
-target_link_libraries(myndcore PUBLIC Qt6::Core Qt6::Gui ${MYND_ZIP_TARGET})
+target_link_libraries(myndcore PUBLIC Qt6::Core Qt6::Gui Qt6::Concurrent ${MYND_ZIP_TARGET})
 
 # ---- Application UI ----
 add_library(myndui STATIC

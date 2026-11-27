@@ -309,10 +309,15 @@ Limitations (honest list):
 - New acceptance test (`test_layer3d`): one composition with a hand-drawn animation layer, a 3D cube scene, a vector layer shown as a card with 2D position animation, and text. It checks several frames, that everything animates together, that reopening a saved project renders identical frames, that exported PNG frames equal the editor's render, and that a transparent-background export keeps alpha only where there is content.
 - Still open for Phase 8: card blend modes and masks, card texture resolution (card is canvas-sized so a big zoom softens it), per-triangle sorting of overlapping translucent surfaces, 3D render passes (depth/alpha/shadow passes), and GPU rendering. The preview of heavy 3D scenes is still CPU-only.
 
+## Multithreaded 3D renderer (implemented, headless-tested; not yet timed on Windows)
+- The CPU 3D renderer splits the image into horizontal bands (4 per core) and rasterises them in parallel with Qt Concurrent. Every pixel still sees the triangles in the same order, so the image is bit-identical to the single-threaded render (a test compares the two, with and without supersampling, on a scene with translucent surfaces).
+- Measured in the 2-core sandbox: 1200x720 scene with 15 spheres and a card, 143 ms single-threaded vs 88 ms banded. Expect more on a machine with more cores; not measured on Windows.
+- Not threaded yet: 2D compositing, drawing tools, playback frame generation and model import still run on the UI thread, so the interface can still stall during heavy work. `RenderOptions::threads` forces a thread count (1 = old behaviour).
+
 ## Next tasks
 1. Phase 8: unified 2D/3D composition (awaiting go-ahead).
 2. Visual tween spans in the timeline, swapping an instance's symbol, per-instance Movie Clip play/stop; FBX animation; clip blocks on the timeline.
-3. The 3D renderer is a CPU software renderer; a GPU backend is future work.
+3. The 3D renderer is a CPU software renderer (now multithreaded, see below); a GPU backend is future work.
 
 ## Build / CI status
 `.github/workflows/build.yml` builds and runs the tests on Linux, Windows (MSVC, Qt 6.8.3, vcpkg libzip) and

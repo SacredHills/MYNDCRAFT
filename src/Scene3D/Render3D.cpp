@@ -1,5 +1,8 @@
 #include "Scene3D/Render3D.h"
 
+#include <QThread>
+#include <QtConcurrent>
+
 #include <QPainter>
 #include <algorithm>
 #include <cmath>
@@ -189,8 +192,13 @@ struct Vtx {
     QVector2D uv;
 };
 
+// A render target restricted to the rows [y0, y1]. Bands never overlap, so threads can each rasterise into their own band of the same
+// image and depth buffer, and every pixel still sees the triangles in the same order as in a single-threaded render (identical result).
 struct Target {
     QImage* img; std::vector<float>* depth; int w, h;
+    int y0 = 0, y1 = -1;     // inclusive; y1 < y0 means the whole image
+    int rowMin() const { return y1 < y0 ? 0 : y0; }
+    int rowMax() const { return y1 < y0 ? h - 1 : y1; }
 };
 
 Vtx lerp(const Vtx& a, const Vtx& b, float t) {
@@ -217,7 +225,7 @@ void rasterTriangle(Target& T, const Vtx& v0, const Vtx& v1, const Vtx& v2, cons
     const float area = (sx[1] - sx[0]) * (sy[2] - sy[0]) - (sy[1] - sy[0]) * (sx[2] - sx[0]);
     if (std::abs(area) < 1e-9f) return;
     const int minX = std::max(0, int(std::floor(std::min({sx[0], sx[1], sx[2]})))), maxX = std::min(T.w - 1, int(std::ceil(std::max({sx[0], sx[1], sx[2]}))));
-    const int minY = std::max(0, int(std::floor(std::min({sy[0], sy[1], sy[2]})))), maxY = std::min(T.h - 1, int(std::ceil(std::max({sy[0], sy[1], sy[2]}))));
+    const int minY = std::max(T.rowMin(), int(std::floor(std::min({sy[0], sy[1], sy[2]})))), maxY = std::min(T.rowMax(), int(std::ceil(std::max({sy[0], sy[1], sy[2]}))));
     const float invArea = 1.0f / area;
     for (int y = minY; y <= maxY; ++y) {
         QRgb* row = reinterpret_cast<QRgb*>(T.img->scanLine(y));
@@ -283,6 +291,14 @@ QImage renderScene(const Scene3D& s, const RenderCamera& cam, const QSize& size,
     }
     std::vector<float> depth(size_t(W) * H, 2.0f);
     Target T{&img, &depth, W, H};
+    // Horizontal bands, a few per thread so uneven scenes still balance. Small images are not worth the hand-over.
+    const int threads = opt.threads > 0 ? opt.threads : QThread::idealThreadCount();
+    std::vector<Target> bands;
+    if (threads > 1 && qint64(W) * H >= 40000) {
+        const int n = std::min(threads * 4, std::max(1, H / 16));
+        for (int i = 0; i < n; ++i) { Target b = T; b.y0 = H * i / n; b.y1 = H * (i + 1) / n - 1; if (b.y1 >= b.y0) bands.push_back(b); }
+    }
+    if (bands.size() < 2) bands.assign(1, T);
 
     // lights
     std::vector<Light> lights;
@@ -354,8 +370,16 @@ QImage renderScene(const Scene3D& s, const RenderCamera& cam, const QSize& size,
                 auto t = tex.find(mat->baseTexture);
                 if (t != tex.end()) sm.tex = &t->second;
             } else { sm.base = QVector3D(0.78f, 0.78f, 0.78f); sm.alpha = 1; sm.metallic = 0; sm.roughness = 0.6f; sm.doubleSided = false; }
+            auto drawTriangles = [&](Target& B) {
             for (int i = part.firstIndex; i + 2 < part.firstIndex + part.indexCount; i += 3) {
                 const uint32_t i0 = mesh.indices[size_t(i)], i1 = mesh.indices[size_t(i) + 1], i2 = mesh.indices[size_t(i) + 2];
+                {   // skip triangles that lie wholly outside this band (only when no near-plane clipping is needed)
+                    const QVector4D &c0 = vs[i0].clip, &c1 = vs[i1].clip, &c2 = vs[i2].clip;
+                    if (c0.w() > 1e-7f && c1.w() > 1e-7f && c2.w() > 1e-7f) {
+                        const float y0s = (1 - (c0.y() / c0.w() * 0.5f + 0.5f)) * B.h, y1s = (1 - (c1.y() / c1.w() * 0.5f + 0.5f)) * B.h, y2s = (1 - (c2.y() / c2.w() * 0.5f + 0.5f)) * B.h;
+                        if (std::max({y0s, y1s, y2s}) < B.rowMin() - 1 || std::min({y0s, y1s, y2s}) > B.rowMax() + 1) continue;
+                    }
+                }
                 Vtx a = vs[i0], b = vs[i1], c = vs[i2];
                 if (!hasN) {                                        // flat normal
                     QVector3D fn = QVector3D::crossProduct(b.wpos - a.wpos, c.wpos - a.wpos);
@@ -364,8 +388,11 @@ QImage renderScene(const Scene3D& s, const RenderCamera& cam, const QSize& size,
                     a.nrm = b.nrm = c.nrm = fn;
                 } else if (mirrored) { a.nrm = -a.nrm; b.nrm = -b.nrm; c.nrm = -c.nrm; }
                 if (mirrored) std::swap(b, c);                       // keep the front face counter-clockwise
-                drawClipped(T, a, b, c, sm, hasUv, cam.eye, lights, ambient);
+                drawClipped(B, a, b, c, sm, hasUv, cam.eye, lights, ambient);
             }
+            };
+            if (bands.size() == 1) drawTriangles(bands[0]);
+            else QtConcurrent::blockingMap(bands, drawTriangles);
         }
     }
     if (ss == 1) return img;

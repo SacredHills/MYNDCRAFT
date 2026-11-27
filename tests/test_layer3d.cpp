@@ -1,4 +1,6 @@
 #include <QtTest>
+#include <QElapsedTimer>
+#include <QThread>
 
 #include "TestEnv.h"
 #include "Core/Exporter.h"
@@ -94,6 +96,36 @@ class TestLayer3D : public QObject {
         return c;
     }
     static bool nonWhite(const QColor& c) { return c.red() < 235 || c.green() < 235 || c.blue() < 235; }
+
+private slots:
+    void theMultithreadedRendererGivesExactlyTheSameImageAsOneThreadAndIsFaster() {
+        Comp c = buildComp();
+        // a heavier scene: a grid of spheres plus the translucent card, so ordering of blended pixels matters
+        c.doc->editScene3D(c.scene, [&](Scene3D& sc) {
+            auto sph = makeSphere(0.35, 48, 24); sc.meshes[sph->id] = sph;
+            for (int i = 0; i < 5; ++i) for (int j = 0; j < 3; ++j) {
+                Node3D n; n.kind = NodeKind::Mesh; n.name = "S"; n.mesh = sph->id; n.position = {float(i - 2) * 0.8f, float(j - 1) * 0.8f, -1.0f - 0.2f * float(i)}; sc.addNode(n);
+            }
+            return true; }, "Spheres");
+        const Layer* sl = c.doc->findLayer(c.scene);
+        auto scene = Compositor::sceneForDrawing(*sl, 5, c.doc->canvasSize());
+        const RenderCamera cam = sceneCamera(*scene, 200.0 / 120.0);
+        const QSize size(1200, 720);
+        RenderOptions one; one.threads = 1; one.supersample = 1;
+        RenderOptions many = one; many.threads = 4;
+        QElapsedTimer t; t.start();
+        const QImage a = renderScene(*scene, cam, size, one);
+        const qint64 tOne = t.elapsed();
+        t.restart();
+        const QImage b = renderScene(*scene, cam, size, many);
+        const qint64 tMany = t.elapsed();
+        QCOMPARE(a.size(), b.size());
+        QVERIFY2(a == b, "banded render differs from the single-threaded one");
+        qInfo() << "3D render" << size << ": 1 thread" << tOne << "ms, 4 bands in parallel" << tMany << "ms, cores" << QThread::idealThreadCount();
+        // and with supersampling, as used for export
+        one.supersample = many.supersample = 2;
+        QVERIFY(renderScene(*scene, cam, QSize(400, 240), one) == renderScene(*scene, cam, QSize(400, 240), many));
+    }
 
 private slots:
     void oneCompositionMixesAnimationVectorTextAndThreeDAndAnimatesThemTogether() {
