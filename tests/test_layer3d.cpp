@@ -88,7 +88,7 @@ class TestLayer3D : public QObject {
             sc.activeCamera = sc.addNode(cam);
             sc.background = QColor(0, 0, 0, 0);
             return true; }, "Build");
-        TextContent tc; tc.text = "HELLO"; tc.pos = {120, 20}; tc.sizePx = 24; tc.color = Qt::black;
+        TextContent tc; tc.text = "HELLO"; tc.pos = {125, 85}; tc.sizePx = 24; tc.color = Qt::black;
         c.text = d.addTextLayer(tc, "Title");
         d.undoStack()->clear();
         return c;
@@ -111,7 +111,7 @@ private slots:
         QVERIFY2(green(f10.pixelColor(120, 25)), qPrintable(f10.pixelColor(120, 25).name()));
         // text sits above everything
         bool text = false;
-        for (int y = 20; y < 45 && !text; ++y) for (int x = 120; x < 180; ++x) if (f0.pixelColor(x, y).red() < 90) { text = true; break; }
+        for (int y = 80; y < 118 && !text; ++y) for (int x = 125; x < 195; ++x) if (f0.pixelColor(x, y).red() < 90) { text = true; break; }
         QVERIFY(text);
         // save, reopen, render the entire composition again: identical frames
         QTemporaryDir dir; QString err;
