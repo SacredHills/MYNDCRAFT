@@ -1119,6 +1119,7 @@ public:
         if (!shapes) m_active = &m_layer;
         else if (e.alt()) m_active = &m_layer;
         else if (e.ctrl() && l->type == LayerType::Vector) { m_active = &m_direct; m_mapped = true; selectShapeUnderPoint(e); }
+        else if (l->type == LayerType::Vector && onSelectedPoint(e)) { m_active = &m_direct; m_mapped = true; }   // a visible point is grabbed directly
         else { m_active = &m_select; m_mapped = true; }
         m_active->press(m_mapped ? local(e) : e);
     }
@@ -1164,7 +1165,19 @@ public:
         if (m_active && m_active->busy()) { (m_active == &m_layer ? m_layer.paintOverlay(p, t) : m_active->paintOverlay(p, lt)); return; }
         m_select.paintOverlay(p, lt);
         const bool editing = l->type == LayerType::Vector && (QGuiApplication::keyboardModifiers() & Qt::ControlModifier);
-        if (!editing) return;
+        if (!editing) {
+            // The anchor points of the selected shapes are always visible (grab one to move it; Ctrl shows every shape's points).
+            if (l->type != LayerType::Vector) return;
+            p.setRenderHint(QPainter::Antialiasing);
+            for (const VectorShape& sh : l->shapes) {
+                if (!m_s->selectedShapes().contains(sh.id)) continue;
+                p.setPen(QPen(QColor(20, 120, 255), 1));
+                p.setBrush(Qt::NoBrush);
+                p.drawPath(lt.map(sh.path()));
+                for (const PathNode& n : sh.nodes) drawSquare(p, lt.map(n.pos), 4, false);
+            }
+            return;
+        }
         // Holding Ctrl: show the points of every shape (the selected one in full, with its handles).
         p.setRenderHint(QPainter::Antialiasing);
         for (const VectorShape& sh : l->shapes) {
@@ -1323,6 +1336,17 @@ private:
         const QTransform inv = layerMatrix(m_s->activeLayer()).inverted(&ok);
         if (ok) r.doc = inv.map(e.doc);
         return r;
+    }
+    bool onSelectedPoint(const PointerEvent& e) const {
+        const Layer* l = m_s->activeLayer();
+        if (!l || l->props.locked || m_s->selectedShapes().isEmpty()) return false;
+        const QPointF q = local(e).doc;
+        const double tol = kHitPx / m_c->zoom();
+        for (const VectorShape& sh : l->shapes) {
+            if (!m_s->selectedShapes().contains(sh.id)) continue;
+            for (const PathNode& n : sh.nodes) if (QLineF(q, n.pos).length() <= tol) return true;
+        }
+        return false;
     }
     // Ctrl-click on a point of a shape that is not selected yet: select that shape so the click grabs the point.
     void selectShapeUnderPoint(const PointerEvent& e) {
