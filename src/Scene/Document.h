@@ -91,6 +91,8 @@ public:
     int durationFrames() const { return m_comp.durationFrames; }
     void setDuration(int frames);
     void setFrameRate(FrameRate fps);
+    void setBackground(const QColor& c);             // undoable; alpha 0 = transparent (checkerboard, alpha in exports)
+    void applyBackground(const QColor& c);           // used by the undo command
     void setWorkArea(bool enabled, int in, int out);
     // First/last frame of the playback range (work area when enabled, else the whole duration).
     int rangeStart() const;

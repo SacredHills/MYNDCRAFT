@@ -14,6 +14,7 @@
 
 #include <QApplication>
 #include <QCloseEvent>
+#include <QColorDialog>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -590,6 +591,38 @@ void MainWindow::buildMenus() {
     view->addActions({aGrid, aRulers, aGuides, aSnap, aClearGuides});
     view->addSeparator();
     view->addAction(aDetachCanvas);
+    view->addSeparator();
+    {   // the colour (or transparency) the canvas and exports start from
+        QMenu* bgm = view->addMenu(tr("Canvas &Background"));
+        auto* grp = new QActionGroup(this);
+        auto add = [&](const QString& text, const QColor& c) {
+            QAction* a = bgm->addAction(text);
+            a->setCheckable(true);
+            grp->addAction(a);
+            connect(a, &QAction::triggered, this, [this, c] { if (m_doc) m_doc->setBackground(c); });
+            return a;
+        };
+        add(tr("White"), Qt::white);
+        add(tr("Black"), Qt::black);
+        QAction* tp = add(tr("Transparent"), QColor(0, 0, 0, 0));
+        QAction* custom = bgm->addAction(tr("Custom Color…"));
+        custom->setCheckable(true);
+        grp->addAction(custom);
+        connect(custom, &QAction::triggered, this, [this] {
+            if (!m_doc) return;
+            const QColor c = QColorDialog::getColor(m_doc->comp().background.alpha() ? m_doc->comp().background : QColor(Qt::white), this, tr("Canvas Background"), QColorDialog::ShowAlphaChannel);
+            if (c.isValid()) m_doc->setBackground(c);
+        });
+        connect(bgm, &QMenu::aboutToShow, this, [this, bgm, grp, tp, custom] {
+            const QColor c = m_doc ? m_doc->comp().background : QColor(Qt::white);
+            for (QAction* a : grp->actions()) a->setChecked(false);
+            const auto acts = bgm->actions();
+            if (c.alpha() == 0) tp->setChecked(true);
+            else if (c == QColor(Qt::white)) acts[0]->setChecked(true);
+            else if (c == QColor(Qt::black)) acts[1]->setChecked(true);
+            else custom->setChecked(true);
+        });
+    }
 
     QMenu* obj = menuBar()->addMenu(tr("&Object"));
     obj->addActions({aGroupShapes, aUngroupShapes});

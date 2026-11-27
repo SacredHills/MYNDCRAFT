@@ -7,6 +7,7 @@
 #include "Core/Exporter.h"
 #include "Core/ProjectIO.h"
 #include "Core/Settings.h"
+#include "Graphics/Compositor.h"
 #include "UI/MainWindow.h"
 #include "UI/GraphEditor.h"
 #include "UI/PropertiesPanel.h"
@@ -170,6 +171,25 @@ private slots:
         QCOMPARE(keys("transform.position").size(), 1);
         QTest::mouseDClick(t->viewport(), Qt::LeftButton, {}, t->cellCenter(20, pr));
         QCOMPARE(keys("transform.position").size(), 2);
+    }
+
+    void theCanvasBackgroundCanBeMadeTransparentAndBack() {
+        QCOMPARE(doc->comp().background, QColor(Qt::white));
+        doc->setBackground(QColor(0, 0, 0, 0));
+        QCOMPARE(Compositor::render(*doc).pixelColor(5, 5).alpha(), 0);          // nothing under the empty corner
+        QCOMPARE(Compositor::render(*doc).pixelColor(120, 120), QColor(Qt::red));  // the drawing is untouched
+        QTemporaryDir dir;
+        QString err;
+        const QString path = dir.filePath("t.mynd");
+        QVERIFY2(ProjectIO::save(*doc, path, &err), qPrintable(err));
+        auto back = ProjectIO::load(path);
+        QVERIFY2(back.doc, qPrintable(back.error));
+        QCOMPARE(back.doc->comp().background.alpha(), 0);
+        doc->undoStack()->undo();
+        QCOMPARE(doc->comp().background, QColor(Qt::white));
+        QCOMPARE(Compositor::render(*doc).pixelColor(5, 5), QColor(Qt::white));
+        doc->undoStack()->redo();
+        QCOMPARE(Compositor::render(*doc).pixelColor(5, 5).alpha(), 0);
     }
 
     void keyframeSelectionMoveEaseCopyPasteAndDeleteAreUndoable() {

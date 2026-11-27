@@ -117,6 +117,15 @@ private:
     Document* m_doc; TimingSettings m_before, m_after;
 };
 
+class BackgroundCommand : public QUndoCommand {
+public:
+    BackgroundCommand(Document* d, const QColor& before, const QColor& after, const QString& text);
+    void undo() override;
+    void redo() override;
+private:
+    Document* m_doc; QColor m_before, m_after;
+};
+
 class VectorStateCommand : public QUndoCommand {
 public:
     VectorStateCommand(Document* d, const QUuid& layer, const ShapeList& before,

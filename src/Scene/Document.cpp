@@ -392,6 +392,14 @@ void Document::setDuration(int frames) {
     if (a == b) return;
     m_undo.push(new TimingCommand(this, a, b, tr("Set Duration")));
 }
+void Document::setBackground(const QColor& c) {
+    if (!c.isValid() || c == m_comp.background) return;
+    m_undo.push(new BackgroundCommand(this, m_comp.background, c, c.alpha() == 0 ? tr("Transparent Background") : tr("Change Background")));
+}
+void Document::applyBackground(const QColor& c) {
+    m_comp.background = c;
+    emitContentChanged({});
+}
 void Document::setFrameRate(FrameRate fps) {
     if (!fps.isValid() || fps == m_comp.fps) return;
     TimingSettings a = timingOf(m_comp), b = a;

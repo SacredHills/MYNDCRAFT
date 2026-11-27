@@ -134,6 +134,11 @@ TimingCommand::TimingCommand(Document* d, const TimingSettings& b, const TimingS
 void TimingCommand::redo() { m_doc->applyTiming(m_after); }
 void TimingCommand::undo() { m_doc->applyTiming(m_before); }
 
+// ---------------- Composition background ----------------
+BackgroundCommand::BackgroundCommand(Document* d, const QColor& b, const QColor& a, const QString& text) : m_doc(d), m_before(b), m_after(a) { setText(text); }
+void BackgroundCommand::redo() { m_doc->applyBackground(m_after); }
+void BackgroundCommand::undo() { m_doc->applyBackground(m_before); }
+
 // ---------------- Vector state ----------------
 VectorStateCommand::VectorStateCommand(Document* d, const QUuid& layer, const ShapeList& b,
                                        const ShapeList& a, const QString& text)
