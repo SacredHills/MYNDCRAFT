@@ -98,7 +98,6 @@ bool WorkspaceManager::apply(const QString& name) {
 void WorkspaceManager::applyPreset(const QString& name) {
     CDockWidget* cvs = m_docks["canvas"];
     CDockWidget* opt = m_docks["options"];
-    CDockWidget* sty = m_docks["style"];
     CDockWidget* lay = m_docks["layers"];
     CDockWidget* his = m_docks["history"];
     CDockWidget* tim = m_docks["timeline"];
@@ -117,24 +116,23 @@ void WorkspaceManager::applyPreset(const QString& name) {
     place(cvs);
     if (name == "Drawing") {
         // Everything stacked on the right; history hidden.
-        auto* sA = m_mgr->addDockWidget(RightDockWidgetArea, sty, cA);
-        auto* oA = m_mgr->addDockWidget(BottomDockWidgetArea, opt, sA);
+        auto* sA = m_mgr->addDockWidget(RightDockWidgetArea, opt, cA);
+        auto* oA = sA;
         auto* lA = m_mgr->addDockWidget(BottomDockWidgetArea, lay, oA);
-        place(sty); place(opt); place(lay);
+        place(opt); place(lay);
         m_mgr->setSplitterSizes(cA, {W - 300, 300});
-        m_mgr->setSplitterSizes(sA, {110, 230, 380});
+        m_mgr->setSplitterSizes(sA, {230, 490});
         Q_UNUSED(lA);
     } else if (name == "Animation") {
         // Options + onion skin + properties (tabbed) and colors on the left; exposure sheet over layers on the right; timeline below.
         auto* oA = m_mgr->addDockWidget(LeftDockWidgetArea, opt, cA);
         m_mgr->addDockWidgetTabToArea(oni, oA);
         m_mgr->addDockWidgetTabToArea(prp, oA);
-        m_mgr->addDockWidget(BottomDockWidgetArea, sty, oA);
         auto* eA = m_mgr->addDockWidget(RightDockWidgetArea, exs, cA);
         auto* lA = m_mgr->addDockWidget(BottomDockWidgetArea, lay, eA);
         m_mgr->addDockWidgetTabToArea(his, lA);
         auto* tA = m_mgr->addDockWidget(BottomDockWidgetArea, tim);
-        for (auto* d : {opt, oni, prp, sty, exs, lay, his, tim}) place(d);
+        for (auto* d : {opt, oni, prp, exs, lay, his, tim}) place(d);
         m_mgr->setSplitterSizes(cA, {250, W - 520, 270});
         m_mgr->setSplitterSizes(eA, {330, 220});
         m_mgr->setSplitterSizes(tA, {H - 260, 210});
@@ -154,18 +152,16 @@ void WorkspaceManager::applyPreset(const QString& name) {
         m_mgr->setSplitterSizes(tA, {H - 250, 200});
         s3d->setAsCurrentTab(); lay->setAsCurrentTab();
     } else {  // Illustration: options + colors on the left, canvas, layers + history (tabbed) on the right
-        auto* oA = m_mgr->addDockWidget(LeftDockWidgetArea, opt, cA);
-        m_mgr->addDockWidget(BottomDockWidgetArea, sty, oA);
+        m_mgr->addDockWidget(LeftDockWidgetArea, opt, cA);
         auto* lA = m_mgr->addDockWidget(RightDockWidgetArea, lay, cA);
         m_mgr->addDockWidgetTabToArea(his, lA);
-        for (auto* d : {opt, sty, lay, his}) place(d);
+        for (auto* d : {opt, lay, his}) place(d);
         m_mgr->setSplitterSizes(cA, {260, W - 560, 300});
-        m_mgr->setSplitterSizes(oA, {240, 120});
         lay->setAsCurrentTab();
     }
     // Panels this workspace does not show are parked (closed) next to the layers panel: the Window menu brings them back there.
     CDockAreaWidget* park = lay->dockAreaWidget();
-    for (CDockWidget* d : {opt, sty, lay, his, tim, exs, oni, prp, s3d, v3d}) {
+    for (CDockWidget* d : {opt, lay, his, tim, exs, oni, prp, s3d, v3d}) {
         if (!d || shown.contains(d)) continue;
         m_mgr->addDockWidgetTabToArea(d, park);
         d->toggleView(false);

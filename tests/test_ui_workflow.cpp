@@ -398,7 +398,7 @@ private slots:
         QVERIFY(vis("history"));
         QVERIFY(ws->apply("Drawing"));
         QVERIFY(!vis("history"));
-        QVERIFY(vis("layers") && vis("options") && vis("style"));
+        QVERIFY(vis("layers") && vis("options"));
         // The project itself is untouched by workspace changes.
         QCOMPARE(w->document()->layerCount(), 1);
         w->dock("history")->toggleView(true);

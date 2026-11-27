@@ -454,6 +454,8 @@ void MainWindow::buildToolbars() {
         tb->addAction(m_toolActions[id]);
         if (id == ToolId::Zoom || id == ToolId::Eyedropper) tb->addSeparator();
     }
+    tb->addSeparator();
+    tb->addWidget(new StylePanel(m_session));            // colors and shape style live at the bottom of the tools
 
     auto* top = addToolBar(tr("Workspace"));
     top->setObjectName("workspace-bar");
@@ -537,7 +539,6 @@ void MainWindow::buildDocks() {
     m_layers = new LayerPanel(m_session);
     mkDock("canvas", tr("Canvas"), m_canvas)->setFeature(ads::CDockWidget::DockWidgetClosable, false);   // there must always be a canvas
     mkDock("options", tr("Tool Options"), new ToolOptionsPanel(m_session));
-    mkDock("style", tr("Color & Style"), new StylePanel(m_session));
     mkDock("layers", tr("Layers"), m_layers);
     mkDock("history", tr("History"), new HistoryPanel(m_session));
     m_anim = new AnimationActions(m_session, this);

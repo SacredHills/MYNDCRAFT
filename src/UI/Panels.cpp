@@ -324,29 +324,29 @@ void LayerPanel::ungroupActive() {
 // =============================================================== Style panel
 static void setSwatch(QToolButton* b, const QColor& c) { b->setIcon(icons::colorSwatch(c, 24)); b->setIconSize({24, 24}); }
 
+// A compact strip that sits at the bottom of the tool bar (like the swatches at the bottom of a toolbox).
 StylePanel::StylePanel(EditorSession* s, QWidget* parent) : QWidget(parent), m_s(s) {
-    auto* lay = new QVBoxLayout(this);
-    lay->setContentsMargins(6, 6, 6, 6);
-    auto* top = new QHBoxLayout;
+    setObjectName("styleStrip");
+    auto* g = new QGridLayout(this);
+    g->setContentsMargins(3, 4, 3, 4);
+    g->setSpacing(3);
     m_fg = new QToolButton; m_fg->setToolTip(tr("Foreground color (brush, bucket, gradient start)"));
     m_bg = new QToolButton; m_bg->setToolTip(tr("Background color (gradient end)"));
     auto* swap = new QToolButton; swap->setText("⇄"); swap->setToolTip(tr("Swap colors (X)"));
-    top->addWidget(new QLabel(tr("Paint")));
-    top->addWidget(m_fg); top->addWidget(m_bg); top->addWidget(swap); top->addStretch();
-    lay->addLayout(top);
-
-    auto* form = new QFormLayout;
-    m_fillOn = new QCheckBox(tr("Fill"));
-    m_fill = new QToolButton;
-    auto* fr = new QHBoxLayout; fr->addWidget(m_fillOn); fr->addWidget(m_fill); fr->addStretch();
-    form->addRow(tr("Vector"), fr);
-    m_strokeOn = new QCheckBox(tr("Stroke"));
-    m_stroke = new QToolButton;
+    swap->setAutoRaise(true);
+    g->addWidget(m_fg, 0, 0); g->addWidget(m_bg, 0, 1);
+    g->addWidget(swap, 1, 0, 1, 2);
+    m_fillOn = new QCheckBox(tr("Fill")); m_fillOn->setToolTip(tr("Vector shapes get a fill"));
+    m_fill = new QToolButton; m_fill->setToolTip(tr("Fill color of new vector shapes"));
+    m_strokeOn = new QCheckBox(tr("Line")); m_strokeOn->setToolTip(tr("Vector shapes get an outline"));
+    m_stroke = new QToolButton; m_stroke->setToolTip(tr("Outline color of new vector shapes"));
     m_width = new QDoubleSpinBox; m_width->setRange(0.1, 500); m_width->setDecimals(1); m_width->setSuffix(" px");
-    auto* sr = new QHBoxLayout; sr->addWidget(m_strokeOn); sr->addWidget(m_stroke); sr->addWidget(m_width); sr->addStretch();
-    form->addRow("", sr);
-    lay->addLayout(form);
-    lay->addStretch();
+    m_width->setToolTip(tr("Outline width"));
+    g->addWidget(m_fillOn, 2, 0); g->addWidget(m_fill, 2, 1);
+    g->addWidget(m_strokeOn, 3, 0); g->addWidget(m_stroke, 3, 1);
+    g->addWidget(m_width, 4, 0, 1, 2);
+    for (QToolButton* b : {m_fg, m_bg, m_fill, m_stroke}) b->setFixedSize(30, 30);
+    setFixedWidth(88);
 
     auto pick = [this](QToolButton* b, QColor cur, std::function<void(QColor)> apply) {
         connect(b, &QToolButton::clicked, this, [this, cur, apply, b] {
