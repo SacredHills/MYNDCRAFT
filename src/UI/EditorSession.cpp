@@ -477,6 +477,27 @@ bool EditorSession::toggleAnimated(const QUuid& layer, const QString& prop) {
     return true;
 }
 
+bool EditorSession::addKeysHere(const QUuid& layer, const QString& prop) {
+    Layer* l = editableTracksLayer(this, layer);
+    if (!l) return false;
+    PropertyTracks t = l->tracks;
+    const int f = m_doc->currentFrame();
+    int added = 0;
+    auto key = [&](const PropertyDef& d) {
+        const PropValue cur = valueOf(t, d, f);
+        if (!t.contains(d.id)) { PropertyTrack nt; nt.base = d.def; t.insert(d.id, nt); }
+        PropertyTrack& trk = t[d.id];
+        if (trk.indexOfKey(f) >= 0) return;
+        trk.setKey(d, f, cur);
+        ++added;
+    };
+    if (prop.isEmpty()) { for (const PropertyDef& d : layerPropertyDefs()) key(d); }
+    else if (const PropertyDef* d = findPropertyDef(prop)) key(*d);
+    if (!added) return false;
+    m_doc->editTracks(layer, t, tr("Add Keyframe"));
+    return true;
+}
+
 bool EditorSession::toggleKeyHere(const QUuid& layer, const QString& prop) {
     Layer* l = editableTracksLayer(this, layer);
     const PropertyDef* d = findPropertyDef(prop);

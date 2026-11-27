@@ -145,6 +145,33 @@ private slots:
         QVERIFY(!L()->tracks.contains("opacity") || !L()->tracks["opacity"].animated());
     }
 
+    void doubleClickingTheTimelineAddsKeyframes() {
+        TimelineView* t = tv();
+        t->setCellWidth(20);
+        const int layerRow = t->rowOfLayer(layerId);
+        // a double-click in a layer's own row keys all of its properties at that frame (one undo step) and shows them
+        QVERIFY(!t->isExpanded(layerId));
+        QTest::mouseDClick(t->viewport(), Qt::LeftButton, {}, t->cellCenter(8, layerRow));
+        QApplication::processEvents();
+        QCOMPARE(doc->currentFrame(), 8);
+        QVERIFY(t->isExpanded(layerId));
+        QCOMPARE(keys("transform.position").size(), 1);
+        QVERIFY(keys("transform.position").first().startsWith("8:"));
+        QCOMPARE(keys("opacity").size() + keys("transform.scale").size(), 2);
+        doc->undoStack()->undo();
+        QVERIFY(keys("transform.position").isEmpty());
+        // a double-click on one property row keys only that property; on an existing key it does nothing more
+        const int pr = t->rowOfProperty(layerId, "transform.position");
+        QVERIFY(pr >= 0);
+        QTest::mouseDClick(t->viewport(), Qt::LeftButton, {}, t->cellCenter(12, pr));
+        QCOMPARE(keys("transform.position").size(), 1);
+        QVERIFY(keys("transform.scale").isEmpty());
+        QTest::mouseDClick(t->viewport(), Qt::LeftButton, {}, t->cellCenter(12, pr));
+        QCOMPARE(keys("transform.position").size(), 1);
+        QTest::mouseDClick(t->viewport(), Qt::LeftButton, {}, t->cellCenter(20, pr));
+        QCOMPARE(keys("transform.position").size(), 2);
+    }
+
     void keyframeSelectionMoveEaseCopyPasteAndDeleteAreUndoable() {
         s->setAutoKey(true);
         for (int f : {0, 10, 20}) { doc->setCurrentFrame(f); s->setProperty(layerId, "transform.position", PropValue::of(f * 5.0, 0)); }

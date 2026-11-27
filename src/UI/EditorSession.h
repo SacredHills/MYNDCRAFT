@@ -151,6 +151,7 @@ public:
     bool setProperties(const QUuid& layer, const QVector<QPair<QString, PropValue>>& values, const QString& mergeKey = {});
     bool setProperty(const QUuid& layer, const QString& prop, PropValue v, const QString& mergeKey = {}) { return setProperties(layer, {{prop, v}}, mergeKey); }
     bool toggleAnimated(const QUuid& layer, const QString& prop);     // stopwatch
+    bool addKeysHere(const QUuid& layer, const QString& prop = {});    // key `prop` (or every layer property when empty) at the current frame; never removes
     bool toggleKeyHere(const QUuid& layer, const QString& prop);      // add / remove the key at the current frame
     bool gotoKey(int direction);                                       // previous/next keyframe of the active layer
     // Selection of keyframes (what Delete / Move / Copy / Ease act on).

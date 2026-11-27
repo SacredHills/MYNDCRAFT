@@ -458,6 +458,26 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e) {
     viewport()->setCursor(pt.x() >= kNameW && hitExposureEdge(pt, &r, &i) ? Qt::SizeHorCursor : Qt::ArrowCursor);
 }
 
+// Double-click puts a keyframe where the click is: on a property row for that property, on a layer's own row for all of its properties
+// (animation layers excepted: a click in their row selects drawing frames).
+void TimelineView::mouseDoubleClickEvent(QMouseEvent* e) {
+    Document* d = m_s->doc();
+    const QPoint pt = e->position().toPoint();
+    if (!d || e->button() != Qt::LeftButton || pt.y() < kRulerH || pt.x() < kNameW) { QAbstractScrollArea::mouseDoubleClickEvent(e); return; }
+    const int r = rowAtY(pt.y());
+    if (r < 0) return;
+    const Layer* l = m_rows[r].layer;
+    const QString prop = m_rows[r].prop;
+    KeyRef kr;
+    if (!prop.isEmpty() && keyAt(pt, &kr)) return;                       // on an existing key: nothing to add
+    if (prop.isEmpty() && l->type == LayerType::Animation) return;
+    m_drag = None;
+    m_s->playback()->pause();
+    d->setCurrentFrame(std::clamp(frameAtX(pt.x()), 0, d->durationFrames() - 1));
+    const QUuid id = l->id;                                              // by value: the edit rebuilds the rows
+    if (m_s->addKeysHere(id, prop) && prop.isEmpty()) setExpanded(id, true);   // show what was keyed
+}
+
 void TimelineView::mouseReleaseEvent(QMouseEvent*) {
     if (m_drag == KeyMove) {
         const int delta = m_keyDelta;
