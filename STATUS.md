@@ -322,6 +322,9 @@ Limitations (honest list):
 - **Texture repeat:** Material panel has Repeat (U, V) and Offset (U, V) for the base texture (drag or type; negative mirrors). Stored in the project, applied by the renderer (the image already wrapped), undoable. glTF `KHR_texture_transform` scale/offset on the base colour texture is imported (its rotation is not).
 - Only the base colour texture exists as a texture slot, so repeat applies to it only.
 
+## 3D view stays on when other layers are clicked (implemented, headless-tested; not yet hand-tested on Windows)
+- The 3D panels and the 3D view work on "the active 3D scene": the active layer if it is a scene, else the scene that shows the active layer as a card, else the scene that was last active. Clicking a raster/vector/any other layer no longer empties the 3D view, and the selected 3D object stays selected. Clicking a layer that is a card selects its card in the 3D view. Creating a 3D object while a plain layer is active adds it to that scene. A different scene layer or a new document resets it.
+
 ## Next tasks
 1. Phase 8: unified 2D/3D composition (awaiting go-ahead).
 2. Visual tween spans in the timeline, swapping an instance's symbol, per-instance Movie Clip play/stop; FBX animation; clip blocks on the timeline.

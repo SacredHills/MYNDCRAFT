@@ -61,6 +61,7 @@ void EditorSession::setDocument(Document* d) {
     m_selected.clear();
     m_keySel.clear();
     m_activeLayer = {};
+    m_sceneLayer = {};
     m_node = {};
     if (d) {
         connect(d, &Document::tracksChanged, this, [this] {
@@ -112,10 +113,37 @@ void EditorSession::setSelectedNode(const QUuid& id) {
     emit nodeSelectionChanged(id);
 }
 
+Layer* EditorSession::active3DLayer() const {
+    Layer* l = activeLayer();
+    if (l && l->type == LayerType::Scene3D && l->scene3d) return l;
+    Layer* s = m_doc && !m_sceneLayer.isNull() ? m_doc->findLayer(m_sceneLayer) : nullptr;
+    return s && s->type == LayerType::Scene3D && s->scene3d ? s : nullptr;
+}
+
+// The first 3D scene (and its node) that shows layer `id` as a card.
+static Layer* sceneShowingAsCard(Layer& group, const QUuid& id, QUuid* node) {
+    for (const auto& c : group.children) {
+        if (c->type == LayerType::Scene3D && c->scene3d)
+            for (const Node3D& n : c->scene3d->nodes) if (n.cardLayer == id) { *node = n.id; return c.get(); }
+        if (c->isGroup()) if (Layer* f = sceneShowingAsCard(*c, id, node)) return f;
+    }
+    return nullptr;
+}
+
 void EditorSession::setActiveLayer(const QUuid& id) {
     if (id == m_activeLayer) return;
+    if (const Layer* old = activeLayer(); old && old->type == LayerType::Scene3D && old->scene3d) m_sceneLayer = old->id;   // (it may have become active without passing here)
     m_activeLayer = id;
-    setSelectedNode({});
+    // Which scene stays in the 3D view: the layer itself if it is a scene, else the scene that shows it as a card, else the one before.
+    const QUuid sceneBefore = m_sceneLayer;
+    QUuid cardNode;
+    if (const Layer* nl = m_doc ? m_doc->findLayer(id) : nullptr) {
+        if (nl->type == LayerType::Scene3D && nl->scene3d) m_sceneLayer = id;
+        else if (Layer* sc = sceneShowingAsCard(*m_doc->root(), id, &cardNode)) m_sceneLayer = sc->id;
+    }
+    if (!cardNode.isNull()) setSelectedNode(cardNode);              // clicking a layer that is a card selects its card in the 3D view
+    else if (m_sceneLayer != sceneBefore) setSelectedNode({});
+    // (otherwise the selected 3D object stays selected while other layers are clicked)
     if (!m_selLayer.isNull() && m_selLayer != id) clearFrameSelection();
     m_selected.clear();
     emit activeLayerChanged(id);

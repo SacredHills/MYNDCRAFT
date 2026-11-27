@@ -67,7 +67,9 @@ public:
     void setActiveLayer(const QUuid& id);
     // ---- 3D ----
     // The 3D scene layer the 3D panels edit: the active layer when it is a 3D scene, otherwise null.
-    Layer* active3DLayer() const { Layer* l = activeLayer(); return l && l->type == LayerType::Scene3D && l->scene3d ? l : nullptr; }
+    // The 3D scene the 3D panels and the 3D view work on: the active layer when it is a scene; otherwise the scene that shows the active
+    // layer as a card, or else the scene that was last active. So clicking any other layer does not switch the 3D view off.
+    Layer* active3DLayer() const;
     QUuid selectedNode() const { return m_node; }          // a node of the active 3D layer's scene (null = none)
     void setSelectedNode(const QUuid& id);
     // Returns the active layer if it has the requested type and is editable; otherwise (optionally)
@@ -218,6 +220,7 @@ signals:
 private:
     Document* m_doc = nullptr;
     QUuid m_activeLayer;
+    QUuid m_sceneLayer;          // the 3D scene last in use (see active3DLayer)
     QUuid m_node;
     LayerPtr m_layerClip;
     QSet<QUuid> m_selected;

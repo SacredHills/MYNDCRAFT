@@ -480,6 +480,38 @@ private slots:
         check("moved and tilted");
     }
 
+    void clickingOtherLayersKeepsTheThreeDViewOnTheScene() {
+        const QUuid cube = buildScene();
+        const QUuid scene = s->activeLayerId();
+        QCOMPARE(s->active3DLayer()->id, scene);
+        const QUuid plain = doc->addLayer(LayerType::Raster, "Plain");
+        const QUuid art = doc->addLayer(LayerType::Vector, "Art");
+        const QUuid cardNode = a->makeLayer3D(art);                       // a card in that scene (reuses the scene layer above it, or makes one)
+        QVERIFY(!cardNode.isNull());
+        // go back to the original scene and select the cube
+        const Layer* cardScene = nullptr;
+        for (const auto& c : doc->root()->children) if (c->type == LayerType::Scene3D && c->scene3d && c->scene3d->node(cube)) cardScene = c.get();
+        QVERIFY(cardScene);
+        s->setActiveLayer(cardScene->id);
+        s->setSelectedNode(cube);
+        QVERIFY(vp->isVisible());
+        // any other layer: the 3D panels, the 3D view and the selected object all stay
+        s->setActiveLayer(plain);
+        QApplication::processEvents();
+        QVERIFY(s->active3DLayer() && s->active3DLayer()->id == cardScene->id);
+        QCOMPARE(s->selectedNode(), cube);
+        QVERIFY(w->scene3dPanel()->tree()->topLevelItemCount() >= 3);
+        // creating an object while a plain layer is active goes into that scene
+        const int before = int(s->active3DLayer()->scene3d->nodes.size());
+        a->createPrimitive(Primitive::Sphere);
+        QCOMPARE(int(s->active3DLayer()->scene3d->nodes.size()), before + 1);
+        // the layer that is a card selects its card in the 3D view
+        s->setActiveLayer(art);
+        QApplication::processEvents();
+        QVERIFY(s->active3DLayer());
+        QCOMPARE(s->selectedNode(), cardNode);
+    }
+
     void workspacesComeBackIdenticallyWhateverWasShownBefore() {
         auto snap = [&] {
             QStringList out;
