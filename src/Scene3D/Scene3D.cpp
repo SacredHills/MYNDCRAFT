@@ -60,7 +60,7 @@ QMatrix4x4 Node3D::localMatrix() const {
 bool Node3D::operator==(const Node3D& o) const {
     return id == o.id && parent == o.parent && name == o.name && kind == o.kind && visible == o.visible && position == o.position &&
            rotation == o.rotation && scale == o.scale && mesh == o.mesh && materialOverride == o.materialOverride && skin == o.skin &&
-           cardLayer == o.cardLayer && cardLit == o.cardLit &&
+           cardLayer == o.cardLayer && cardLit == o.cardLit && slerpRotation == o.slerpRotation &&
            lightType == o.lightType && lightColor == o.lightColor && intensity == o.intensity && range == o.range &&
            spotAngle == o.spotAngle && fov == o.fov && nearPlane == o.nearPlane && farPlane == o.farPlane;
 }
@@ -421,6 +421,7 @@ QJsonObject Scene3D::toJson() const {
         if (!n.parent.isNull()) j["parent"] = n.parent.toString(QUuid::WithoutBraces);
         j["name"] = n.name; j["kind"] = nodeKindKey(n.kind); j["visible"] = n.visible;
         j["position"] = vec3(n.position); j["rotation"] = vec3(n.rotation); j["scale"] = vec3(n.scale);
+        if (n.slerpRotation) j["slerp"] = true;
         if (n.kind == NodeKind::Mesh) {
             j["mesh"] = n.mesh.toString(QUuid::WithoutBraces);
             if (!n.materialOverride.isNull()) j["material"] = n.materialOverride.toString(QUuid::WithoutBraces);
@@ -503,6 +504,7 @@ bool Scene3D::fromJson(const QJsonObject& o, Scene3D& out, QString* err) {
         n.visible = j["visible"].toBool(true);
         if (!readVec3(j["position"], n.position) || !readVec3(j["rotation"], n.rotation) || !readVec3(j["scale"], n.scale))
             return fail("3D node '" + n.name + "' has an invalid transform");
+        n.slerpRotation = j["slerp"].toBool(false);
         if (n.kind == NodeKind::Mesh) { n.mesh = QUuid(j["mesh"].toString()); n.materialOverride = QUuid(j["material"].toString()); n.skin = QUuid(j["skin"].toString()); n.cardLayer = QUuid(j["cardLayer"].toString()); n.cardLit = j["cardLit"].toBool(false); }
         else if (n.kind == NodeKind::Light) {
             if (!lightTypeFromKey(j["lightType"].toString("point"), n.lightType)) return fail("unknown light type");

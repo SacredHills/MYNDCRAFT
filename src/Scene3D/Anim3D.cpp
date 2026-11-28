@@ -1,6 +1,7 @@
 #include "Scene3D/Anim3D.h"
 
 #include <QHash>
+#include <QQuaternion>
 #include <QMutex>
 #include <QMutexLocker>
 #include <algorithm>
@@ -198,6 +199,38 @@ bool hasSceneAnimation(const Scene3D& s, const PropertyTracks& t) {
     return false;
 }
 
+namespace {
+QQuaternion quatFromEuler(const QVector3D& e) {        // R = Rz * Ry * Rx
+    return QQuaternion::fromAxisAndAngle(0, 0, 1, e.z()) * QQuaternion::fromAxisAndAngle(0, 1, 0, e.y()) * QQuaternion::fromAxisAndAngle(1, 0, 0, e.x());
+}
+// Value of a rotation track at `frame` turning the shortest way between neighbouring keys (slerp). The segment's timing (ease, hold)
+// is the track's own; the result is an Euler triple of the same orientation.
+PropValue slerpRotationAt(const PropertyTrack& tr, const PropertyDef& d, double frame) {
+    if (tr.keys.size() < 2 || frame <= tr.keys.first().frame || frame >= tr.keys.last().frame) return tr.valueAt(d, frame);
+    auto it = std::upper_bound(tr.keys.begin(), tr.keys.end(), frame, [](double f, const Keyframe& k) { return f < k.frame; });
+    const Keyframe& b = *it; const Keyframe& a = *(it - 1);
+    if (frame == a.frame || a.out == Interp::Hold) return a.value;
+    double e = (frame - a.frame) / double(b.frame - a.frame);
+    if (a.out == Interp::Bezier || b.in == Interp::Bezier) {
+        const Handle o = a.out == Interp::Bezier ? a.outHandle : Handle{};
+        const Handle i = b.in == Interp::Bezier ? b.inHandle : Handle{};
+        e = bezierEase(e, o.x, o.y, 1 - i.x, 1 - i.y);
+    }
+    const QQuaternion q = QQuaternion::slerp(quatFromEuler(QVector3D(a.value.c[0], a.value.c[1], a.value.c[2])),
+                                             quatFromEuler(QVector3D(b.value.c[0], b.value.c[1], b.value.c[2])), float(e));
+    const QVector3D ref(a.value.c[0], a.value.c[1], a.value.c[2]);
+    const QVector3D eul = eulerNear(eulerFromMatrix(QMatrix4x4(q.normalized().toRotationMatrix())), ref);
+    return PropValue::of(eul.x(), eul.y(), eul.z());
+}
+// Track value, using quaternion interpolation for the rotation of nodes that ask for it.
+PropValue trackValue(const Scene3D& s, const QString& id, const PropertyTrack& tr, const PropertyDef& d, double frame) {
+    PropTarget pt;
+    if (parseScene3DPropId(id, &pt) && !pt.material && pt.what == "rot")
+        if (const Node3D* n = s.node(pt.target); n && n->slerpRotation) return slerpRotationAt(tr, d, frame);
+    return tr.valueAt(d, frame);
+}
+}  // namespace
+
 Scene3D evaluateScene(const Scene3D& base, const PropertyTracks& t, double frame) {
     if (!hasSceneAnimation(base, t)) return base;
     Scene3D s = base;
@@ -217,7 +250,7 @@ Scene3D evaluateScene(const Scene3D& base, const PropertyTracks& t, double frame
             if (!it->animated()) continue;
             const PropertyDef* d = scene3DPropertyDef(it.key());
             if (!d || !scenePropExists(s, it.key())) continue;
-            const PropValue v = it->valueAt(*d, ct);
+            const PropValue v = trackValue(s, it.key(), it.value(), *d, ct);
             writeSceneProp(s, it.key(), v);
             mixValue(it.key(), v);
         }
@@ -226,7 +259,7 @@ Scene3D evaluateScene(const Scene3D& base, const PropertyTracks& t, double frame
         if (!isScene3DPropId(it.key()) || !it->animated()) continue;
         const PropertyDef* d = scene3DPropertyDef(it.key());
         if (!d || !scenePropExists(s, it.key())) continue;
-        const PropValue v = it->valueAt(*d, frame);
+        const PropValue v = trackValue(s, it.key(), it.value(), *d, frame);
         writeSceneProp(s, it.key(), v);
         mixValue(it.key(), v);
     }

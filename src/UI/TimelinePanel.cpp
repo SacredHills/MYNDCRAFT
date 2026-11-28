@@ -563,6 +563,14 @@ void TimelineView::contextMenuEvent(QContextMenuEvent* e) {
         menu.exec(e->globalPos());
         return;
     }
+    // A layer's own row (name column, or the key area of a layer that has no exposure cells): keyframe commands
+    if (r >= 0 && m_rows[r].prop.isEmpty() && (pt.x() < kNameW || m_rows[r].layer->type != LayerType::Animation)) {
+        if (pt.x() >= kNameW && m_s->doc()) m_s->doc()->setCurrentFrame(std::clamp(frameAtX(pt.x()), 0, m_s->doc()->durationFrames() - 1));
+        QMenu menu(this);
+        m_a->fillLayerKeyMenu(&menu, m_rows[r].layer->id);
+        menu.exec(e->globalPos());
+        return;
+    }
     if (pt.x() >= kNameW && r >= 0) if (Document* d = m_s->doc()) {
         const int f = std::clamp(frameAtX(pt.x()), 0, d->durationFrames() - 1);
         int a, b;

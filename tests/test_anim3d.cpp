@@ -56,6 +56,38 @@ private slots:
         QVERIFY(findPropertyDef(materialPropId(n, "base"))->type == PropType::Color);
     }
 
+    void smoothRotationTurnsTheShortestWayBetweenKeysInsteadOfEachAngleOnItsOwn() {
+        Document d(cs());
+        const Ids ids = build(d);
+        Layer* l = d.findLayer(ids.layer);
+        const QString id = nodePropId(ids.box, "rot");
+        PropertyTrack tr; const PropertyDef* def = findPropertyDef(id);
+        auto rot = [](float x, float y, float z) { return PropValue::of(x, y, z); };
+        tr.setKey(*def, 0, rot(0, 0, 0)); tr.setKey(*def, 10, rot(90, 90, 90));
+        l->tracks.insert(id, tr);
+        auto mid = [&](bool slerp) {
+            d.editScene3D(ids.layer, [&](Scene3D& sc) { sc.node(ids.box)->slerpRotation = slerp; return true; }, "mode");
+            return l->sceneAt(5)->node(ids.box)->localMatrix();
+        };
+        // expected: the halfway orientation of the two key orientations
+        auto q = [](float x, float y, float z) { return QQuaternion::fromAxisAndAngle(0, 0, 1, z) * QQuaternion::fromAxisAndAngle(0, 1, 0, y) * QQuaternion::fromAxisAndAngle(1, 0, 0, x); };
+        const QMatrix4x4 expected(QQuaternion::slerp(q(0, 0, 0), q(90, 90, 90), 0.5f).toRotationMatrix());
+        auto diff = [](const QMatrix4x4& a, const QMatrix4x4& b) { float m = 0; for (int r = 0; r < 3; ++r) for (int c = 0; c < 3; ++c) m = std::max(m, std::abs(a(r, c) - b(r, c))); return m; };
+        QVERIFY2(diff(mid(true), expected) < 1e-4, "slerp midpoint is not the halfway orientation");
+        QVERIFY2(diff(mid(false), expected) > 0.05, "the default Euler interpolation should differ here");
+        // constant angular speed: the turn from the start grows evenly (angle of q0^-1 q(t))
+        auto angle = [&](int frame) { const QVector3D e = l->sceneAt(frame)->node(ids.box)->rotation; const QQuaternion r = q(e.x(), e.y(), e.z()); return 2 * std::acos(std::min(1.0f, std::abs(r.scalar()))) * 180.0f / float(M_PI); };
+        mid(true);
+        const float a2 = angle(2), a4 = angle(4), a8 = angle(8);
+        QVERIFY2(std::abs(a4 - 2 * a2) < 0.5f && std::abs(a8 - 4 * a2) < 0.5f, qPrintable(QString("%1 %2 %3").arg(a2).arg(a4).arg(a8)));
+        // survives saving
+        QTemporaryDir dir; QString err;
+        QVERIFY2(ProjectIO::save(d, dir.filePath("t.studio"), &err), qPrintable(err));
+        LoadResult r = ProjectIO::load(dir.filePath("t.studio"));
+        QVERIFY2(r.doc, qPrintable(r.error));
+        QVERIFY(r.doc->findLayer(ids.layer)->scene3d->node(ids.box)->slerpRotation);
+    }
+
     void aTrackedPropertyIsEvaluatedAtEachFrameWithoutTouchingTheStaticScene() {
         Document d(cs());
         const Ids ids = build(d);

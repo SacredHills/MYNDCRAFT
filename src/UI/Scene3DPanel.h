@@ -37,6 +37,7 @@ public:
     QToolButton* keyButton(const QString& what) const { for (const KeyRow& r : m_keyRows) if (r.what == what) return r.key; return nullptr; }
     QGroupBox* cardGroup() const { return m_gCard; }
     QCheckBox* cardLitBox() const { return m_cardLit; }
+    QCheckBox* slerpBox() const { return m_slerp; }
     QGroupBox *transformGroup() const { return m_gXform; }
     QGroupBox *materialGroup() const { return m_gMat; }
     QGroupBox *lightGroup() const { return m_gLight; }
@@ -87,6 +88,7 @@ private:
     QGroupBox* m_gCard = nullptr;
     QLabel* m_cardSource = nullptr;
     QCheckBox* m_cardLit = nullptr;
+    QCheckBox* m_slerp = nullptr;
     QListWidget *m_clipList = nullptr, *m_placeList = nullptr;
     QSpinBox *m_pStart = nullptr, *m_pOffset = nullptr;
     QDoubleSpinBox* m_pSpeed = nullptr;

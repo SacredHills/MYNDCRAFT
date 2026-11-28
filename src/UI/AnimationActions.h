@@ -36,6 +36,9 @@ public:
     void fillContextMenu(QMenu* menu);
     // Context menu for a keyframe in the timeline: copy/paste, interpolation, delete.
     void fillKeyframeMenu(QMenu* menu);
+    // Context menu for a layer's own row in the timeline (any layer type): add keyframes at the current frame for everything or for one
+    // property, paste, jump between keys, delete the selected keys.
+    void fillLayerKeyMenu(QMenu* menu, const QUuid& layer);
 
     void goToFrame(int frame);
     QAction* actionFor(const QString& name) const { return m_byName.value(name); }

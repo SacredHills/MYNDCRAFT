@@ -96,6 +96,9 @@ struct Node3D {
     QVector3D position{0, 0, 0};
     QVector3D rotation{0, 0, 0};         // Euler degrees; the matrix is Rz * Ry * Rx (X applied first)
     QVector3D scale{1, 1, 1};
+    // How keyframed rotation is interpolated: false = each of the three Euler angles on its own (the default), true = the shortest turn
+    // between the key orientations (quaternion slerp): no gimbal-lock detours or odd tilts between keys.
+    bool slerpRotation = false;
     // Mesh nodes
     QUuid mesh;                          // key into Scene3D::meshes
     QUuid materialOverride;              // replaces every part's material when set

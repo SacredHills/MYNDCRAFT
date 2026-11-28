@@ -146,6 +146,32 @@ private slots:
         QVERIFY(!L()->tracks.contains("opacity") || !L()->tracks["opacity"].animated());
     }
 
+    void theLayerRowRightClickMenuAddsKeyframesForAnyLayerType() {
+        doc->setCurrentFrame(6);
+        QMenu m;
+        w->animation()->fillLayerKeyMenu(&m, layerId);
+        QAction* all = nullptr; QMenu* one = nullptr;
+        for (QAction* a : m.actions()) { if (a->text() == "Add Keyframes Here") all = a; if (a->menu() && a->text() == "Add Keyframe For") one = a->menu(); }
+        QVERIFY(all && one);
+        QStringList labels; for (QAction* a : one->actions()) labels << a->text();
+        QVERIFY(labels.contains("Position") && labels.contains("Opacity"));
+        QVERIFY(!labels.contains("Shape Morph"));                                     // only for shape tweens
+        // one property
+        for (QAction* a : one->actions()) if (a->text() == "Rotation") a->trigger();
+        QCOMPARE(keys("transform.rotation").size(), 1);
+        QVERIFY(keys("transform.position").isEmpty());
+        // everything
+        all->trigger();
+        QCOMPARE(keys("transform.position").size(), 1);
+        QVERIFY(keys("transform.position").first().startsWith("6:"));
+        // a locked layer cannot be keyed from the menu
+        doc->undoStack()->clear();
+        LayerProps lp = L()->props; lp.locked = true; doc->setLayerProps(layerId, lp);
+        QMenu m2;
+        w->animation()->fillLayerKeyMenu(&m2, layerId);
+        for (QAction* a : m2.actions()) if (a->text() == "Add Keyframes Here") QVERIFY(!a->isEnabled());
+    }
+
     void doubleClickingTheTimelineAddsKeyframes() {
         TimelineView* t = tv();
         t->setCellWidth(20);

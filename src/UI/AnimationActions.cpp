@@ -385,6 +385,28 @@ void AnimationActions::fillMenu(QMenu* m) {
     m->addActions({createTweenAction, removeTweenAction, createShapeTweenAction, editEndShapeAction, removeShapeTweenAction});
 }
 
+void AnimationActions::fillLayerKeyMenu(QMenu* m, const QUuid& layer) {
+    refresh();
+    const Layer* l = m_s->doc() ? m_s->doc()->findLayer(layer) : nullptr;
+    const bool ok = l && !l->props.locked;
+    QAction* all = m->addAction(tr("Add Keyframes Here"));
+    all->setEnabled(ok);
+    connect(all, &QAction::triggered, m, [this, layer] { m_s->addKeysHere(layer); });
+    QMenu* one = m->addMenu(tr("Add Keyframe For"));
+    one->setEnabled(ok);
+    for (const PropertyDef& d : layerPropertyDefs()) {
+        if (d.id == "shape.morph" && !(l && l->hasShapeTween())) continue;
+        const QString id = d.id;
+        connect(one->addAction(d.label), &QAction::triggered, m, [this, layer, id] { m_s->addKeysHere(layer, id); });
+    }
+    QAction* paste = m->addAction(tr("Paste Keyframes at Current Frame"));
+    paste->setEnabled(ok && !m_s->keyClip().isEmpty());
+    connect(paste, &QAction::triggered, m, [this] { m_s->pasteKeys(); });
+    m->addSeparator();
+    m->addActions({prevKey, nextKey});
+    m->addAction(deleteKeys);
+}
+
 void AnimationActions::fillKeyframeMenu(QMenu* m) {
     refresh();
     connect(m->addAction(tr("Copy Keyframes")), &QAction::triggered, m, [this] { m_s->copyKeys(false); });

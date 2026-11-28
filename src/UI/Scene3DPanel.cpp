@@ -136,6 +136,10 @@ Scene3DPanel::Scene3DPanel(EditorSession* s, Scene3DActions* a, QWidget* parent)
     auto* fx = new QFormLayout(m_gXform);
     row3(fx, tr("Position"), m_pos, -1e6, 1e6, 0.1, 3, "pos");
     row3(fx, tr("Rotation"), m_rot, -36000, 36000, 1, 2, "rot");
+    m_slerp = new QCheckBox(tr("Smooth rotation between keys (quaternion)"));
+    m_slerp->setToolTip(tr("Animated rotation takes the shortest turn between key orientations, so cameras and objects do not tilt oddly between keys."));
+    fx->addRow(QString(), m_slerp);
+    connect(m_slerp, &QCheckBox::toggled, this, [this](bool on) { if (!m_updating) edit(tr("Rotation Interpolation"), {}, [on](Scene3D&, Node3D& n) { if (n.slerpRotation == on) return false; n.slerpRotation = on; return true; }); });
     row3(fx, tr("Scale"), m_scl, -1e5, 1e5, 0.1, 3, "scl");
     il->addWidget(m_gXform);
 
@@ -574,6 +578,7 @@ void Scene3DPanel::refreshInspector() {
         m_cardSource->setText(src ? src->props.name : tr("(the layer no longer exists)"));
         m_cardLit->setChecked(n->cardLit);
     }
+    if (n) m_slerp->setChecked(n->slerpRotation);
     m_gLight->setVisible(n && n->kind == NodeKind::Light);
     m_gCam->setVisible(n && n->kind == NodeKind::Camera);
     m_gScene->setVisible(sc != nullptr);
