@@ -815,6 +815,7 @@ private slots:
         auto* cv = w->findChild<CanvasView*>();
         QVERIFY(cv);
         QApplication::processEvents();
+        cv->flushRender();                                          // (a render of the first frame may still be on its way)
         s->playback()->play();
         QVERIFY(s->playback()->isPlaying());
         for (int f = 1; f < 10; ++f) { doc->setCurrentFrame(f); cv->flushRender(); }       // (frames are rendered in the background; here each one is waited for)
