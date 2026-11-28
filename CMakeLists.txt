@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Test Concurrent)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Test Concurrent OpenGL)
 # libzip: pkg-config first (Linux/Homebrew; Debian's CMake package config is broken),
 # then the CMake package (vcpkg on Windows).
 find_package(PkgConfig QUIET)
@@ -54,6 +54,7 @@ add_library(myndcore STATIC
   src/Scene/Layer.cpp
   src/Scene/LayerFx.cpp
   src/Graphics/Effects.cpp
+  src/Graphics/GpuEffects.cpp
   src/Scene/Document.cpp
   src/Drawing/BrushEngine.cpp
   src/Drawing/FloodFill.cpp
@@ -67,7 +68,7 @@ add_library(myndcore STATIC
   src/Scene3D/ImportFbx.cpp
 )
 target_include_directories(myndcore PUBLIC src)
-target_link_libraries(myndcore PUBLIC Qt6::Core Qt6::Gui Qt6::Concurrent ${MYND_ZIP_TARGET})
+target_link_libraries(myndcore PUBLIC Qt6::Core Qt6::Gui Qt6::Concurrent Qt6::OpenGL ${MYND_ZIP_TARGET})
 
 # ---- Application UI ----
 add_library(myndui STATIC
@@ -130,6 +131,7 @@ myndcraft_test(test_import3d)
 myndcraft_test(test_anim3d)
 myndcraft_test(test_layer3d)
 myndcraft_test(test_effects)
+myndcraft_test(test_gpu_effects)
 myndcraft_test(test_export)
 myndcraft_test(test_document)
 myndcraft_test(test_projectio)

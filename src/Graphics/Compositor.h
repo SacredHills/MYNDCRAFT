@@ -49,6 +49,7 @@ public:
     // Pool for whole-picture renders that run in the background (canvas, 3D viewport). Separate from the global pool because those renders
     // themselves split work over the global pool; running them there as well could leave every thread waiting for another.
     static QThreadPool* backgroundPool();
+    static int gpuEffectsUsed();      // how many layer-effect chains have been run on the GPU so far (diagnostics, tests)
     static std::shared_ptr<const Snapshot> snapshot(const Document& doc);
     static QImage render(const Snapshot& snap, const QRect& region, const Options& opt);
     // Depth pass of a frame: 16-bit grayscale, white = nearest, black = farthest or nothing 3D there. Made from every visible 3D scene layer

@@ -8,6 +8,8 @@ namespace mynd::settings {
 
 bool autosaveEnabled();
 void setAutosaveEnabled(bool on);
+bool gpuEffects();                   // experimental: run layer effects through OpenGL (off by default)
+void setGpuEffects(bool on);
 int autosaveIntervalSeconds();
 void setAutosaveIntervalSeconds(int s);
 double defaultGridSize();

@@ -81,6 +81,7 @@ private:
     void actExportAnimation();
     void actImport();
     void actPreferences();
+    void applyGpuSetting();
     void actAbout();
     void rebuildWorkspaceMenu();
     void mutateShapes(const QString& text, const std::function<void(ShapeList&, const QSet<QUuid>&)>& fn);

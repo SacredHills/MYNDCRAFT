@@ -9,10 +9,15 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y ninja-build qt6-base-dev qt6-base-private-dev libzip-dev libgl1-mesa-dev libxkbcommon-dev
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build qt6-base-dev qt6-base-private-dev libzip-dev libgl1-mesa-dev libxkbcommon-dev libqt6opengl6-dev xvfb libgl1-mesa-dri
       - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
       - run: cmake --build build
       - run: QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+      - name: GPU effects path on software OpenGL (Mesa llvmpipe under Xvfb)
+        run: |
+          export LIBGL_ALWAYS_SOFTWARE=1 QT_QPA_PLATFORM=xcb
+          xvfb-run -a ./build/test_gpu_effects | tee gpu.log
+          grep -q "llvmpipe" gpu.log && ! grep -q "SKIP" gpu.log
 
   windows:
     runs-on: windows-latest

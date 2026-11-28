@@ -1,6 +1,8 @@
 #include <limits>
 #include <cmath>
 #include "Graphics/Compositor.h"
+#include "Graphics/GpuEffects.h"
+#include <atomic>
 #include "Graphics/Effects.h"
 
 #include <mutex>
@@ -58,6 +60,9 @@ static QImage renderTree(const Layer& root, const SymbolResolver* syms, const QS
 QImage Compositor::render(const Document& doc, const QRect& region, const Options& opt) {
     return renderTree(*doc.root(), &doc, doc.canvasSize(), doc.comp().background, doc.currentFrame(), region, opt, &Compositor::drawGroup);
 }
+
+static std::atomic<int> g_gpuUsed{0};
+int Compositor::gpuEffectsUsed() { return g_gpuUsed; }
 
 QThreadPool* Compositor::backgroundPool() {
     static QThreadPool* pool = [] { auto* p = new QThreadPool; p->setMaxThreadCount(2); p->setThreadPriority(QThread::LowPriority); return p; }();
@@ -384,7 +389,10 @@ void Compositor::drawLayerWithFx(QPainter& p, const Layer& l, const QRect& regio
         bp.setClipRect(src);
         drawLayerContent(bp, l, src, canvas, ctx, 1.0, BlendMode::Normal);
     }
-    if (!lfx.effects.isEmpty()) fx::applyEffects(buf, lfx.effects);
+    if (!lfx.effects.isEmpty()) {
+        if (fx::gpu::enabled() && fx::gpu::applyEffects(buf, lfx.effects)) ++g_gpuUsed;
+        else fx::applyEffects(buf, lfx.effects);
+    }
     if (!lfx.masks.isEmpty()) fx::applyCoverage(buf, fx::maskCoverage(lfx.masks, src.size(), src.topLeft()));
     QImage comp(region.size(), QImage::Format_ARGB32_Premultiplied);
     comp.fill(Qt::transparent);

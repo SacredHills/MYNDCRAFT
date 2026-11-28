@@ -38,6 +38,7 @@
 #include <QSpinBox>
 #include "Core/Exporter.h"
 #include "Core/Settings.h"
+#include "Graphics/GpuEffects.h"
 #include "Graphics/Compositor.h"
 #include "UI/ExposureSheet.h"
 #include "UI/Icons.h"
@@ -75,6 +76,7 @@ MainWindow::MainWindow() {
     setCentralWidget(m_dockManager);
     m_autosave = new Autosaver(this);
     m_autosave->setEnabled(settings::autosaveEnabled());
+    if (settings::gpuEffects()) QTimer::singleShot(0, this, [this] { applyGpuSetting(); });     // after the window exists (the OpenGL surface is made on the GUI thread)
     m_autosave->setInterval(settings::autosaveIntervalSeconds());
 
     buildActions();
@@ -998,6 +1000,19 @@ void MainWindow::actPreferences() {
     form->addRow(on);
     form->addRow(tr("Autosave interval"), iv);
     form->addRow(tr("Grid size (new projects)"), gs);
+    auto* gpu = new QCheckBox(tr("Use the GPU for layer effects (experimental)"));
+    gpu->setChecked(settings::gpuEffects());
+    gpu->setToolTip(tr("Runs blur, drop shadow, glow and colour effects through OpenGL 3.3. The picture is the same as the CPU path to within a couple of colour levels; "
+                       "if anything goes wrong the CPU path is used automatically. 3D rendering is not affected (it runs on the CPU)."));
+    form->addRow(gpu);
+    auto* gpuInfo = new QLabel; gpuInfo->setWordWrap(true);
+    {
+        const bool have = fx::gpu::available() || fx::gpu::initialize();
+        gpuInfo->setText(have ? tr("OpenGL available: %1").arg(fx::gpu::rendererName()) : tr("OpenGL 3.3 is not available on this machine; effects will use the CPU."));
+        gpu->setEnabled(have);
+        if (!have) gpu->setChecked(false);
+    }
+    form->addRow(gpuInfo);
     auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     form->addRow(bb);
     connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
@@ -1006,9 +1021,23 @@ void MainWindow::actPreferences() {
     settings::setAutosaveEnabled(on->isChecked());
     settings::setAutosaveIntervalSeconds(iv->value());
     settings::setDefaultGridSize(gs->value());
+    if (gpu->isChecked() != settings::gpuEffects()) {
+        settings::setGpuEffects(gpu->isChecked());
+        applyGpuSetting();
+    }
     m_autosave->setEnabled(on->isChecked());
     m_autosave->setInterval(iv->value());
     if (on->isChecked() && m_doc) m_autosave->attach(m_doc.get());
+}
+
+void MainWindow::applyGpuSetting() {
+    bool on = settings::gpuEffects();
+    if (on && !fx::gpu::available() && !fx::gpu::initialize()) {
+        on = false;
+        statusBar()->showMessage(tr("OpenGL 3.3 is not available: effects stay on the CPU."), 6000);
+    }
+    fx::gpu::setEnabled(on);
+    if (m_canvas) m_canvas->rebuildCache();
 }
 
 void MainWindow::actAbout() {
