@@ -1372,6 +1372,198 @@ private:
 
 }  // namespace
 
+
+// ============================================================ Mask editor
+static QTransform activeLayerMatrix(EditorSession* s) {
+    Layer* l = s->activeLayer();
+    if (!l || !s->doc()) return {};
+    const QSize cs = s->doc()->canvasSize();
+    return l->xformAt(s->doc()->currentFrame()).matrix(QPointF(cs.width() / 2.0, cs.height() / 2.0));
+}
+
+void paintMaskOutlines(QPainter& p, EditorSession* s, const QTransform& docToView, int selMask, int selNode) {
+    Layer* l = s->activeLayer();
+    if (!l || !s->doc() || l->fx.masks.isEmpty()) return;
+    const QTransform t = activeLayerMatrix(s) * docToView;
+    p.setRenderHint(QPainter::Antialiasing);
+    const LayerFx fx = l->fxAt(s->doc()->currentFrame());
+    for (int i = 0; i < fx.masks.size(); ++i) {
+        const Mask& m = l->fx.masks[i];
+        QPainterPath path = t.map(m.shape.path());
+        const bool sel = i == selMask;
+        const QColor c = m.mode == MaskMode::Subtract ? QColor(255, 90, 90) : m.mode == MaskMode::Intersect ? QColor(90, 170, 255) : QColor(255, 220, 60);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(QColor(0, 0, 0, 160), sel ? 3.0 : 2.0)); p.drawPath(path);
+        p.setPen(QPen(c, sel ? 1.6 : 1.0)); p.drawPath(path);
+        if (!sel) continue;
+        for (int k = 0; k < m.shape.nodes.size(); ++k) {
+            const PathNode& n = m.shape.nodes[k];
+            const QPointF a = t.map(n.pos);
+            if (k == selNode) {
+                p.setPen(QPen(QColor(120, 120, 120), 1));
+                for (const QPointF& h : {n.in, n.out}) if (!h.isNull()) {
+                    const QPointF hp = t.map(n.pos + h);
+                    p.drawLine(a, hp); p.setBrush(Qt::white); p.drawEllipse(hp, 3.0, 3.0);
+                }
+            }
+            p.setPen(QPen(Qt::black, 1)); p.setBrush(k == selNode ? c : Qt::white);
+            p.drawRect(QRectF(a.x() - 3.5, a.y() - 3.5, 7, 7));
+        }
+    }
+}
+
+class MaskTool : public Tool {
+public:
+    using Tool::Tool;
+    ToolId id() const override { return ToolId::Mask; }
+    bool busy() const override { return m_drag != None; }
+    QCursor cursor() const override { return Qt::ArrowCursor; }
+
+    void press(const PointerEvent& e) override {
+        if (e.button != Qt::LeftButton) return;
+        Layer* l = m_s->activeLayer();
+        if (!l || l->fx.masks.isEmpty()) { emit m_s->message(QObject::tr("This layer has no masks. Layer > Mask adds one.")); return; }
+        if (l->props.locked) return;
+        const QPointF q = toLocal(e.doc);
+        const double tol = kHitPx / m_c->zoom();
+        m_before = l->fx;
+        if (valid(*l)) {
+            const Mask& m = l->fx.masks[m_mask];
+            if (m_node >= 0 && m_node < m.shape.nodes.size()) {
+                const PathNode& n = m.shape.nodes[m_node];
+                if (!n.out.isNull() && QLineF(q, n.pos + n.out).length() <= tol) return begin(HandleOut);
+                if (!n.in.isNull() && QLineF(q, n.pos + n.in).length() <= tol) return begin(HandleIn);
+            }
+            for (int i = 0; i < m.shape.nodes.size(); ++i)
+                if (QLineF(q, m.shape.nodes[i].pos).length() <= tol) { m_node = i; m_c->update(); return begin(Node); }
+            const VectorShape::SegmentHit sh = m.shape.nearestSegment(q);
+            if (sh.seg >= 0 && sh.distance <= tol) {
+                m_seg = sh.seg; m_segT = std::clamp(sh.t, 0.15, 0.85); m_segPress = sh.point;
+                const int j = (sh.seg + 1) % m.shape.nodes.size();
+                m_segOut = m.shape.nodes[sh.seg].out; m_segIn = m.shape.nodes[j].in;
+                m_node = -1;
+                return begin(Segment);
+            }
+        }
+        // pick another mask: its outline, or inside it (topmost = last)
+        int pick = -1;
+        for (int i = l->fx.masks.size() - 1; i >= 0 && pick < 0; --i) {
+            const VectorShape& sh = l->fx.masks[i].shape;
+            const VectorShape::SegmentHit h = sh.nearestSegment(q);
+            if ((h.seg >= 0 && h.distance <= tol) || sh.path().contains(q)) pick = i;
+        }
+        m_mask = pick; m_node = -1;
+        m_c->update();
+    }
+    void move(const PointerEvent& e) override {
+        if (m_drag == None) return;
+        Layer* l = m_s->activeLayer();
+        if (!l || !valid(*l)) return;
+        VectorShape& sh = l->fx.masks[m_mask].shape;
+        const QPointF q = toLocal(e.doc);
+        if (m_drag == Segment) {
+            const int n = sh.nodes.size(), j = (m_seg + 1) % n;
+            const QPointF d = (q - m_segPress) / (3.0 * m_segT * (1.0 - m_segT));
+            PathNode& a = sh.nodes[m_seg]; PathNode& b = sh.nodes[j];
+            a.out = m_segOut + d; b.in = m_segIn + d;
+            if (a.smooth) a.in = -a.out;
+            if (b.smooth) b.out = -b.in;
+        } else if (m_node >= 0 && m_node < sh.nodes.size()) {
+            PathNode& n = sh.nodes[m_node];
+            if (m_drag == Node) n.pos = q;
+            else {
+                const QPointF off = q - n.pos;
+                if (m_drag == HandleOut) { n.out = off; if (n.smooth && !e.alt()) n.in = -off; }
+                else { n.in = off; if (n.smooth && !e.alt()) n.out = -off; }
+            }
+        }
+        m_s->doc()->emitContentChanged({});
+    }
+    void release(const PointerEvent&) override { finish(QObject::tr("Edit Mask")); }
+    void doubleClick(const PointerEvent& e) override {
+        Layer* l = m_s->activeLayer();
+        if (!l || l->props.locked || !valid(*l)) return;
+        const QPointF q = toLocal(e.doc);
+        const double tol = kHitPx / m_c->zoom();
+        m_before = l->fx;
+        LayerFx after = l->fx;
+        VectorShape& sh = after.masks[m_mask].shape;
+        for (int i = 0; i < sh.nodes.size(); ++i) {
+            if (QLineF(q, sh.nodes[i].pos).length() > tol) continue;
+            PathNode& n = sh.nodes[i];
+            if (n.smooth || !n.in.isNull() || !n.out.isNull()) { n.in = n.out = {}; n.smooth = false; }
+            else {
+                const int cnt = sh.nodes.size();
+                const QPointF prev = sh.nodes[(i + cnt - 1) % cnt].pos, next = sh.nodes[(i + 1) % cnt].pos;
+                QPointF dir = next - prev; const double len = std::hypot(dir.x(), dir.y());
+                if (len > 0) { dir = dir / len * (std::min(QLineF(prev, n.pos).length(), QLineF(n.pos, next).length()) / 3.0); n.out = dir; n.in = -dir; n.smooth = true; }
+            }
+            m_node = i;
+            m_s->doc()->setLayerFx(l->id, after, QObject::tr("Toggle Smooth Mask Point"));
+            return;
+        }
+        const VectorShape::SegmentHit hit = sh.nearestSegment(q);
+        if (hit.seg >= 0 && hit.distance <= tol) {
+            const int idx = sh.insertNode(hit.seg, hit.t);
+            if (idx >= 0) { m_node = idx; m_s->doc()->setLayerFx(l->id, after, QObject::tr("Add Mask Point")); }
+        }
+    }
+    bool keyPress(QKeyEvent* k) override {
+        if (k->key() != Qt::Key_Delete && k->key() != Qt::Key_Backspace) return false;
+        Layer* l = m_s->activeLayer();
+        if (!l || l->props.locked || !valid(*l)) return false;
+        LayerFx after = l->fx;
+        VectorShape& sh = after.masks[m_mask].shape;
+        if (m_node >= 0 && m_node < sh.nodes.size() && sh.nodes.size() > 3) { sh.nodes.removeAt(m_node); m_node = -1; m_s->doc()->setLayerFx(l->id, after, QObject::tr("Delete Mask Point")); }
+        else if (m_node < 0) {                                  // no point selected: delete the whole mask (and its keyframes)
+            const QString idStr = after.masks[m_mask].id.toString(QUuid::WithoutBraces);
+            after.masks.removeAt(m_mask);
+            PropertyTracks pruned = l->tracks; bool orphans = false;
+            for (const QString& key : l->tracks.keys()) if (isFxPropId(key) && key.contains(idStr)) { pruned.remove(key); orphans = true; }
+            if (orphans) { m_s->doc()->undoStack()->beginMacro(QObject::tr("Delete Mask")); m_s->doc()->setLayerFx(l->id, after, QObject::tr("Delete Mask")); m_s->doc()->editTracks(l->id, pruned, QObject::tr("Delete Mask")); m_s->doc()->undoStack()->endMacro(); }
+            else m_s->doc()->setLayerFx(l->id, after, QObject::tr("Delete Mask"));
+            m_mask = -1;
+        } else return false;
+        m_c->update();
+        return true;
+    }
+    void cancel() override { restore(); }
+    void paintOverlay(QPainter& p, const QTransform& t) override { paintMaskOutlines(p, m_s, t, m_mask, m_node); }
+
+    int selectedMask() const { return m_mask; }
+
+private:
+    enum Drag { None, Node, HandleIn, HandleOut, Segment };
+    Drag m_drag = None;
+    int m_mask = -1, m_node = -1, m_seg = -1;
+    double m_segT = 0.5;
+    QPointF m_segPress, m_segOut, m_segIn;
+    LayerFx m_before;
+
+    QPointF toLocal(const QPointF& doc) const {
+        bool ok = false; const QTransform inv = activeLayerMatrix(m_s).inverted(&ok);
+        return ok ? inv.map(doc) : doc;
+    }
+    bool valid(const Layer& l) const { return m_mask >= 0 && m_mask < l.fx.masks.size(); }
+    void begin(Drag d) { m_drag = d; m_c->update(); }
+    void restore() {
+        Layer* l = m_s->activeLayer();
+        if (m_drag != None && l) { l->fx = m_before; m_s->doc()->emitContentChanged({}); }
+        m_drag = None; m_c->update();
+    }
+    void finish(const QString& text) {
+        if (m_drag == None) return;
+        Layer* l = m_s->activeLayer();
+        m_drag = None;
+        if (l) {
+            const LayerFx after = l->fx;
+            l->fx = m_before;                                   // the drag edited the layer live; the undo command needs the true "before"
+            m_s->doc()->setLayerFx(l->id, after, text);
+        }
+        m_c->update();
+    }
+};
+
 std::unique_ptr<Tool> createTool(ToolId id, EditorSession* s, CanvasView* c) {
     switch (id) {
     case ToolId::Select: return std::make_unique<UnifiedSelectTool>(s, c);
@@ -1393,6 +1585,7 @@ std::unique_ptr<Tool> createTool(ToolId id, EditorSession* s, CanvasView* c) {
     case ToolId::FreeTransform: return std::make_unique<FreeTransformTool>(s, c);
     case ToolId::Text: return std::make_unique<TextTool>(s, c);
     case ToolId::LayerTransform: return std::make_unique<LayerTransformTool>(s, c);
+    case ToolId::Mask: return std::make_unique<MaskTool>(s, c);
     }
     return nullptr;
 }

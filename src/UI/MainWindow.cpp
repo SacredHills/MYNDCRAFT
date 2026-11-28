@@ -397,7 +397,7 @@ void MainWindow::buildActions() {
                        {ToolId::Eraser, "E"}, {ToolId::Pen, "P"}, {ToolId::Line, "L"}, {ToolId::Rectangle, "M"},
                        {ToolId::Ellipse, "O"}, {ToolId::Polygon, "Y"}, {ToolId::Bucket, "K"}, {ToolId::Gradient, "G"},
                        {ToolId::Eyedropper, "I"}, {ToolId::Hand, "H"}, {ToolId::Zoom, "Z"},
-                       {ToolId::Smudge, "S"}, {ToolId::FreeTransform, "Q"}, {ToolId::Text, "T"}};
+                       {ToolId::Smudge, "S"}, {ToolId::FreeTransform, "Q"}, {ToolId::Text, "T"}, {ToolId::Mask, "W"}};
     for (const T& t : tools) {
         auto* a = new QAction(icons::tool(t.id), toolName(t.id), this);
         a->setCheckable(true);
@@ -451,7 +451,7 @@ void MainWindow::buildToolbars() {
     for (auto it = m_toolActions.begin(); it != m_toolActions.end(); ++it, ++i) {}
     const ToolId order[] = {ToolId::Select, ToolId::Hand, ToolId::Zoom, ToolId::Brush, ToolId::Pencil,
                             ToolId::Eraser, ToolId::Smudge, ToolId::Bucket, ToolId::Gradient, ToolId::Eyedropper, ToolId::Pen, ToolId::Line,
-                            ToolId::Rectangle, ToolId::Ellipse, ToolId::Polygon, ToolId::Text, ToolId::FreeTransform};
+                            ToolId::Rectangle, ToolId::Ellipse, ToolId::Polygon, ToolId::Text, ToolId::FreeTransform, ToolId::Mask};
     for (ToolId id : order) {
         tb->addAction(m_toolActions[id]);
         if (id == ToolId::Zoom || id == ToolId::Eyedropper) tb->addSeparator();
@@ -598,6 +598,7 @@ void MainWindow::buildEffectMenus(QMenu* layerMenu) {
     needLayer << mask->addAction(tr("New Rectangle Mask"), this, [fx] { fx->addRectangleMask(); });
     needLayer << mask->addAction(tr("New Ellipse Mask"), this, [fx] { fx->addEllipseMask(); });
     needLayer << mask->addAction(tr("Mask from Selected Shape"), this, [fx] { fx->addMaskFromSelectedShapes(); });
+    needLayer << mask->addAction(tr("Edit Masks (W)"), this, [this] { m_session->setTool(ToolId::Mask); });
     needLayer << mask->addAction(tr("Remove All Masks"), this, [fx] { fx->clearMasks(); });
     QMenu* matte = layerMenu->addMenu(tr("Track Matte"));
     connect(matte, &QMenu::aboutToShow, matte, [this, matte, fx] {

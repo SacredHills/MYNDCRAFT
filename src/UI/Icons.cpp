@@ -94,6 +94,10 @@ QIcon tool(ToolId id) {
             p.drawEllipse(QPointF(15.5, 8.5), 2.2, 2.2);
             p.drawLine(QPointF(15.5, 6), QPointF(15.5, 11)); p.drawLine(QPointF(13, 8.5), QPointF(18, 8.5));
             p.drawArc(QRectF(11, 3, 9, 9), 40 * 16, 110 * 16); break;
+        case ToolId::Mask:
+            p.setPen(QPen(c, 1.2, Qt::DashLine)); p.drawRect(QRectF(5.5, 5.5, 13, 13)); p.setPen(QPen(c, 1.4)); p.setBrush(c);
+            for (QPointF q : {QPointF(5.5, 5.5), QPointF(18.5, 18.5), QPointF(18.5, 5.5)}) p.drawEllipse(q, 2.0, 2.0);
+            break;
         case ToolId::Text:
             p.drawLine(6, 6, 18, 6); p.drawLine(12, 6, 12, 19); p.drawLine(9, 19, 15, 19); break;
         case ToolId::Zoom:

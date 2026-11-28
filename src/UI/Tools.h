@@ -44,6 +44,9 @@ protected:
     CanvasView* m_c;
 };
 
+// Outlines (and, for the mask being edited, points and handles) of the active layer's masks, in view space. selMask/selNode = -1 for none.
+void paintMaskOutlines(QPainter& p, EditorSession* s, const QTransform& docToView, int selMask, int selNode);
+
 std::unique_ptr<Tool> createTool(ToolId id, EditorSession* s, CanvasView* c);
 
 }  // namespace mynd

@@ -24,6 +24,7 @@ QString toolName(ToolId t) {
     case ToolId::Smudge: return "Smudge";
     case ToolId::FreeTransform: return "Free Transform";
     case ToolId::LayerTransform: return "Transform Layer";
+    case ToolId::Mask: return "Mask Editor";
     case ToolId::Text: return "Text";
     }
     return {};

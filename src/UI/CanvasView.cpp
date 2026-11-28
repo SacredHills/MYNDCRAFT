@@ -251,6 +251,7 @@ void CanvasView::paintEvent(QPaintEvent* ev) {
 
     if (m_session->gridVisible) drawGrid(p, t);
     if (m_session->guidesVisible) drawGuides(p, t);
+    if (m_tool && m_tool->id() != ToolId::Mask) { p.save(); paintMaskOutlines(p, m_session, t, -1, -1); p.restore(); }
     if (m_tool) { p.save(); m_tool->paintOverlay(p, t); p.restore(); }
 
     if (m_session->rulersVisible && std::abs(m_rotation) < 0.01) drawRulers(p);

@@ -39,7 +39,7 @@ struct KeyClip {
 
 enum class ToolId {
     Select, DirectSelect, Brush, Pencil, Eraser, Pen, Line, Rectangle, Ellipse, Polygon,
-    Bucket, Gradient, Eyedropper, Hand, Zoom, Smudge, FreeTransform, Text, LayerTransform
+    Bucket, Gradient, Eyedropper, Hand, Zoom, Smudge, FreeTransform, Text, LayerTransform, Mask
 };
 QString toolName(ToolId t);
 

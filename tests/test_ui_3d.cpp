@@ -17,6 +17,7 @@
 #include "UI/PropertiesPanel.h"
 #include "UI/MainWindow.h"
 #include "UI/Panels.h"
+#include "UI/Tools.h"
 #include "UI/CanvasView.h"
 #include "UI/ScrubSpinBox.h"
 #include "UI/TimelinePanel.h"
@@ -533,6 +534,52 @@ private slots:
         s->setActiveLayer(art);
         s->setActiveLayer(QUuid()); s->setActiveLayer(art);
         QVERIFY(!blur->isEnabled());
+    }
+
+    void theMaskToolEditsPointsOnTheCanvasWithUndo() {
+        auto* fxp = w->effectsPanel();
+        const QUuid art = doc->addLayer(LayerType::Vector, "MaskEdit");
+        VectorShape r = VectorShape::makeRect(QRectF(0, 0, 100, 100)); r.fill.color = Qt::red;
+        doc->setShapes(art, {r}, "shape");
+        s->setActiveLayer(art);
+        QVERIFY(fxp->addRectangleMask());
+        Layer* l = doc->findLayer(art);
+        const QRectF full = l->fx.masks[0].shape.bounds();
+        s->setTool(ToolId::Mask);
+        auto tool = createTool(ToolId::Mask, s, w->canvas());
+        auto ev = [](QPointF p) { PointerEvent e; e.doc = p; return e; };
+        const QTransform lm = l->xformAt(doc->currentFrame()).matrix(QPointF(doc->canvasSize().width() / 2.0, doc->canvasSize().height() / 2.0));
+        const QPointF corner = lm.map(l->fx.masks[0].shape.nodes[0].pos);
+        const QPointF inside = lm.map(full.center());
+        tool->press(ev(inside)); tool->release(ev(inside));             // selects the mask
+        const int undoBefore = doc->undoStack()->index();
+        tool->press(ev(corner));                                         // drag the first point
+        QVERIFY(tool->busy());
+        tool->move(ev(corner + QPointF(30, 20)));
+        tool->release(ev(corner + QPointF(30, 20)));
+        QVERIFY(!tool->busy());
+        QCOMPARE(doc->undoStack()->index(), undoBefore + 1);
+        const QPointF moved = l->fx.masks[0].shape.nodes[0].pos;
+        QVERIFY(QLineF(lm.map(moved), corner + QPointF(30, 20)).length() < 0.01);
+        doc->undoStack()->undo();
+        QCOMPARE(l->fx.masks[0].shape.nodes[0].pos, lm.inverted().map(corner));
+        doc->undoStack()->redo();
+        // double-click on an outline adds a point, Delete removes the selected one
+        const int n = l->fx.masks[0].shape.nodes.size();
+        const QPointF edge = lm.map(l->fx.masks[0].shape.path().pointAtPercent(0.6));
+        tool->doubleClick(ev(edge));
+        QCOMPARE(l->fx.masks[0].shape.nodes.size(), n + 1);
+        QKeyEvent del(QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier);
+        QVERIFY(tool->keyPress(&del));
+        QCOMPARE(l->fx.masks[0].shape.nodes.size(), n);
+        // the edited mask is what gets composited
+        QCOMPARE(l->fx.masks[0].shape.nodes[0].pos, moved);   // the moved corner survived the insert/delete
+        // with no point selected Delete removes the whole mask
+        QVERIFY(tool->keyPress(&del));
+        QVERIFY(l->fx.masks.isEmpty());
+        doc->undoStack()->undo();
+        QCOMPARE(l->fx.masks.size(), 1);
+        s->setTool(ToolId::Select);
     }
 
     void effectValuesAreDraggableAndCanBeAnimatedWithTheStopwatch() {
