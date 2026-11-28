@@ -8,6 +8,7 @@
 #include "UI/Scene3DActions.h"
 #include "UI/Scene3DPanel.h"
 #include "UI/EffectsPanel.h"
+#include "UI/PropertiesPanel.h"
 #include "UI/Viewport3D.h"
 #include <QTabWidget>
 #include <QLabel>
@@ -559,15 +560,73 @@ void MainWindow::buildDocks() {
     }
     mkDock("exposure", tr("Exposure Sheet"), new ExposureSheetPanel(m_session, m_anim));
     mkDock("onion", tr("Onion Skin"), new OnionSkinPanel(m_session));
-    m_effectsPanel = new EffectsPanel(m_session);
-    mkDock("effects", tr("Effects"), m_effectsPanel);
-    mkDock("properties", tr("Properties"), new PropertiesPanel(m_session, m_anim));
+    auto* propsPanel = new PropertiesPanel(m_session, m_anim);
+    m_effectsPanel = propsPanel->effects();
+    mkDock("properties", tr("Properties"), propsPanel);
     m_scene3dPanel = new Scene3DPanel(m_session, m_scene3dActions);
     m_viewport3d = new Viewport3D(m_session, m_scene3dActions);
     mkDock("scene3d", tr("3D Scene"), m_scene3dPanel);
     mkDock("viewport3d", tr("3D View"), m_viewport3d);
     m_workspaces = new WorkspaceManager(this, m_dockManager, m_docks, this);
     connect(m_workspaces, &WorkspaceManager::changed, this, &MainWindow::rebuildWorkspaceMenu);
+}
+
+// After Effects style: Effect menu next to Layer; masks and track mattes under Layer. Everything acts on the active layer and its controls
+// show up in the Properties panel.
+void MainWindow::buildEffectMenus(QMenu* layerMenu) {
+    EffectsPanel* fx = m_effectsPanel;
+    QMenu* eff = menuBar()->addMenu(tr("E&ffect"));
+    struct Cat { const char* name; QVector<EffectType> types; };
+    const Cat cats[] = {{"Blur && Glow", {EffectType::Blur, EffectType::Glow}}, {"Perspective", {EffectType::DropShadow}},
+                        {"Color Correction", {EffectType::BrightnessContrast, EffectType::HueSaturation, EffectType::Invert}}};
+    QList<QAction*> needLayer;
+    for (const Cat& c : cats) {
+        QMenu* sub = eff->addMenu(tr(c.name));
+        for (EffectType t : c.types) {
+            QAction* a = sub->addAction(tr(effectInfo(t).label));
+            connect(a, &QAction::triggered, this, [fx, t] { fx->addEffect(t); });
+            needLayer << a;
+        }
+    }
+    eff->addSeparator();
+    QAction* clr = eff->addAction(tr("Remove All Effects"));
+    connect(clr, &QAction::triggered, this, [fx] { fx->clearEffects(); });
+    needLayer << clr;
+
+    layerMenu->addSeparator();
+    QMenu* mask = layerMenu->addMenu(tr("&Mask"));
+    needLayer << mask->addAction(tr("New Rectangle Mask"), this, [fx] { fx->addRectangleMask(); });
+    needLayer << mask->addAction(tr("New Ellipse Mask"), this, [fx] { fx->addEllipseMask(); });
+    needLayer << mask->addAction(tr("Mask from Selected Shape"), this, [fx] { fx->addMaskFromSelectedShapes(); });
+    needLayer << mask->addAction(tr("Remove All Masks"), this, [fx] { fx->clearMasks(); });
+    QMenu* matte = layerMenu->addMenu(tr("Track Matte"));
+    connect(matte, &QMenu::aboutToShow, matte, [this, matte, fx] {
+        matte->clear();
+        const Layer* cur = m_session->activeLayer();
+        matte->addAction(tr("None"), this, [fx] { fx->setMatte(QUuid(), MatteMode::None); })->setEnabled(cur);
+        if (!cur || !m_session->doc()) return;
+        static const struct { MatteMode m; const char* name; } modes[] = {{MatteMode::Alpha, "Alpha Matte"}, {MatteMode::InvertedAlpha, "Alpha Inverted Matte"}, {MatteMode::Luma, "Luma Matte"}, {MatteMode::InvertedLuma, "Luma Inverted Matte"}};
+        for (const auto& md : modes) {
+            QMenu* sub = matte->addMenu(tr(md.name));
+            std::function<void(const Layer*)> walk = [&](const Layer* g) {
+                for (const auto& c : g->children) {
+                    if (c->id != cur->id) { const QUuid id = c->id; const MatteMode mm = md.m; sub->addAction(c->props.name, this, [fx, id, mm] { fx->setMatte(id, mm); }); }
+                    if (c->isGroup()) walk(c.get());
+                }
+            };
+            walk(m_session->doc()->root());
+            if (sub->isEmpty()) sub->setEnabled(false);
+        }
+    });
+    const auto refresh = [this, needLayer, mask, matte] {
+        const Layer* l = m_session->activeLayer();
+        const bool on = l && !l->props.locked;
+        for (QAction* a : needLayer) a->setEnabled(on);
+        mask->setEnabled(on); matte->setEnabled(on);
+    };
+    connect(m_session, &EditorSession::activeLayerChanged, this, refresh);
+    connect(m_session, &EditorSession::documentChanged, this, refresh);
+    refresh();
 }
 
 void MainWindow::buildMenus() {
@@ -670,6 +729,7 @@ void MainWindow::buildMenus() {
     layer->addSeparator();
     layer->addAction(m_scene3dActions->make3D);
 
+    buildEffectMenus(layer);
     QMenu* anim = menuBar()->addMenu(tr("&Animation"));
     m_anim->fillMenu(anim);
     m_symbolActions->fillMenu(menuBar()->addMenu(tr("&Symbol")));

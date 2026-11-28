@@ -28,6 +28,7 @@ public:
     QComboBox* instanceMode() const { return m_instMode; }
     QSpinBox* instanceFirstFrame() const { return m_instFirst; }
     QGroupBox* instanceBox() const { return m_instBox; }
+    class EffectsPanel* effects() const { return m_effects; }
 
 private:
     struct Row {
@@ -41,6 +42,7 @@ private:
     EditorSession* m_s;
     AnimationActions* m_a;
     QLabel* m_layerName;
+    class EffectsPanel* m_effects = nullptr;
     QCheckBox *m_auto, *m_link;
     QMap<QString, Row> m_rows;
     QGroupBox* m_instBox = nullptr;

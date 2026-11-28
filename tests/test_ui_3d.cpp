@@ -1,5 +1,8 @@
 #include <QtTest>
+#include <QCheckBox>
 #include <QDoubleSpinBox>
+#include <QMenu>
+#include <QMenuBar>
 #include <QFile>
 #include <QGroupBox>
 #include <QListWidget>
@@ -10,6 +13,7 @@
 #include "Core/Settings.h"
 #include "UI/EffectsPanel.h"
 #include "UI/GraphEditor.h"
+#include "UI/PropertiesPanel.h"
 #include "UI/MainWindow.h"
 #include "UI/Panels.h"
 #include "UI/CanvasView.h"
@@ -491,6 +495,43 @@ private slots:
         // a locked layer is left alone
         LayerProps lp = doc->findLayer(art)->props; lp.locked = true; doc->setLayerProps(art, lp);
         QVERIFY(!fxp->addEffect(EffectType::Invert));
+    }
+
+    void effectsAreAddedFromTheEffectMenuAndTheirControlsAppearInTheProperties() {
+        const QUuid art = doc->addLayer(LayerType::Vector, "MenuFx");
+        s->setActiveLayer(art);
+        QMenu* effectMenu = nullptr;
+        for (QAction* a : w->menuBar()->actions()) if (a->text().remove('&') == "Effect") effectMenu = a->menu();
+        QVERIFY2(effectMenu, "no Effect menu in the menu bar");
+        QStringList top; for (QAction* a : w->menuBar()->actions()) top << a->text().remove('&');
+        QVERIFY(top.indexOf("Effect") == top.indexOf("Layer") + 1);               // right next to the Layer menu
+        QAction* blur = nullptr;
+        for (QAction* a : effectMenu->actions()) if (a->menu()) for (QAction* b : a->menu()->actions()) if (b->text() == "Gaussian Blur") blur = b;
+        QVERIFY(blur && blur->isEnabled());
+        auto* fxp = w->effectsPanel();
+        QVERIFY(fxp->findChildren<QCheckBox*>().isEmpty());                      // nothing shown until the layer has an effect
+        blur->trigger();
+        QCOMPARE(doc->findLayer(art)->fx.effects.size(), 1);
+        QApplication::processEvents();
+        bool shown = false;
+        for (QCheckBox* c : fxp->findChildren<QCheckBox*>()) shown |= c->text() == "Gaussian Blur";
+        QVERIFY2(shown, "the effect's controls are not in the Properties panel");
+        bool inProps = false;
+        for (QWidget* p = fxp->parentWidget(); p; p = p->parentWidget()) inProps |= qobject_cast<PropertiesPanel*>(p) != nullptr;
+        QVERIFY(inProps);
+        // masks and the matte are under the Layer menu
+        QMenu* layerMenu = nullptr;
+        for (QAction* a : w->menuBar()->actions()) if (a->text().remove('&') == "Layer") layerMenu = a->menu();
+        QMenu* maskMenu = nullptr; bool matteMenu = false;
+        for (QAction* a : layerMenu->actions()) { if (a->text().remove('&') == "Mask") maskMenu = a->menu(); if (a->text() == "Track Matte") matteMenu = true; }
+        QVERIFY(maskMenu && matteMenu);
+        for (QAction* a : maskMenu->actions()) if (a->text() == "New Ellipse Mask") a->trigger();
+        QCOMPARE(doc->findLayer(art)->fx.masks.size(), 1);
+        // a locked layer disables the commands
+        LayerProps lp = doc->findLayer(art)->props; lp.locked = true; doc->setLayerProps(art, lp);
+        s->setActiveLayer(art);
+        s->setActiveLayer(QUuid()); s->setActiveLayer(art);
+        QVERIFY(!blur->isEnabled());
     }
 
     void foldedGroupsStayFoldedWhenOtherObjectsAreSelected() {

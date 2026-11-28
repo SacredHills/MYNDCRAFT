@@ -12,7 +12,8 @@ namespace mynd {
 class EffectsPanel : public QWidget {
     Q_OBJECT
 public:
-    explicit EffectsPanel(EditorSession* s, QWidget* parent = nullptr);
+    // `embedded`: no scroll area of its own (it sits inside the Properties panel under the layer's other properties).
+    explicit EffectsPanel(EditorSession* s, bool embedded = false, QWidget* parent = nullptr);
 
     // What the buttons do (also used by tests and menus).
     bool addEffect(EffectType t);
@@ -21,6 +22,7 @@ public:
     bool addEllipseMask();
     bool addMaskFromSelectedShapes();       // the selected shapes of a vector layer become masks of that layer
     bool clearMasks();
+    bool clearEffects();
     bool setMatte(const QUuid& layer, MatteMode mode);
     void edit(const QString& text, const QString& mergeKey, const std::function<void(LayerFx&)>& fn);
 
@@ -33,6 +35,7 @@ private:
     QUuid m_shownLayer;
     LayerFx m_shown;
     bool m_rebuilding = false;
+    bool m_embedded = false;
 };
 
 }  // namespace mynd

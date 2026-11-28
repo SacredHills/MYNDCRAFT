@@ -159,8 +159,6 @@ void WorkspaceManager::applyPreset(const QString& name) {
         m_mgr->setSplitterSizes(cA, {260, W - 560, 300});
         lay->setAsCurrentTab();
     }
-    // Effects & Masks sits as a tab next to the layers panel in every workspace.
-    if (CDockWidget* fxd = m_docks.value("effects")) { m_mgr->addDockWidgetTabToArea(fxd, lay->dockAreaWidget()); shown.insert(fxd); lay->setAsCurrentTab(); }
     // Panels this workspace does not show are parked (closed) next to the layers panel: the Window menu brings them back there.
     CDockAreaWidget* park = lay->dockAreaWidget();
     for (CDockWidget* d : {opt, lay, his, tim, exs, oni, prp, s3d, v3d}) {

@@ -1,5 +1,6 @@
 #include "UI/PropertiesPanel.h"
 #include "UI/ScrubSpinBox.h"
+#include "UI/EffectsPanel.h"
 
 #include <QFormLayout>
 
@@ -139,6 +140,8 @@ PropertiesPanel::PropertiesPanel(EditorSession* s, AnimationActions* a, QWidget*
     m_instBox->setVisible(false);
     connect(m_instMode, &QComboBox::activated, this, [this] { instanceEdited(); });
     connect(m_instFirst, &QSpinBox::editingFinished, this, [this] { instanceEdited(); });
+    m_effects = new EffectsPanel(m_s, true);          // effects, masks and the matte of the layer, under its other properties
+    lay->addWidget(m_effects);
     lay->addStretch(1);
 
     auto sync = [this] { refresh(); };

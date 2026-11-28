@@ -26,13 +26,18 @@ QDoubleSpinBox* spin(double lo, double hi, double v, int dec, const QString& suf
 }
 }  // namespace
 
-EffectsPanel::EffectsPanel(EditorSession* s, QWidget* parent) : QWidget(parent), m_s(s) {
+EffectsPanel::EffectsPanel(EditorSession* s, bool embedded, QWidget* parent) : QWidget(parent), m_s(s), m_embedded(embedded) {
     setObjectName("effectsPanel");
     auto* outer = new QVBoxLayout(this); outer->setContentsMargins(0, 0, 0, 0);
-    auto* scroll = new QScrollArea; scroll->setWidgetResizable(true); scroll->setFrameShape(QFrame::NoFrame);
-    outer->addWidget(scroll);
-    m_body = new QWidget; scroll->setWidget(m_body);
-    m_layout = new QVBoxLayout(m_body); m_layout->setAlignment(Qt::AlignTop);
+    if (embedded) {
+        m_body = this;
+        m_layout = outer;
+    } else {
+        auto* scroll = new QScrollArea; scroll->setWidgetResizable(true); scroll->setFrameShape(QFrame::NoFrame);
+        outer->addWidget(scroll);
+        m_body = new QWidget; scroll->setWidget(m_body);
+        m_layout = new QVBoxLayout(m_body); m_layout->setAlignment(Qt::AlignTop);
+    }
     connect(s, &EditorSession::documentChanged, this, [this] {
         if (m_s->doc()) { connect(m_s->doc(), &Document::layerTreeChanged, this, &EffectsPanel::refreshIfChanged, Qt::UniqueConnection); }
         rebuild();
@@ -99,6 +104,12 @@ bool EffectsPanel::clearMasks() {
     rebuild();
     return true;
 }
+bool EffectsPanel::clearEffects() {
+    Layer* l = m_s->activeLayer(); if (!l || l->props.locked || l->fx.effects.isEmpty()) return false;
+    edit(tr("Remove Effects"), {}, [](LayerFx& f) { f.effects.clear(); });
+    rebuild();
+    return true;
+}
 bool EffectsPanel::setMatte(const QUuid& layer, MatteMode mode) {
     Layer* l = m_s->activeLayer(); if (!l || l->props.locked) return false;
     if (layer == l->id) return false;
@@ -114,15 +125,21 @@ void EffectsPanel::rebuild() {
     Layer* l = m_s->activeLayer();
     m_shownLayer = l ? l->id : QUuid(); m_shown = l ? l->fx : LayerFx();
     if (!l) {
-        auto* lab = new QLabel(tr("Select a layer to give it masks, a track matte or effects.")); lab->setWordWrap(true);
-        m_layout->addWidget(lab); m_rebuilding = false; return;
+        if (!m_embedded) { auto* lab = new QLabel(tr("Select a layer to give it masks, a track matte or effects.")); lab->setWordWrap(true); m_layout->addWidget(lab); }
+        m_rebuilding = false; return;
     }
+    // Embedded in the Properties panel (After Effects style): effects, masks and a matte show up only once the layer has them; they are
+    // added from the Effect and Layer menus.
+    const bool showMatte = !m_embedded || l->fx.matteMode != MatteMode::None;
+    const bool showMaskBar = !m_embedded;
+    const bool showMasks = !m_embedded || !l->fx.masks.isEmpty();
+    const bool showEffects = !m_embedded || !l->fx.effects.isEmpty();
     const bool locked = l->props.locked;
-    auto* head = new QLabel(tr("<b>%1</b>").arg(l->props.name.toHtmlEscaped())); m_layout->addWidget(head);
+    if (!m_embedded) m_layout->addWidget(new QLabel(tr("<b>%1</b>").arg(l->props.name.toHtmlEscaped())));
 
     // ---- track matte ----
-    m_layout->addWidget(new QLabel(tr("<b>Track matte</b>")));
-    {
+    if (showMatte) m_layout->addWidget(new QLabel(tr("<b>Track matte</b>")));
+    if (showMatte) {
         auto* row = new QHBoxLayout;
         auto* layerBox = new QComboBox; layerBox->addItem(tr("(none)"), QUuid());
         std::function<void(const Layer*)> walk = [&](const Layer* g) {
@@ -146,14 +163,14 @@ void EffectsPanel::rebuild() {
     }
 
     // ---- masks ----
-    m_layout->addWidget(new QLabel(tr("<b>Masks</b>")));
-    {
+    if (showMasks) m_layout->addWidget(new QLabel(tr("<b>Masks</b>")));
+    if (showMasks) {
         auto* row = new QHBoxLayout; row->setContentsMargins(0, 0, 0, 0);
         auto mk = [&](const QString& text, std::function<void()> fn) { auto* b = new QPushButton(text); b->setEnabled(!locked); connect(b, &QPushButton::clicked, this, [fn] { fn(); }); row->addWidget(b); };
         mk(tr("Rectangle"), [this] { addRectangleMask(); });
         mk(tr("Ellipse"), [this] { addEllipseMask(); });
         mk(tr("From selected shape"), [this] { addMaskFromSelectedShapes(); });
-        auto* w = new QWidget; w->setLayout(row); m_layout->addWidget(w);
+        auto* w = new QWidget; w->setLayout(row); if (showMaskBar) m_layout->addWidget(w); else delete w;
         for (int i = 0; i < l->fx.masks.size(); ++i) {
             const Mask& m = l->fx.masks[i];
             auto* box = new QFrame; box->setFrameShape(QFrame::StyledPanel);
@@ -180,13 +197,13 @@ void EffectsPanel::rebuild() {
     }
 
     // ---- effects ----
-    m_layout->addWidget(new QLabel(tr("<b>Effects</b> (applied top to bottom, before the masks)")));
-    {
+    if (showEffects) m_layout->addWidget(new QLabel(tr("<b>Effects</b> (applied top to bottom, before the masks)")));
+    if (showEffects) {
         auto* add = new QToolButton; add->setText(tr("Add effect ▾")); add->setPopupMode(QToolButton::InstantPopup); add->setEnabled(!locked);
         auto* menu = new QMenu(add);
         for (EffectType t : allEffectTypes()) menu->addAction(effectInfo(t).label, this, [this, t] { addEffect(t); });
         add->setMenu(menu);
-        m_layout->addWidget(add, 0, Qt::AlignLeft);
+        if (!m_embedded) m_layout->addWidget(add, 0, Qt::AlignLeft); else delete add;
         for (int i = 0; i < l->fx.effects.size(); ++i) {
             const Effect& e = l->fx.effects[i];
             const EffectInfo& info = effectInfo(e.type);
@@ -228,9 +245,8 @@ void EffectsPanel::rebuild() {
             m_layout->addWidget(box);
         }
     }
-    auto* note = new QLabel(tr("Effect, mask and matte settings are fixed values (not keyframable yet).")); note->setWordWrap(true); note->setStyleSheet("color:#8a8f98;");
-    m_layout->addWidget(note);
-    m_layout->addStretch(1);
+    if (!m_embedded || l->fx.any()) { auto* note = new QLabel(tr("Effect, mask and matte settings are fixed values (not keyframable yet).")); note->setWordWrap(true); note->setStyleSheet("color:#8a8f98;"); m_layout->addWidget(note); }
+    if (!m_embedded) m_layout->addStretch(1);
     m_rebuilding = false;
 }
 

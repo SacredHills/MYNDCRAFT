@@ -66,6 +66,7 @@ protected:
 private:
     void buildActions();
     void buildMenus();
+    void buildEffectMenus(class QMenu* layerMenu);
     void buildToolbars();
     void buildDocks();
     void bindUndo();
