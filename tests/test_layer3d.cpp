@@ -98,6 +98,34 @@ class TestLayer3D : public QObject {
     static bool nonWhite(const QColor& c) { return c.red() < 235 || c.green() < 235 || c.blue() < 235; }
 
 private slots:
+    void effectsMasksAndMattesOfTheSourceLayerShowOnItsCard() {
+        Setup s = build();
+        const QImage plain = render(*s.doc);
+        QVERIFY(isRed(plain.pixelColor(80, 50)));
+        // mask: keep only the left half of the canvas -> the red middle is cut off at x = 80, the green square stays
+        Layer* art = s.doc->findLayer(s.art);
+        LayerFx fx;
+        Mask m; m.shape = VectorShape::makeRect(QRectF(0, 0, 80, 100)); m.shape.closed = true; fx.masks << m;
+        s.doc->setLayerFx(s.art, fx, "mask");
+        const QImage masked = render(*s.doc);
+        QVERIFY(isRed(masked.pixelColor(60, 50)));
+        QVERIFY(isWhite(masked.pixelColor(100, 50)));
+        QVERIFY(art->fx.masks.size() == 1);
+        // an Invert effect turns the red card cyan
+        fx.masks.clear(); fx.effects << Effect::make(EffectType::Invert);
+        s.doc->setLayerFx(s.art, fx, "invert");
+        const QColor c = render(*s.doc).pixelColor(80, 50);
+        QVERIFY2(c.red() < 60 && c.green() > 200 && c.blue() > 200, qPrintable(c.name()));
+        // a track matte (Alpha) from a small vector layer limits the card to that layer's shape
+        const QUuid matte = s.doc->addLayer(LayerType::Vector, "Matte");
+        VectorShape mr = VectorShape::makeRect(QRectF(0, 0, 70, 100)); mr.fill.color = Qt::black; mr.stroke.enabled = false;
+        s.doc->setShapes(matte, {mr}, "matte");
+        fx.effects.clear(); fx.matteLayer = matte; fx.matteMode = MatteMode::Alpha;
+        s.doc->setLayerFx(s.art, fx, "matte");
+        const QImage mt = render(*s.doc);
+        QVERIFY(isRed(mt.pixelColor(60, 50)));
+        QVERIFY(isWhite(mt.pixelColor(90, 50)));
+    }
     void aCardThatAppearsLargerThanTheCanvasKeepsItsDetail() {
         Setup s = build(true);
         // a 2 px wide black vertical line on white

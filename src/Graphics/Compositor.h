@@ -54,7 +54,7 @@ private:
     static void drawGroup(QPainter& p, const Layer& group, const QRect& region, const QSize& canvas, const Ctx& ctx);
     static void drawLayer(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx);
     static void drawLayerImpl(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx, bool ignoreHidden);
-    static void drawLayerWithFx(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx);
+    static void drawLayerWithFx(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx, bool forCard = false);   // forCard: opacity and blend are left to the card's material
     static void drawScene3D(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx);
     static void drawSymbol(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx);
     static void drawAnimationLayer(QPainter& p, const Layer& l, const QRect& region, const Ctx& ctx, double opacity);

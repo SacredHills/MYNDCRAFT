@@ -140,7 +140,7 @@ std::shared_ptr<const Scene3D> Compositor::sceneForDrawing(const Layer& l, int f
     };
     quint64 h = 1469598103934665603ull;
     const QSet<QUuid> noCards;                                   // the layer shown on a card is drawn by the card only
-    const Ctx ctx{frame, nullptr, syms, 1, 1, &noCards};
+    const Ctx ctx{frame, nullptr, syms, 1, 1, &noCards, root, 0};
     for (Node3D& n : s->nodes) {
         if (n.cardLayer.isNull()) continue;
         const Layer* src = findInTree(*root, n.cardLayer);
@@ -157,7 +157,11 @@ std::shared_ptr<const Scene3D> Compositor::sceneForDrawing(const Layer& l, int f
             // layer keeps its 2D animation when it becomes a card; the card's 3D transform comes on top of it.
             const LayerXform xf = src->xformAt(frame);
             QRect region(QPoint(0, 0), canvas);
-            if (!xf.isIdentity()) {
+            if (src->fx.any()) {
+                // effects, masks and a track matte are part of the layer's picture (opacity and blend stay with the card's material)
+                drawLayerWithFx(p, *src, region, canvas, ctx, true);
+                region = QRect();
+            } else if (!xf.isIdentity()) {
                 const QTransform m = xf.matrix(QPointF(canvas.width() / 2.0, canvas.height() / 2.0));
                 bool ok = false;
                 const QTransform inv = m.inverted(&ok);
@@ -333,9 +337,9 @@ void Compositor::drawLayer(QPainter& p, const Layer& l, const QRect& region, con
 }
 
 // Layer with effects, masks and/or a track matte: content -> effects -> masks (layer space) -> layer transform -> matte -> opacity/blend.
-void Compositor::drawLayerWithFx(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx) {
+void Compositor::drawLayerWithFx(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx, bool forCard) {
     const LayerXform xf = l.xformAt(ctx.frame);
-    const double opacity = l.props.opacity * xf.opacity;
+    const double opacity = forCard ? 1.0 : l.props.opacity * xf.opacity;
     if (opacity <= 0) return;
     const QTransform m = xf.matrix(QPointF(canvas.width() / 2.0, canvas.height() / 2.0));
     bool invertible = false;
@@ -382,7 +386,7 @@ void Compositor::drawLayerWithFx(QPainter& p, const Layer& l, const QRect& regio
     }
     p.save();
     p.setOpacity(opacity);
-    p.setCompositionMode(mode(l.props.blend));
+    p.setCompositionMode(forCard ? QPainter::CompositionMode_SourceOver : mode(l.props.blend));
     p.drawImage(region.topLeft(), comp);
     p.restore();
 }
