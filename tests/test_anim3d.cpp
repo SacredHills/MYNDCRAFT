@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QQuaternion>
 
 #include "TestEnv.h"
 #include "Core/ProjectIO.h"
