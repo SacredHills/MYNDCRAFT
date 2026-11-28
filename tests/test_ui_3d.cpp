@@ -8,6 +8,7 @@
 #include "AnimGltf.h"
 #include "Core/ProjectIO.h"
 #include "Core/Settings.h"
+#include "UI/EffectsPanel.h"
 #include "UI/GraphEditor.h"
 #include "UI/MainWindow.h"
 #include "UI/Panels.h"
@@ -458,6 +459,38 @@ private slots:
         // and it undoes
         doc->undoStack()->undo();
         QVERIFY(indexOf(cube) != int(scene()->nodes.size()) - 1);
+    }
+
+    void theEffectsPanelAddsMasksMattesAndEffectsToTheActiveLayerWithUndo() {
+        auto* fxp = w->effectsPanel();
+        QVERIFY(fxp);
+        const QUuid art = doc->addLayer(LayerType::Vector, "FxArt");
+        VectorShape r = VectorShape::makeRect(QRectF(10, 10, 40, 40)); r.fill.color = Qt::red;
+        doc->setShapes(art, {r}, "shape");
+        const QUuid other = doc->addLayer(LayerType::Vector, "Matte");
+        s->setActiveLayer(art);
+        QVERIFY(fxp->addEffect(EffectType::Blur));
+        QVERIFY(fxp->addRectangleMask());
+        QVERIFY(fxp->addEllipseMask());
+        QVERIFY(fxp->setMatte(other, MatteMode::Luma));
+        const LayerFx& fx = doc->findLayer(art)->fx;
+        QCOMPARE(fx.effects.size(), 1); QCOMPARE(fx.masks.size(), 2);
+        QCOMPARE(fx.matteLayer, other); QVERIFY(fx.matteMode == MatteMode::Luma);
+        QVERIFY(!fxp->setMatte(art, MatteMode::Alpha));                         // a layer cannot be its own matte
+        // the selected shape of a vector layer can become a mask too
+        s->setSelectedShapes({r.id});
+        QVERIFY(fxp->addMaskFromSelectedShapes());
+        QCOMPARE(doc->findLayer(art)->fx.masks.size(), 3);
+        fxp->edit("Blur radius", "k", [](LayerFx& f) { f.effects[0].p[0] = 5; });
+        fxp->edit("Blur radius", "k", [](LayerFx& f) { f.effects[0].p[0] = 9; });
+        QCOMPARE(doc->findLayer(art)->fx.effects[0].p[0], 9.0);
+        doc->undoStack()->undo();                                               // both slider moves are one step
+        QCOMPARE(doc->findLayer(art)->fx.effects[0].p[0], Effect::make(EffectType::Blur).p[0]);
+        QVERIFY(fxp->clearMasks());
+        QVERIFY(doc->findLayer(art)->fx.masks.isEmpty());
+        // a locked layer is left alone
+        LayerProps lp = doc->findLayer(art)->props; lp.locked = true; doc->setLayerProps(art, lp);
+        QVERIFY(!fxp->addEffect(EffectType::Invert));
     }
 
     void foldedGroupsStayFoldedWhenOtherObjectsAreSelected() {

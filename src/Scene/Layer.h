@@ -1,4 +1,5 @@
 #pragma once
+#include "Scene/LayerFx.h"
 #include <QImage>
 #include <QString>
 #include <QUuid>
@@ -68,6 +69,7 @@ public:
     std::map<QUuid, QImage> drawingImages;
     // Keyframe-animatable properties (transform, opacity). Sparse: absent = default value, no keys.
     PropertyTracks tracks;
+    LayerFx fx;                      // masks, track matte, effects (all layer types)
     std::vector<LayerPtr> children;  // Group layers
     // Symbol instances: which symbol is shown and how its timeline is mapped onto this one.
     QUuid symbolId;

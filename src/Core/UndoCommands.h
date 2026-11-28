@@ -117,6 +117,17 @@ private:
     Document* m_doc; TimingSettings m_before, m_after;
 };
 
+class LayerFxCommand : public QUndoCommand {
+public:
+    LayerFxCommand(Document* d, const QUuid& layer, const LayerFx& before, const LayerFx& after, const QString& text, const QString& mergeKey);
+    void undo() override;
+    void redo() override;
+    int id() const override { return m_key.isEmpty() ? -1 : 1003; }
+    bool mergeWith(const QUndoCommand* other) override;
+private:
+    Document* m_doc; QUuid m_layer; LayerFx m_before, m_after; QString m_key;
+};
+
 class BackgroundCommand : public QUndoCommand {
 public:
     BackgroundCommand(Document* d, const QColor& before, const QColor& after, const QString& text);

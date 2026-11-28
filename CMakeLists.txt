@@ -52,6 +52,8 @@ add_library(myndcore STATIC
   src/Scene/ShapeMorph.cpp
   src/Scene/Playback.cpp
   src/Scene/Layer.cpp
+  src/Scene/LayerFx.cpp
+  src/Graphics/Effects.cpp
   src/Scene/Document.cpp
   src/Drawing/BrushEngine.cpp
   src/Drawing/FloodFill.cpp
@@ -73,6 +75,7 @@ add_library(myndui STATIC
   src/UI/Tools.cpp
   src/UI/CanvasView.cpp
   src/UI/Panels.cpp
+  src/UI/EffectsPanel.cpp
   src/UI/Icons.cpp
   src/UI/AnimationActions.cpp
   src/UI/TimelinePanel.cpp
@@ -126,6 +129,7 @@ myndcraft_test(test_scene3d)
 myndcraft_test(test_import3d)
 myndcraft_test(test_anim3d)
 myndcraft_test(test_layer3d)
+myndcraft_test(test_effects)
 myndcraft_test(test_export)
 myndcraft_test(test_document)
 myndcraft_test(test_projectio)

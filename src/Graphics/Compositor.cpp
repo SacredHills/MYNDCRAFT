@@ -1,6 +1,7 @@
 #include <limits>
 #include <cmath>
 #include "Graphics/Compositor.h"
+#include "Graphics/Effects.h"
 
 #include <mutex>
 #include <vector>
@@ -47,7 +48,7 @@ QImage Compositor::render(const Document& doc, const QRect& region, const Option
     p.setClipRect(r);
     QSet<QUuid> cards;
     collectCardSources(*doc.root(), cards);
-    const Ctx ctx{opt.frame >= 0 ? opt.frame : doc.currentFrame(), &opt.onion, &doc, 0, opt.scene3dSupersample, &cards};
+    const Ctx ctx{opt.frame >= 0 ? opt.frame : doc.currentFrame(), &opt.onion, &doc, 0, opt.scene3dSupersample, &cards, doc.root(), 0};
     drawGroup(p, *doc.root(), r, doc.canvasSize(), ctx);
     return out;
 }
@@ -96,6 +97,7 @@ void Compositor::collectCardSources(const Layer& group, QSet<QUuid>& out) {
     for (const auto& c : group.children) {
         if (c->type == LayerType::Scene3D && c->scene3d)
             for (const Node3D& n : c->scene3d->nodes) if (!n.cardLayer.isNull()) out.insert(n.cardLayer);
+        if (c->fx.matteMode != MatteMode::None && !c->fx.matteLayer.isNull()) out.insert(c->fx.matteLayer);     // a track matte is only seen through the layer it mattes
         if (c->isGroup()) collectCardSources(*c, out);
     }
 }
@@ -327,8 +329,67 @@ void Compositor::drawLayerContent(QPainter& p, const Layer& l, const QRect& regi
 }
 
 void Compositor::drawLayer(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx) {
-    if (!l.props.visible) return;
-    if (ctx.cards && ctx.cards->contains(l.id)) return;           // shown through a card in a 3D scene instead
+    drawLayerImpl(p, l, region, canvas, ctx, false);
+}
+
+// Layer with effects, masks and/or a track matte: content -> effects -> masks (layer space) -> layer transform -> matte -> opacity/blend.
+void Compositor::drawLayerWithFx(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx) {
+    const LayerXform xf = l.xformAt(ctx.frame);
+    const double opacity = l.props.opacity * xf.opacity;
+    if (opacity <= 0) return;
+    const QTransform m = xf.matrix(QPointF(canvas.width() / 2.0, canvas.height() / 2.0));
+    bool invertible = false;
+    const QTransform inv = m.inverted(&invertible);
+    if (!invertible) return;
+    const int margin = fx::effectMargin(l.fx.effects);
+    const QRect limit = QRect(QPoint(0, 0), canvas).adjusted(-margin, -margin, margin, margin);
+    const QRect src = inv.mapRect(QRectF(region)).toAlignedRect().adjusted(-2 - margin, -2 - margin, 2 + margin, 2 + margin).intersected(limit);
+    if (src.isEmpty()) return;
+    QImage buf(src.size(), QImage::Format_ARGB32_Premultiplied);
+    buf.fill(Qt::transparent);
+    {
+        QPainter bp(&buf);
+        bp.setRenderHint(QPainter::Antialiasing);
+        bp.translate(-src.topLeft());
+        bp.setClipRect(src);
+        drawLayerContent(bp, l, src, canvas, ctx, 1.0, BlendMode::Normal);
+    }
+    if (!l.fx.effects.isEmpty()) fx::applyEffects(buf, l.fx.effects);
+    if (!l.fx.masks.isEmpty()) fx::applyCoverage(buf, fx::maskCoverage(l.fx.masks, src.size(), src.topLeft()));
+    QImage comp(region.size(), QImage::Format_ARGB32_Premultiplied);
+    comp.fill(Qt::transparent);
+    {
+        QPainter cp(&comp);
+        cp.setRenderHint(QPainter::SmoothPixmapTransform);
+        cp.translate(-region.topLeft());
+        cp.setWorldTransform(m, true);
+        cp.drawImage(src.topLeft(), buf);
+    }
+    if (l.fx.matteMode != MatteMode::None && !l.fx.matteLayer.isNull() && ctx.root && ctx.matteDepth < 8) {
+        if (const Layer* ml = findInTree(*ctx.root, l.fx.matteLayer); ml && ml != &l) {
+            QImage matte(region.size(), QImage::Format_ARGB32_Premultiplied);
+            matte.fill(Qt::transparent);
+            {
+                QPainter mp(&matte);
+                mp.setRenderHint(QPainter::Antialiasing);
+                mp.translate(-region.topLeft());
+                Ctx mc = ctx; mc.matteDepth = ctx.matteDepth + 1;
+                drawLayerImpl(mp, *ml, region, canvas, mc, true);
+            }
+            fx::applyMatte(comp, matte, l.fx.matteMode);
+        }
+    }
+    p.save();
+    p.setOpacity(opacity);
+    p.setCompositionMode(mode(l.props.blend));
+    p.drawImage(region.topLeft(), comp);
+    p.restore();
+}
+
+void Compositor::drawLayerImpl(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx, bool ignoreHidden) {
+    if (!l.props.visible && !ignoreHidden) return;
+    if (!ignoreHidden && ctx.cards && ctx.cards->contains(l.id)) return;           // shown through a card in a 3D scene instead (or used as a track matte)
+    if (l.fx.any()) { drawLayerWithFx(p, l, region, canvas, ctx); return; }
     const LayerXform xf = l.xformAt(ctx.frame);
     const double opacity = l.props.opacity * xf.opacity;
     if (opacity <= 0) return;

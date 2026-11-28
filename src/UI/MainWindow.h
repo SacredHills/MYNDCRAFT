@@ -43,6 +43,7 @@ public:
     Scene3DActions* scene3d() const { return m_scene3dActions; }
     Viewport3D* viewport3d() const { return m_viewport3d; }
     Scene3DPanel* scene3dPanel() const { return m_scene3dPanel; }
+    class EffectsPanel* effectsPanel() const { return m_effectsPanel; }
     void show3DPanels();
     Autosaver* autosaver() const { return m_autosave; }
 
@@ -98,6 +99,7 @@ private:
     Scene3DActions* m_scene3dActions = nullptr;
     Viewport3D* m_viewport3d = nullptr;
     Scene3DPanel* m_scene3dPanel = nullptr;
+    class EffectsPanel* m_effectsPanel = nullptr;
     QLabel* m_crumb = nullptr;
     QToolButton* m_crumbExit = nullptr;
     QAction* m_crumbExitAction = nullptr;

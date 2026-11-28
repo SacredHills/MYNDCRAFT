@@ -135,6 +135,17 @@ void TimingCommand::redo() { m_doc->applyTiming(m_after); }
 void TimingCommand::undo() { m_doc->applyTiming(m_before); }
 
 // ---------------- Composition background ----------------
+LayerFxCommand::LayerFxCommand(Document* d, const QUuid& layer, const LayerFx& b, const LayerFx& a, const QString& text, const QString& key)
+    : m_doc(d), m_layer(layer), m_before(b), m_after(a), m_key(key) { setText(text); }
+void LayerFxCommand::redo() { m_doc->applyLayerFx(m_layer, m_after); }
+void LayerFxCommand::undo() { m_doc->applyLayerFx(m_layer, m_before); }
+bool LayerFxCommand::mergeWith(const QUndoCommand* other) {
+    auto* o = dynamic_cast<const LayerFxCommand*>(other);
+    if (!o || m_key.isEmpty() || o->m_key != m_key || o->m_layer != m_layer) return false;
+    m_after = o->m_after;
+    return true;
+}
+
 BackgroundCommand::BackgroundCommand(Document* d, const QColor& b, const QColor& a, const QString& text) : m_doc(d), m_before(b), m_after(a) { setText(text); }
 void BackgroundCommand::redo() { m_doc->applyBackground(m_after); }
 void BackgroundCommand::undo() { m_doc->applyBackground(m_before); }

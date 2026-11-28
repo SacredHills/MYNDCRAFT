@@ -392,6 +392,18 @@ void Document::setDuration(int frames) {
     if (a == b) return;
     m_undo.push(new TimingCommand(this, a, b, tr("Set Duration")));
 }
+void Document::setLayerFx(const QUuid& layer, const LayerFx& fx, const QString& text, const QString& mergeKey) {
+    Layer* l = findLayer(layer);
+    if (!l || l->fx == fx) return;
+    m_undo.push(new LayerFxCommand(this, layer, l->fx, fx, text, mergeKey));
+}
+void Document::applyLayerFx(const QUuid& layer, const LayerFx& fx) {
+    Layer* l = findLayer(layer);
+    if (!l) return;
+    l->fx = fx;
+    emitContentChanged({});
+    emit layerTreeChanged();
+}
 void Document::setBackground(const QColor& c) {
     if (!c.isValid() || c == m_comp.background) return;
     m_undo.push(new BackgroundCommand(this, m_comp.background, c, c.alpha() == 0 ? tr("Transparent Background") : tr("Change Background")));

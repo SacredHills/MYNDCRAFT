@@ -7,6 +7,7 @@
 #include "UI/SymbolPanel.h"
 #include "UI/Scene3DActions.h"
 #include "UI/Scene3DPanel.h"
+#include "UI/EffectsPanel.h"
 #include "UI/Viewport3D.h"
 #include <QTabWidget>
 #include <QLabel>
@@ -558,6 +559,8 @@ void MainWindow::buildDocks() {
     }
     mkDock("exposure", tr("Exposure Sheet"), new ExposureSheetPanel(m_session, m_anim));
     mkDock("onion", tr("Onion Skin"), new OnionSkinPanel(m_session));
+    m_effectsPanel = new EffectsPanel(m_session);
+    mkDock("effects", tr("Effects"), m_effectsPanel);
     mkDock("properties", tr("Properties"), new PropertiesPanel(m_session, m_anim));
     m_scene3dPanel = new Scene3DPanel(m_session, m_scene3dActions);
     m_viewport3d = new Viewport3D(m_session, m_scene3dActions);

@@ -174,6 +174,7 @@ LayerPtr Layer::cloneExact() const {
     c->textContent = textContent;
     c->anim = anim;
     c->tracks = tracks;
+    c->fx = fx;
     c->symbolId = symbolId; c->symbolPlay = symbolPlay; c->symbolFirstFrame = symbolFirstFrame;
     if (scene3d) c->scene3d = std::make_shared<mynd::Scene3D>(*scene3d);
     for (const auto& [did, img] : drawingImages) c->drawingImages[did] = img.copy();
@@ -194,6 +195,7 @@ LayerPtr Layer::cloneWithNewIds() const {
     c->textContent = textContent;
     c->anim = anim;
     c->tracks = tracks;
+    c->fx = fx;
     c->symbolId = symbolId; c->symbolPlay = symbolPlay; c->symbolFirstFrame = symbolFirstFrame;
     if (scene3d) {
         c->scene3d = std::make_shared<mynd::Scene3D>(*scene3d);

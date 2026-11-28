@@ -91,6 +91,9 @@ public:
     int durationFrames() const { return m_comp.durationFrames; }
     void setDuration(int frames);
     void setFrameRate(FrameRate fps);
+    // Masks, track matte and effects of a layer (undoable; edits with the same non-empty `mergeKey` merge into one undo step).
+    void setLayerFx(const QUuid& layer, const LayerFx& fx, const QString& text, const QString& mergeKey = {});
+    void applyLayerFx(const QUuid& layer, const LayerFx& fx);                       // used by the undo command
     void setBackground(const QColor& c);             // undoable; alpha 0 = transparent (checkerboard, alpha in exports)
     void applyBackground(const QColor& c);           // used by the undo command
     void setWorkArea(bool enabled, int in, int out);

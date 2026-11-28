@@ -32,7 +32,7 @@ public:
         OnionSkin onion;
         int scene3dSupersample = 0;   // 0 = automatic (2x anti-aliasing unless the canvas is large), 1 = fastest, 2 = anti-aliased (export)
     };
-    struct Ctx { int frame; const OnionSkin* onion; const SymbolResolver* syms = nullptr; int depth = 0; int ss3d = 1; const QSet<QUuid>* cards = nullptr; };
+    struct Ctx { int frame; const OnionSkin* onion; const SymbolResolver* syms = nullptr; int depth = 0; int ss3d = 1; const QSet<QUuid>* cards = nullptr; const Layer* root = nullptr; int matteDepth = 0; };
     static QImage render(const Document& doc, const QRect& region, const Options& opt);
     // Depth pass of a frame: 16-bit grayscale, white = nearest, black = farthest or nothing 3D there. Made from every visible 3D scene layer
     // (the nearest opaque surface wins; 2D layers have no depth). The range of real distances (scene units) is returned in *nearOut/*farOut.
@@ -53,6 +53,8 @@ public:
 private:
     static void drawGroup(QPainter& p, const Layer& group, const QRect& region, const QSize& canvas, const Ctx& ctx);
     static void drawLayer(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx);
+    static void drawLayerImpl(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx, bool ignoreHidden);
+    static void drawLayerWithFx(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx);
     static void drawScene3D(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx);
     static void drawSymbol(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx);
     static void drawAnimationLayer(QPainter& p, const Layer& l, const QRect& region, const Ctx& ctx, double opacity);

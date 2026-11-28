@@ -41,6 +41,7 @@ QJsonObject layerToJson(const Layer& l) {
     o["locked"] = l.props.locked;
     o["opacity"] = l.props.opacity;
     o["blend"] = blendModeKey(l.props.blend);
+    if (l.fx.any()) o["fx"] = l.fx.toJson();
     if (l.type == LayerType::Raster) o["asset"] = rasterAssetName(l.id);
     if (l.type == LayerType::Vector) {
         // While the end shapes are being edited the two lists are swapped in memory; the file always has start/end the right way round.
@@ -307,6 +308,7 @@ LayerPtr layerFromJson(const QJsonObject& o, zip_t* z, const Document& doc, QStr
     bool ok = false;
     l->props.blend = blendModeFromKey(o["blend"].toString("normal"), &ok);
     if (!ok) warnings << QString("Layer '%1': unknown blend mode, using Normal").arg(l->props.name);
+    if (o.contains("fx")) { QStringList fw; l->fx = LayerFx::fromJson(o["fx"].toObject(), &fw); for (const QString& w : fw) warnings << QString("Layer '%1': %2").arg(l->props.name, w); }
     if (o.contains("tracks")) {
         QStringList tw;
         if (!tracksFromJson(o["tracks"].toObject(), l->tracks, err, &tw)) return nullptr;
