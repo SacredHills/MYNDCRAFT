@@ -544,9 +544,9 @@ private slots:
         const Effect e = doc->findLayer(art)->fx.effects[0];
         const QString id = fxEffectPropId(e, 0);
         // the fields are scrub (drag) fields
-        QVERIFY(!fxp->findChildren<ScrubSpinBox*>().isEmpty());
+        QVERIFY(!fxp->findChildren<QDoubleSpinBox*>().isEmpty());
         ScrubSpinBox* spin = nullptr;
-        for (ScrubSpinBox* sp : fxp->findChildren<ScrubSpinBox*>()) if (sp->maximum() == 300) spin = sp;
+        for (auto* c : fxp->findChildren<QDoubleSpinBox*>()) if (auto* sp = dynamic_cast<ScrubSpinBox*>(c); sp && sp->maximum() == 300) spin = sp;
         QVERIFY(spin);
         spin->scrubBy(0, {}); spin->setValue(20);                                        // like dragging / typing: a fixed value while not animated
         QCOMPARE(doc->findLayer(art)->fx.effects[0].p[0], 20.0);
