@@ -127,12 +127,36 @@ static QRectF childrenBounds(const std::vector<LayerPtr>& kids, int frame, const
     return r;
 }
 
+QVector<ShapeList> Layer::poses() const {
+    if (!hasShapeTween()) return {shapes};
+    QVector<ShapeList> p; p << shapes << morphShapes; for (const ShapeList& e : morphExtra) p << e;
+    if (editingPose > 0 && editingPose < p.size()) std::swap(p[0], p[editingPose]);      // `shapes` holds the edited pose: put it back in its place
+    return p;
+}
+
+Layer::PoseLayout Layer::layoutPoses(const QVector<ShapeList>& poses, int editing) {
+    PoseLayout r;
+    if (poses.isEmpty()) return r;
+    QVector<ShapeList> p = poses;
+    editing = std::clamp(editing, 0, int(p.size()) - 1);
+    if (p.size() < 2) editing = 0;
+    if (editing > 0) std::swap(p[0], p[editing]);
+    r.shapes = p[0];
+    if (p.size() > 1) r.morph = p[1];
+    for (int i = 2; i < p.size(); ++i) r.extra << p[i];
+    r.editing = editing;
+    return r;
+}
+
 ShapeList Layer::shapesAt(double frame) const {
-    if (!hasShapeTween() || editingEnd) return shapes;
-    const double m = valueOf(tracks, *findPropertyDef("shape.morph"), frame).c[0] / 100.0;
-    if (m <= 0) return shapes;
-    if (m >= 1) return morphShapes;
-    return mynd::morphShapes(shapes, morphShapes, m);
+    if (!hasShapeTween() || editingPose != 0) return shapes;
+    const int n = poseCount();
+    const double m = std::clamp(valueOf(tracks, *findPropertyDef("shape.morph"), frame).c[0] / 100.0, 0.0, double(n - 1));
+    auto pose = [&](int i) -> const ShapeList& { return i == 0 ? shapes : i == 1 ? morphShapes : morphExtra[i - 2]; };
+    const int i = std::min(int(std::floor(m)), n - 1);
+    const double t = m - i;
+    if (t <= 0 || i >= n - 1) return pose(i);
+    return mynd::morphShapes(pose(i), pose(i + 1), t);
 }
 
 QRectF Layer::contentBounds(int frame, const QSize& canvas, const SymbolResolver* syms) const {
@@ -170,7 +194,7 @@ LayerPtr Layer::cloneExact() const {
     c->props = props;
     c->raster = raster.copy();
     c->shapes = shapes;
-    c->morphShapes = morphShapes; c->editingEnd = editingEnd;
+    c->morphShapes = morphShapes; c->morphExtra = morphExtra; c->editingPose = editingPose;
     c->textContent = textContent;
     c->anim = anim;
     c->tracks = tracks;
@@ -191,7 +215,7 @@ LayerPtr Layer::cloneWithNewIds() const {
     c->props = props;
     c->raster = raster.copy();
     c->shapes = shapes;
-    c->morphShapes = morphShapes; c->editingEnd = editingEnd;
+    c->morphShapes = morphShapes; c->morphExtra = morphExtra; c->editingPose = editingPose;
     c->textContent = textContent;
     c->anim = anim;
     c->tracks = tracks;

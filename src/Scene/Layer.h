@@ -60,8 +60,17 @@ public:
     ShapeList shapes;       // Vector layers: bottom -> top
     // Shape tween: the end shapes (paired with `shapes` by position). The animatable property "shape.morph" (0-100 %)
     // blends between them. While `editingEnd` is set the two lists are swapped so the tools edit the end shapes.
+    // More than two shapes: `morphExtra` holds shape 3, 4, ... (poses 2, 3, ...); "shape.morph" 0 % = shape 1, 100 % = shape 2, 200 % = shape 3 ...
+    // and values in between blend the two neighbouring shapes. While a pose other than the first is being edited (`editingPose` > 0) the tools
+    // work on `shapes`, which then holds that pose, and the first pose sits in that pose's slot instead.
     ShapeList morphShapes;
-    bool editingEnd = false;
+    QVector<ShapeList> morphExtra;
+    int editingPose = 0;
+    bool editingEnd() const { return editingPose != 0; }
+    int poseCount() const { return hasShapeTween() ? 2 + int(morphExtra.size()) : 1; }
+    QVector<ShapeList> poses() const;                                   // the shapes of every pose in order, whatever is being edited
+    struct PoseLayout { ShapeList shapes, morph; QVector<ShapeList> extra; int editing = 0; };
+    static PoseLayout layoutPoses(const QVector<ShapeList>& poses, int editing);
     TextContent textContent; // Text layers
     // Animation layers: exposure timing plus the pixels of every drawing (canvas-sized ARGB32_Premultiplied).
     // Images stay in the map even when no exposure references them, so undo can bring them back.

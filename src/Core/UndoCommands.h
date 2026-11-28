@@ -159,16 +159,15 @@ private:
     Document* m_doc; QUuid m_layer; TextContent m_before, m_after; QString m_mergeKey;
 };
 
-// Start/end shapes and the edit-end flag of a vector layer, changed together.
+// All shapes (poses) of a shape-tween layer and which one is being edited, changed together.
 class ShapeTweenCommand : public QUndoCommand {
 public:
-    ShapeTweenCommand(Document* d, const QUuid& layer, const ShapeList& bs, const ShapeList& bm, bool be,
-                      const ShapeList& as, const ShapeList& am, bool ae, const QString& text);
+    ShapeTweenCommand(Document* d, const QUuid& layer, const Layer::PoseLayout& before, const Layer::PoseLayout& after, const QString& text);
     void undo() override;
     void redo() override;
 private:
-    void apply(const ShapeList& s, const ShapeList& m, bool e);
-    Document* m_doc; QUuid m_layer; ShapeList m_bs, m_bm, m_as, m_am; bool m_be, m_ae;
+    void apply(const Layer::PoseLayout& s);
+    Document* m_doc; QUuid m_layer; Layer::PoseLayout m_b, m_a;
 };
 
 // ---- Symbols ----

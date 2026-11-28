@@ -659,19 +659,45 @@ bool EditorSession::createShapeTween(const QUuid& layer, int a, int b, bool easy
 bool EditorSession::toggleEditEndShape(const QUuid& layer) {
     Layer* l = editableTracksLayer(this, layer);
     if (!l || !l->hasShapeTween()) return false;
-    m_doc->setShapeTween(layer, l->morphShapes, l->shapes, !l->editingEnd, l->editingEnd ? tr("Edit Start Shape") : tr("Edit End Shape"));
+    return editShapePose(layer, l->editingPose != 0 ? 0 : 1);
+}
+
+bool EditorSession::editShapePose(const QUuid& layer, int pose) {
+    Layer* l = editableTracksLayer(this, layer);
+    if (!l || !l->hasShapeTween() || pose < 0 || pose >= l->poseCount() || pose == l->editingPose) return false;
+    m_doc->setShapePoses(layer, l->poses(), pose, pose == 0 ? tr("Edit First Shape") : tr("Edit Shape %1").arg(pose + 1));
     clearSelection();
+    return true;
+}
+
+bool EditorSession::addShapePose(const QUuid& layer, int frame) {
+    Layer* l = editableTracksLayer(this, layer);
+    if (!l || !m_doc || !l->hasShapeTween() || frame < 0 || frame >= m_doc->durationFrames() || l->poseCount() >= 19) return false;
+    const PropertyDef* d = findPropertyDef("shape.morph");
+    PropertyTracks t = l->tracks;
+    PropertyTrack& trk = t["shape.morph"];
+    if (trk.indexOfKey(frame) >= 0) return false;                       // a key is already there
+    QVector<ShapeList> poses = l->poses();
+    const int n = int(poses.size());
+    poses << poses.last();                                              // the new shape starts as a copy of the last one
+    trk.setKey(*d, frame, PropValue::of(100.0 * n));
+    m_doc->undoStack()->beginMacro(tr("Add Shape Key"));
+    m_doc->setShapePoses(layer, poses, n, tr("Add Shape"));
+    m_doc->editTracks(layer, t, tr("Shape Morph Key"));
+    m_doc->undoStack()->endMacro();
+    clearSelection();
+    emit message(tr("Editing shape %1. Change it with the tools, then choose Edit End Shape (or another shape) in the Animation menu to leave it.").arg(n + 1));
     return true;
 }
 
 bool EditorSession::removeShapeTween(const QUuid& layer) {
     Layer* l = editableTracksLayer(this, layer);
     if (!l || !l->hasShapeTween()) return false;
-    const ShapeList start = l->editingEnd ? l->morphShapes : l->shapes;
+    const ShapeList start = l->poses().first();
     PropertyTracks t = l->tracks;
     t.remove("shape.morph");
     m_doc->undoStack()->beginMacro(tr("Remove Shape Tween"));
-    m_doc->setShapeTween(layer, start, {}, false, tr("Remove Shape Tween"));
+    m_doc->setShapePoses(layer, {start}, 0, tr("Remove Shape Tween"));
     m_doc->editTracks(layer, t, tr("Remove Shape Morph"));
     m_doc->undoStack()->endMacro();
     clearSelection();

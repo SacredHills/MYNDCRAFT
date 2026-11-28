@@ -143,6 +143,12 @@ AnimationActions::AnimationActions(EditorSession* s, QWidget* dialogParent) : QO
     connect(editEndShapeAction, &QAction::triggered, this, [this] {
         if (const Layer* l = m_s->activeLayer()) m_s->toggleEditEndShape(l->id);
     });
+    addShapeKeyAction = mk("addShapeKey", tr("Add Shape Key at Current Frame"));
+    connect(addShapeKeyAction, &QAction::triggered, this, [this] {
+        const Layer* l = m_s->activeLayer();
+        if (l && m_s->doc() && !m_s->addShapePose(l->id, m_s->doc()->currentFrame()))
+            emit m_s->message(tr("Pick a frame without a shape-morph key, on a layer that has a shape tween."));
+    });
     removeShapeTweenAction = mk("removeShapeTween", tr("Remove Shape Tween"));
     connect(removeShapeTweenAction, &QAction::triggered, this, [this] {
         if (const Layer* l = m_s->activeLayer()) m_s->removeShapeTween(l->id);
@@ -331,8 +337,9 @@ void AnimationActions::refresh() {
         const bool vec = vl && vl->type == LayerType::Vector && !vl->props.locked;
         createShapeTweenAction->setEnabled(vec && !vl->shapes.isEmpty() && !vl->hasShapeTween());
         editEndShapeAction->setEnabled(vec && vl->hasShapeTween());
-        editEndShapeAction->setChecked(vl && vl->editingEnd);
+        editEndShapeAction->setChecked(vl && vl->editingEnd());
         removeShapeTweenAction->setEnabled(vec && vl->hasShapeTween());
+        addShapeKeyAction->setEnabled(vec && vl->hasShapeTween());
     }
     const bool anim = onAnimLayer();
     for (QAction* a : {newDrawing, duplicateDrawing, newDrawingNextFrame, insertBlank, deleteFrame, loopExposures, holdDrawing}) a->setEnabled(anim);
@@ -382,7 +389,19 @@ void AnimationActions::fillMenu(QMenu* m) {
     interp->addActions({keyLinear, keyHold, keyEaseIn, keyEaseOut, keyEaseBoth});
     m->addAction(deleteKeys);
     m->addSeparator();
-    m->addActions({createTweenAction, removeTweenAction, createShapeTweenAction, editEndShapeAction, removeShapeTweenAction});
+    m->addActions({createTweenAction, removeTweenAction, createShapeTweenAction, addShapeKeyAction, editEndShapeAction});
+    QMenu* poseMenu = m->addMenu(tr("Edit Shape"));
+    connect(poseMenu, &QMenu::aboutToShow, poseMenu, [this, poseMenu] {
+        poseMenu->clear();
+        const Layer* l = m_s->activeLayer();
+        if (!l || !l->hasShapeTween()) { poseMenu->addAction(tr("(no shape tween on this layer)"))->setEnabled(false); return; }
+        for (int k = 0; k < l->poseCount(); ++k) {
+            QAction* a = poseMenu->addAction(k == 0 ? tr("Shape 1 (start; stop editing)") : tr("Shape %1").arg(k + 1));
+            a->setCheckable(true); a->setChecked(k == l->editingPose);
+            connect(a, &QAction::triggered, this, [this, k] { if (const Layer* ly = m_s->activeLayer()) m_s->editShapePose(ly->id, k); });
+        }
+    });
+    m->addAction(removeShapeTweenAction);
 }
 
 void AnimationActions::fillLayerKeyMenu(QMenu* m, const QUuid& layer) {

@@ -129,7 +129,9 @@ public:
     QUuid addScene3DLayer(const QString& name = {}, QUuid parentId = {}, int index = -1);
 
     // Shape tween state of a vector layer (end shapes + whether they are being edited). Undoable.
-    void setShapeTween(const QUuid& layerId, const ShapeList& shapes, const ShapeList& morph, bool editingEnd, const QString& text);
+    void setShapeTween(const QUuid& layerId, const ShapeList& shapes, const ShapeList& morph, bool editingEnd, const QString& text);   // two shapes
+    // All poses of the layer (>= 2 makes it a shape tween, 1 or none removes it) with pose `editing` open for the tools.
+    void setShapePoses(const QUuid& layerId, const QVector<ShapeList>& poses, int editing, const QString& text);
 
     // ---- Symbols (reusable artwork with its own timeline) ----
     const QVector<SymbolDef>& symbols() const { return m_symbols; }

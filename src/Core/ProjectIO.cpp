@@ -44,9 +44,11 @@ QJsonObject layerToJson(const Layer& l) {
     if (l.fx.any()) o["fx"] = l.fx.toJson();
     if (l.type == LayerType::Raster) o["asset"] = rasterAssetName(l.id);
     if (l.type == LayerType::Vector) {
-        // While the end shapes are being edited the two lists are swapped in memory; the file always has start/end the right way round.
-        o["shapes"] = shapesToJson(l.editingEnd ? l.morphShapes : l.shapes);
-        if (!(l.editingEnd ? l.shapes : l.morphShapes).isEmpty()) o["morphShapes"] = shapesToJson(l.editingEnd ? l.shapes : l.morphShapes);
+        // While another pose is being edited the lists are swapped in memory; the file always has the poses in their real order.
+        const QVector<ShapeList> poses = l.poses();
+        o["shapes"] = shapesToJson(poses[0]);
+        if (poses.size() > 1) o["morphShapes"] = shapesToJson(poses[1]);
+        if (poses.size() > 2) { QJsonArray extra; for (int i = 2; i < poses.size(); ++i) extra.append(shapesToJson(poses[i])); o["morphExtra"] = extra; }
     }
     if (l.type == LayerType::Text) o["text"] = l.textContent.toJson();
     if (l.type == LayerType::Scene3D && l.scene3d) o["scene3d"] = l.scene3d->toJson();
@@ -337,6 +339,11 @@ LayerPtr layerFromJson(const QJsonObject& o, zip_t* z, const Document& doc, QStr
     } else if (t == LayerType::Vector) {
         if (!shapesFromJson(o["shapes"].toArray(), l->shapes, err)) return nullptr;
         if (o.contains("morphShapes") && !shapesFromJson(o["morphShapes"].toArray(), l->morphShapes, err)) return nullptr;
+        if (!l->morphShapes.isEmpty()) for (const auto& ev : o["morphExtra"].toArray()) {
+            if (l->morphExtra.size() >= 18) break;
+            ShapeList pose; if (!shapesFromJson(ev.toArray(), pose, err)) return nullptr;
+            l->morphExtra << pose;
+        }
     } else if (t == LayerType::Text) {
         if (!TextContent::fromJson(o["text"].toObject(), l->textContent, err)) return nullptr;
     } else if (t == LayerType::Animation) {

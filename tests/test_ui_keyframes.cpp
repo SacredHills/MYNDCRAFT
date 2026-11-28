@@ -696,6 +696,54 @@ private slots:
     }
 
     // ------------------------------------------------------------ Shape tweens
+    void aShapeTweenCanHaveMoreThanTwoShapesWithKeysInBetween() {
+        const QUuid v = s->addLayerAboveActive(LayerType::Vector, "Multi");
+        Layer* vl = doc->findLayer(v);
+        ShapeList sl; sl.append(VectorShape::makeRect(QRectF(20, 100, 60, 60)));
+        sl[0].fill.color = Qt::red; sl[0].stroke.enabled = false;
+        doc->setShapes(v, sl, "add");
+        s->setActiveLayer(v);
+        QVERIFY(s->createShapeTween(v, 0, 10, false));                       // shape 1 (red, left) -> shape 2
+        ShapeList second = vl->shapes; second[0].translate({100, 0}); second[0].fill.color = Qt::blue;
+        doc->setShapes(v, second, "shape 2");
+        // a third shape reached at frame 20: moved further, green
+        QVERIFY(s->addShapePose(v, 20));
+        QCOMPARE(vl->poseCount(), 3);
+        QCOMPARE(vl->editingPose, 2);
+        QVERIFY(!s->addShapePose(v, 20));                                      // a key is already there
+        ShapeList third = vl->shapes; third[0].translate({100, 0}); third[0].fill.color = Qt::green;
+        doc->setShapes(v, third, "shape 3");
+        QVERIFY(s->editShapePose(v, 0));                                       // back to the start
+        QCOMPARE(vl->editingPose, 0);
+        QVERIFY(vl->shapes[0].bounds().left() < 25);
+        QCOMPARE(px(0, 40, 130), QColor(Qt::red));
+        QCOMPARE(px(10, 140, 130), QColor(Qt::blue));                          // frame 10: the second shape, 100 px right
+        QCOMPARE(px(20, 240, 130), QColor(Qt::green));                         // frame 20: the third, 200 px right
+        const QColor mid = px(15, 190, 130);                                   // halfway between shapes 2 and 3
+        QVERIFY2(mid.blue() > 60 && mid.green() > 60 && mid.red() < 60, qPrintable(mid.name()));
+        // each shape can be opened for editing without losing the others
+        QVERIFY(s->editShapePose(v, 1));
+        QCOMPARE(vl->editingPose, 1);
+        QVERIFY(vl->shapes[0].bounds().left() > 115 && vl->shapes[0].bounds().left() < 125);
+        QVERIFY(s->editShapePose(v, 2));
+        QVERIFY(vl->shapes[0].bounds().left() > 215);
+        QVERIFY(s->editShapePose(v, 0));
+        QCOMPARE(vl->poses().size(), 3);
+        // saved in the right order, even while a later shape is open
+        QVERIFY(s->editShapePose(v, 2));
+        QTemporaryDir dir; QString err;
+        QVERIFY2(ProjectIO::save(*doc, dir.filePath("t.studio"), &err), qPrintable(err));
+        auto r = ProjectIO::load(dir.filePath("t.studio"));
+        QVERIFY2(r.doc, qPrintable(r.error));
+        const Layer* ll = r.doc->findLayer(v);
+        QCOMPARE(ll->poseCount(), 3);
+        QVERIFY(ll->shapes[0].bounds().left() < 25 && ll->morphShapes[0].bounds().left() > 115 && ll->morphExtra[0][0].bounds().left() > 215);
+        // undo the whole "add shape" in one step
+        doc->undoStack()->undo(); doc->undoStack()->undo(); doc->undoStack()->undo();     // open-pose changes and the shape edit
+        QVERIFY(s->removeShapeTween(v));
+        QVERIFY(!vl->hasShapeTween() && vl->morphExtra.isEmpty());
+    }
+
     void shapeTweenMorphsBetweenStartAndEndShapesAndSurvivesSaving() {
         // a vector layer with a rectangle at the left
         const QUuid v = s->addLayerAboveActive(LayerType::Vector, "Shape");
@@ -706,7 +754,7 @@ private slots:
         s->setActiveLayer(v);
         QVERIFY(s->createShapeTween(v, 0, 20, false));
         QVERIFY(vl->hasShapeTween());
-        QVERIFY(vl->editingEnd);
+        QVERIFY(vl->editingEnd());
         QVERIFY(w->animation()->editEndShapeAction->isChecked());
         QCOMPARE(vl->tracks["shape.morph"].keys.size(), 2);
         // while editing the end shape, move it to the right and turn it blue
@@ -715,7 +763,7 @@ private slots:
         end[0].fill.color = Qt::blue;
         doc->setShapes(v, end, "edit end");
         QVERIFY(s->toggleEditEndShape(v));                                   // back to the start shape
-        QVERIFY(!vl->editingEnd);
+        QVERIFY(!vl->editingEnd());
         QCOMPARE(vl->shapes[0].bounds().left() < 25, true);                  // start is still at the left
         QCOMPARE(px(0, 40, 130), QColor(Qt::red));                           // frame 0: start shape
         QCOMPARE(px(20, 240, 130), QColor(Qt::blue));                        // frame 20: end shape (moved 200 right)

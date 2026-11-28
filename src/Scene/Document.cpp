@@ -482,8 +482,19 @@ namespace mynd {
 void Document::setShapeTween(const QUuid& layerId, const ShapeList& shapes, const ShapeList& morph, bool editingEnd, const QString& text) {
     Layer* l = findLayer(layerId);
     if (!l || l->type != LayerType::Vector) return;
-    if (l->shapes == shapes && l->morphShapes == morph && l->editingEnd == editingEnd) return;
-    m_undo.push(new ShapeTweenCommand(this, layerId, l->shapes, l->morphShapes, l->editingEnd, shapes, morph, editingEnd, text));
+    // `shapes`/`morph` are what the layer should hold in those two slots (as before); further poses are kept
+    Layer::PoseLayout after; after.shapes = shapes; after.morph = morph; after.extra = l->morphExtra; after.editing = editingEnd ? 1 : 0;
+    Layer::PoseLayout before{l->shapes, l->morphShapes, l->morphExtra, l->editingPose};
+    if (before.shapes == after.shapes && before.morph == after.morph && before.extra == after.extra && before.editing == after.editing) return;
+    m_undo.push(new ShapeTweenCommand(this, layerId, before, after, text));
+}
+void Document::setShapePoses(const QUuid& layerId, const QVector<ShapeList>& poses, int editing, const QString& text) {
+    Layer* l = findLayer(layerId);
+    if (!l || l->type != LayerType::Vector || poses.isEmpty()) return;
+    const Layer::PoseLayout after = Layer::layoutPoses(poses, editing);
+    const Layer::PoseLayout before{l->shapes, l->morphShapes, l->morphExtra, l->editingPose};
+    if (before.shapes == after.shapes && before.morph == after.morph && before.extra == after.extra && before.editing == after.editing) return;
+    m_undo.push(new ShapeTweenCommand(this, layerId, before, after, text));
 }
 
 // ---------------- Symbols ----------------
@@ -594,6 +605,7 @@ static void fitLayerToCanvas(Layer& l, const QSize& from, const QSize& to) {
     for (auto& [did, img] : l.drawingImages) img = recenter(img);
     for (auto& s : l.shapes) s.translate(QPointF(off));
     for (auto& s : l.morphShapes) s.translate(QPointF(off));
+    for (auto& pose : l.morphExtra) for (auto& s : pose) s.translate(QPointF(off));
     l.textContent.pos += QPointF(off);
     for (auto& c : l.children) fitLayerToCanvas(*c, from, to);
 }
