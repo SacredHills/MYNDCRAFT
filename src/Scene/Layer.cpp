@@ -271,6 +271,17 @@ QVector<QString> Layer::animated3DProperties() const {
     return scene3d ? animatedSceneProps(*scene3d, tracks) : QVector<QString>();
 }
 QString Layer::propertyLabel(const QString& id) const {
+    if (isFxPropId(id)) {
+        const PropertyDef* d = fxPropertyDef(id);
+        QString label = d ? d->label : id;
+        const QStringList parts = id.split(':');                       // several effects of one kind: number them (second Blur = "Gaussian Blur 2 › ...")
+        if (d && parts.size() == 4 && parts[1] != "mask") {
+            int same = 0, nth = 0;
+            for (const Effect& e : fx.effects) if (QString(effectInfo(e.type).key) == parts[1]) { ++same; if (e.id == QUuid(parts[2])) nth = same; }
+            if (same > 1) { const int cut = label.indexOf(QString::fromUtf8(" ›")); label = label.left(cut) + " " + QString::number(nth) + label.mid(cut); }
+        }
+        return label;
+    }
     if (isScene3DPropId(id)) return scene3d ? describeSceneProp(*scene3d, id) : id;
     const PropertyDef* d = findPropertyDef(id);
     return d ? d->label : id;

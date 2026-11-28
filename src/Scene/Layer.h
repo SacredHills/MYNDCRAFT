@@ -90,6 +90,10 @@ public:
     std::shared_ptr<const mynd::Scene3D> sceneAt(double frame) const;
     // Animated 3D properties of this layer's scene (ids understood by findPropertyDef), in scene order; empty for other layers.
     QVector<QString> animated3DProperties() const;
+    // The effects/masks with every keyframed number evaluated at `frame` (what is drawn).
+    LayerFx fxAt(double frame) const { return fxAtFrame(fx, tracks, frame); }
+    // fx property ids (see LayerFx.h): all of them, or only the ones that have keyframes.
+    QVector<QString> fxProperties(bool onlyAnimated) const { return fxPropertyIds(fx, onlyAnimated ? &tracks : nullptr); }
     // Display name of any property id of this layer ("Position", "Cube › Position").
     QString propertyLabel(const QString& id) const;
     Layer* parent = nullptr;         // maintained by Document

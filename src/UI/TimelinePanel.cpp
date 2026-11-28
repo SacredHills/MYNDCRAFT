@@ -67,6 +67,7 @@ void TimelineView::rebuildRows() {
                 if (m_expanded.contains(c->id)) {
                     for (const PropertyDef& pd : layerPropertyDefs()) m_rows.append({c, depth + 1, pd.id});
                     for (const QString& id : c->animated3DProperties()) m_rows.append({c, depth + 1, id});
+                    for (const QString& id : c->fxProperties(false)) m_rows.append({c, depth + 1, id});      // effect and mask numbers
                 }
                 if (c->isGroup()) walk(c, depth + 1);
             }

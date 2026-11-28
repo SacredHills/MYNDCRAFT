@@ -15,6 +15,7 @@
 #include <functional>
 
 #include "Scene/Document.h"
+#include "UI/ScrubSpinBox.h"
 
 namespace mynd {
 
@@ -38,13 +39,23 @@ EffectsPanel::EffectsPanel(EditorSession* s, bool embedded, QWidget* parent) : Q
         m_body = new QWidget; scroll->setWidget(m_body);
         m_layout = new QVBoxLayout(m_body); m_layout->setAlignment(Qt::AlignTop);
     }
-    connect(s, &EditorSession::documentChanged, this, [this] {
-        if (m_s->doc()) { connect(m_s->doc(), &Document::layerTreeChanged, this, &EffectsPanel::refreshIfChanged, Qt::UniqueConnection); }
-        rebuild();
-    });
+    connect(s, &EditorSession::documentChanged, this, [this] { watchDocument(); rebuild(); });
     connect(s, &EditorSession::activeLayerChanged, this, [this] { rebuild(); });
-    if (s->doc()) connect(s->doc(), &Document::layerTreeChanged, this, &EffectsPanel::refreshIfChanged, Qt::UniqueConnection);
+    watchDocument();
     rebuild();
+}
+
+// (Re)connects to the current document's signals, once per document.
+void EffectsPanel::watchDocument() {
+    Document* d = m_s->doc();
+    if (d == m_watched) return;
+    for (const QMetaObject::Connection& c : m_conns) disconnect(c);
+    m_conns.clear();
+    m_watched = d;
+    if (!d) return;
+    m_conns << connect(d, &Document::layerTreeChanged, this, &EffectsPanel::refreshIfChanged)
+            << connect(d, &Document::frameChanged, this, [this] { updateValues(); })
+            << connect(d, &Document::tracksChanged, this, [this] { updateValues(); });
 }
 
 void EffectsPanel::refreshIfChanged() {
@@ -59,7 +70,86 @@ void EffectsPanel::edit(const QString& text, const QString& mergeKey, const std:
     LayerFx fx = l->fx;
     fn(fx);
     m_shown = fx; m_shownLayer = l->id;                                 // the widgets already show this state
-    m_s->doc()->setLayerFx(l->id, fx, text, mergeKey.isEmpty() ? QString() : mergeKey + l->id.toString());
+    // keyframes of effects/masks that no longer exist go with them (one undo step)
+    PropertyTracks pruned = l->tracks; bool orphans = false;
+    const QVector<QString> valid = fxPropertyIds(fx);
+    for (const QString& k : l->tracks.keys()) if (isFxPropId(k) && !valid.contains(k)) { pruned.remove(k); orphans = true; }
+    Document* d = m_s->doc();
+    if (orphans) {
+        d->undoStack()->beginMacro(text);
+        d->setLayerFx(l->id, fx, text);
+        d->editTracks(l->id, pruned, text);
+        d->undoStack()->endMacro();
+    } else {
+        d->setLayerFx(l->id, fx, text, mergeKey.isEmpty() ? QString() : mergeKey + l->id.toString());
+    }
+}
+
+QWidget* EffectsPanel::valueRow(const QString& label, const QString& propId, double lo, double hi, int decimals, const QString& suffix) {
+    auto* w = new QWidget;
+    auto* r = new QHBoxLayout(w); r->setContentsMargins(0, 0, 0, 0); r->setSpacing(3);
+    auto* lab = new QLabel(label); lab->setMinimumWidth(40);
+    r->addWidget(lab, 1);
+    auto* sp = new ScrubSpinBox; sp->setRange(lo, hi); sp->setDecimals(decimals); sp->setSuffix(suffix);
+    sp->setSingleStep((hi - lo) >= 150 ? 1.0 : 0.5); sp->setKeyboardTracking(false); sp->setMinimumWidth(64);
+    auto* watch = new QToolButton; watch->setCheckable(true); watch->setAutoRaise(true); watch->setText(QString::fromUtf8("⏱")); watch->setToolTip(tr("Animate this value (stopwatch)"));
+    auto* key = new QToolButton; key->setAutoRaise(true); key->setText(QString::fromUtf8("◇")); key->setToolTip(tr("Add or remove a keyframe at the current frame"));
+    r->addWidget(sp); r->addWidget(watch); r->addWidget(key);
+    connect(sp, &QDoubleSpinBox::valueChanged, this, [this, propId](double v) {
+        Layer* l = m_s->activeLayer(); if (!l || m_rebuilding) return;
+        auto it = l->tracks.constFind(propId);
+        if ((it != l->tracks.constEnd() && it->animated()) || m_s->autoKey()) m_s->setProperties(l->id, {{propId, PropValue::of(v)}}, propId);   // keyframe at this frame
+        else edit(tr("Effect Setting"), propId, [&](LayerFx& f) { writeFxValue(f, propId, v); });
+    });
+    connect(watch, &QToolButton::clicked, this, [this, propId](bool on) { setNumberAnimated(propId, on); });
+    connect(key, &QToolButton::clicked, this, [this, propId] { if (Layer* l = m_s->activeLayer()) m_s->toggleKeyHere(l->id, propId); });
+    m_rows.push_back({propId, sp, watch, key});
+    return w;
+}
+
+bool EffectsPanel::setNumberAnimated(const QString& propId, bool on) {
+    Layer* l = m_s->activeLayer(); Document* d = m_s->doc();
+    const PropertyDef* def = findPropertyDef(propId);
+    if (!l || !d || !def || l->props.locked) return false;
+    auto it = l->tracks.constFind(propId);
+    const bool isOn = it != l->tracks.constEnd() && it->animated();
+    if (on == isOn) return false;
+    const int frame = d->currentFrame();
+    const LayerFx now = l->fxAt(frame);
+    double v = def->def.c[0];
+    if (!readFxValue(now, propId, &v)) return false;
+    PropertyTracks t = l->tracks;
+    d->undoStack()->beginMacro(on ? tr("Animate %1").arg(l->propertyLabel(propId)) : tr("Stop Animating %1").arg(l->propertyLabel(propId)));
+    if (on) {
+        PropertyTrack trk; trk.base = PropValue::of(v);
+        trk.setKey(*def, frame, PropValue::of(v));
+        t.insert(propId, trk);
+        d->editTracks(l->id, t, tr("Animate"));
+    } else {
+        t.remove(propId);
+        LayerFx fx = l->fx; writeFxValue(fx, propId, v);                 // the value at this frame becomes the fixed value
+        d->setLayerFx(l->id, fx, tr("Stop Animating"));
+        d->editTracks(l->id, t, tr("Stop Animating"));
+    }
+    d->undoStack()->endMacro();
+    updateValues();
+    return true;
+}
+
+void EffectsPanel::updateValues() {
+    Layer* l = m_s->activeLayer(); Document* d = m_s->doc();
+    if (!l || !d) return;
+    const LayerFx now = l->fxAt(d->currentFrame());
+    for (const ValueRow& r : m_rows) {
+        double v;
+        if (!readFxValue(now, r.id, &v)) continue;
+        auto it = l->tracks.constFind(r.id);
+        const bool animated = it != l->tracks.constEnd() && it->animated();
+        if (!r.spin->hasFocus() && r.spin->value() != v) { QSignalBlocker b(r.spin); r.spin->setValue(v); }
+        { QSignalBlocker b(r.watch); r.watch->setChecked(animated); }
+        r.key->setEnabled(animated);
+        r.key->setText(QString::fromUtf8(animated && it->indexOfKey(d->currentFrame()) >= 0 ? "◆" : "◇"));
+    }
 }
 
 bool EffectsPanel::addEffect(EffectType t) {
@@ -121,6 +211,7 @@ bool EffectsPanel::setMatte(const QUuid& layer, MatteMode mode) {
 void EffectsPanel::rebuild() {
     if (m_rebuilding) return;
     m_rebuilding = true;
+    m_rows.clear();
     while (QLayoutItem* it = m_layout->takeAt(0)) { if (QWidget* w = it->widget()) w->deleteLater(); delete it; }
     Layer* l = m_s->activeLayer();
     m_shownLayer = l ? l->id : QUuid(); m_shown = l ? l->fx : LayerFx();
@@ -185,12 +276,8 @@ void EffectsPanel::rebuild() {
             connect(del, &QToolButton::clicked, this, [this, i] { edit(tr("Remove Mask"), {}, [&](LayerFx& f) { if (i < f.masks.size()) f.masks.removeAt(i); }); rebuild(); });
             top->addWidget(mode); top->addWidget(inv); top->addWidget(del);
             bl->addLayout(top);
-            auto* vals = new QHBoxLayout;
-            auto* fe = spin(0, 500, m.feather, 1, tr(" px")); auto* op = spin(0, 100, m.opacity, 0, " %");
-            connect(fe, &QDoubleSpinBox::valueChanged, this, [this, i](double v) { edit(tr("Mask Feather"), "mf" + QString::number(i), [&](LayerFx& f) { if (i < f.masks.size()) f.masks[i].feather = v; }); });
-            connect(op, &QDoubleSpinBox::valueChanged, this, [this, i](double v) { edit(tr("Mask Opacity"), "mo" + QString::number(i), [&](LayerFx& f) { if (i < f.masks.size()) f.masks[i].opacity = v; }); });
-            vals->addWidget(new QLabel(tr("Feather"))); vals->addWidget(fe); vals->addWidget(new QLabel(tr("Opacity"))); vals->addWidget(op);
-            bl->addLayout(vals);
+            bl->addWidget(valueRow(tr("Feather"), fxMaskPropId(m, "feather"), 0, 500, 1, tr(" px")));
+            bl->addWidget(valueRow(tr("Opacity"), fxMaskPropId(m, "opacity"), 0, 100, 0, " %"));
             box->setEnabled(!locked);
             m_layout->addWidget(box);
         }
@@ -221,14 +308,7 @@ void EffectsPanel::rebuild() {
             connect(del, &QToolButton::clicked, this, [this, i] { edit(tr("Remove Effect"), {}, [&](LayerFx& f) { if (i < f.effects.size()) f.effects.removeAt(i); }); rebuild(); });
             top->addWidget(up); top->addWidget(dn); top->addWidget(del);
             bl->addLayout(top);
-            for (int k = 0; k < info.paramCount; ++k) {
-                auto* r = new QHBoxLayout;
-                r->addWidget(new QLabel(tr(info.params[k].label)), 1);
-                auto* sp = spin(info.params[k].min, info.params[k].max, e.p[k], 1);
-                connect(sp, &QDoubleSpinBox::valueChanged, this, [this, i, k](double v) { edit(tr("Effect Setting"), "e" + QString::number(i) + "p" + QString::number(k), [&](LayerFx& f) { if (i < f.effects.size()) f.effects[i].p[k] = v; }); });
-                r->addWidget(sp);
-                bl->addLayout(r);
-            }
+            for (int k = 0; k < info.paramCount; ++k) bl->addWidget(valueRow(tr(info.params[k].label), fxEffectPropId(e, k), info.params[k].min, info.params[k].max, 1, QString()));
             if (e.type == EffectType::DropShadow) {
                 auto* cb = new QPushButton(tr("Shadow color…"));
                 cb->setStyleSheet(QString("QPushButton { border-left: 14px solid %1; }").arg(e.color.name()));
@@ -245,7 +325,9 @@ void EffectsPanel::rebuild() {
             m_layout->addWidget(box);
         }
     }
-    if (!m_embedded || l->fx.any()) { auto* note = new QLabel(tr("Effect, mask and matte settings are fixed values (not keyframable yet).")); note->setWordWrap(true); note->setStyleSheet("color:#8a8f98;"); m_layout->addWidget(note); }
+    if (!m_embedded || l->fx.any()) { auto* note = new QLabel(tr("Drag a value to change it. The stopwatch makes it animate: change it on other frames to add keyframes. (Shadow colour and matte settings are not animated.)")); note->setWordWrap(true); note->setStyleSheet("color:#8a8f98;"); m_layout->addWidget(note); }
+    m_rebuilding = false;
+    updateValues();
     if (!m_embedded) m_layout->addStretch(1);
     m_rebuilding = false;
 }

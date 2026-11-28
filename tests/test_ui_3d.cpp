@@ -13,6 +13,7 @@
 #include "Core/Settings.h"
 #include "UI/EffectsPanel.h"
 #include "UI/GraphEditor.h"
+#include "UI/ScrubSpinBox.h"
 #include "UI/PropertiesPanel.h"
 #include "UI/MainWindow.h"
 #include "UI/Panels.h"
@@ -102,10 +103,10 @@ private slots:
         Scene3DPanel* p = w->scene3dPanel();
         QVERIFY(p->transformGroup()->isVisibleTo(p) && p->materialGroup()->isVisibleTo(p));
         QVERIFY(!p->lightGroup()->isVisibleTo(p));
-        const int before = doc->undoStack()->count();
+        const int before = doc->undoStack()->index();
         p->posField(0)->setValue(1.0); p->posField(0)->setValue(1.5); p->posField(0)->setValue(2.0);
         QCOMPARE(scene()->node(cube)->position.x(), 2.0f);
-        QCOMPARE(doc->undoStack()->count(), before + 1);                    // one step for the whole edit
+        QCOMPARE(doc->undoStack()->index(), before + 1);                    // one step for the whole edit
         doc->undoStack()->undo();
         QCOMPARE(scene()->node(cube)->position.x(), 0.0f);
         // material edits
@@ -532,6 +533,52 @@ private slots:
         s->setActiveLayer(art);
         s->setActiveLayer(QUuid()); s->setActiveLayer(art);
         QVERIFY(!blur->isEnabled());
+    }
+
+    void effectValuesAreDraggableAndCanBeAnimatedWithTheStopwatch() {
+        const QUuid art = doc->addLayer(LayerType::Vector, "AnimFx");
+        s->setActiveLayer(art);
+        auto* fxp = w->effectsPanel();
+        QVERIFY(fxp->addEffect(EffectType::Blur));
+        QApplication::processEvents();
+        const Effect e = doc->findLayer(art)->fx.effects[0];
+        const QString id = fxEffectPropId(e, 0);
+        // the fields are scrub (drag) fields
+        QVERIFY(!fxp->findChildren<ScrubSpinBox*>().isEmpty());
+        ScrubSpinBox* spin = nullptr;
+        for (ScrubSpinBox* sp : fxp->findChildren<ScrubSpinBox*>()) if (sp->maximum() == 300) spin = sp;
+        QVERIFY(spin);
+        spin->scrubBy(0, {}); spin->setValue(20);                                        // like dragging / typing: a fixed value while not animated
+        QCOMPARE(doc->findLayer(art)->fx.effects[0].p[0], 20.0);
+        QVERIFY(!doc->findLayer(art)->tracks.contains(id));
+        // stopwatch on at frame 2: keyed with the current value; changing it at frame 8 adds a key there
+        doc->setCurrentFrame(2);
+        QVERIFY(fxp->setNumberAnimated(id, true));
+        QCOMPARE(doc->findLayer(art)->tracks[id].keys.size(), 1);
+        QCOMPARE(doc->findLayer(art)->tracks[id].keys[0].value.c[0], 20.0);
+        doc->setCurrentFrame(8);
+        QApplication::processEvents();
+        spin->setValue(60);
+        QCOMPARE(doc->findLayer(art)->tracks[id].keys.size(), 2);
+        QCOMPARE(doc->findLayer(art)->fx.effects[0].p[0], 20.0);                          // the stored value stays; the keys carry the animation
+        doc->setCurrentFrame(5);                                                          // halfway: the field shows the animated value
+        QApplication::processEvents();
+        QVERIFY2(std::abs(spin->value() - 40.0) < 0.6, qPrintable(QString::number(spin->value())));
+        // the timeline and graph editor know the new row
+        QVERIFY(doc->findLayer(art)->fxProperties(true).contains(id));
+        // stopwatch off freezes the value at the current frame
+        QVERIFY(fxp->setNumberAnimated(id, false));
+        QVERIFY(!doc->findLayer(art)->tracks.contains(id));
+        QVERIFY(std::abs(doc->findLayer(art)->fx.effects[0].p[0] - 40.0) < 0.6);
+        doc->undoStack()->undo();                                                         // and it is one undo step
+        QVERIFY(doc->findLayer(art)->tracks.contains(id));
+        // removing the effect takes its keyframes with it; undo brings both back
+        const int before = doc->undoStack()->index();
+        fxp->edit("Remove Effect", {}, [](LayerFx& f) { f.effects.clear(); });
+        QVERIFY(!doc->findLayer(art)->tracks.contains(id));
+        QCOMPARE(doc->undoStack()->index(), before + 1);
+        doc->undoStack()->undo();
+        QVERIFY(doc->findLayer(art)->tracks.contains(id) && doc->findLayer(art)->fx.effects.size() == 1);
     }
 
     void foldedGroupsStayFoldedWhenOtherObjectsAreSelected() {

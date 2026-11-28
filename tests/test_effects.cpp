@@ -137,6 +137,51 @@ private slots:
         QVERIFY(disabled == noFx);
     }
 
+    void effectAndMaskNumbersCanBeKeyframed() {
+        S s = build();
+        show(*s.doc, s.a, false);
+        Effect bl = Effect::make(EffectType::Blur); bl.p[0] = 0;
+        LayerFx fx; fx.effects << bl; fx.masks << rectMask(QRectF(0, 0, 100, 100));
+        s.doc->setLayerFx(s.b, fx, "Fx");
+        const QString blurId = fxEffectPropId(bl, 0), featherId = fxMaskPropId(fx.masks[0], "feather");
+        const PropertyDef* d = findPropertyDef(blurId);
+        QVERIFY(d && d->maxV.c[0] == 300 && d->def.c[0] == 8);
+        QVERIFY(!findPropertyDef("fx:blur:not-a-uuid:0") && !findPropertyDef(QString("fx:blur:%1:9").arg(bl.id.toString(QUuid::WithoutBraces))));
+        PropertyTracks t;
+        PropertyTrack tr; tr.base = PropValue::of(0); tr.setKey(*d, 0, PropValue::of(0)); tr.setKey(*d, 10, PropValue::of(20));
+        t.insert(blurId, tr);
+        s.doc->editTracks(s.b, t, "Animate blur");
+        const Layer* lb = s.doc->findLayer(s.b);
+        QCOMPARE(lb->fxAt(0).effects[0].p[0], 0.0);
+        QCOMPARE(lb->fxAt(5).effects[0].p[0], 10.0);
+        QCOMPARE(lb->fxAt(10).effects[0].p[0], 20.0);
+        QCOMPARE(lb->fx.effects[0].p[0], 0.0);                                   // the stored value is untouched
+        QCOMPARE(lb->fxProperties(true).size(), 1);
+        QVERIFY(lb->fxProperties(false).size() == 1 + 2 + 0);                    // one blur number, mask feather and opacity
+        // the picture follows: sharp at 0, soft edge at 10
+        const QImage f0 = render(*s.doc, 0), f10 = render(*s.doc, 10);
+        QVERIFY(f0.pixelColor(26, 50).alpha() < 10);                            // just outside the circle: nothing
+        QVERIFY(f10.pixelColor(26, 50).alpha() > 15);                           // blurred out to there
+        // a masks's feather keyframes work the same way
+        PropertyTrack mt; const PropertyDef* fd = findPropertyDef(featherId);
+        mt.base = PropValue::of(0); mt.setKey(*fd, 0, PropValue::of(0)); mt.setKey(*fd, 10, PropValue::of(30));
+        t.insert(featherId, mt);
+        s.doc->editTracks(s.b, t, "Animate feather");
+        QCOMPARE(s.doc->findLayer(s.b)->fxAt(10).masks[0].feather, 30.0);
+        // labels, also when there are two of a kind
+        QVERIFY(lb->propertyLabel(blurId).contains("Gaussian Blur"));
+        LayerFx two = lb->fx; two.effects << Effect::make(EffectType::Blur);
+        s.doc->setLayerFx(s.b, two, "Second blur");
+        QVERIFY2(s.doc->findLayer(s.b)->propertyLabel(blurId).contains("Gaussian Blur 1"), qPrintable(s.doc->findLayer(s.b)->propertyLabel(blurId)));
+        // saved and loaded: ids and keyframes survive, and the render matches
+        QTemporaryDir dir; QString err;
+        QVERIFY2(ProjectIO::save(*s.doc, dir.filePath("t.studio"), &err), qPrintable(err));
+        LoadResult r = ProjectIO::load(dir.filePath("t.studio"));
+        QVERIFY2(r.doc, qPrintable(r.error));
+        QCOMPARE(r.doc->findLayer(s.b)->fxAt(5).effects[0].p[0], 10.0);
+        QCOMPARE(render(*r.doc, 10), render(*s.doc, 10));
+    }
+
     void effectsMasksAndMattesSaveLoadAndUndo() {
         S s = build();
         LayerFx fx; fx.masks << rectMask(QRectF(0, 0, 50, 100)); fx.masks[0].feather = 3; fx.masks[0].mode = MaskMode::Intersect; fx.masks[0].invert = true;

@@ -341,7 +341,8 @@ void Compositor::drawLayerWithFx(QPainter& p, const Layer& l, const QRect& regio
     bool invertible = false;
     const QTransform inv = m.inverted(&invertible);
     if (!invertible) return;
-    const int margin = fx::effectMargin(l.fx.effects);
+    const LayerFx lfx = l.fxAt(ctx.frame);                    // keyframed numbers at this frame
+    const int margin = fx::effectMargin(lfx.effects);
     const QRect limit = QRect(QPoint(0, 0), canvas).adjusted(-margin, -margin, margin, margin);
     const QRect src = inv.mapRect(QRectF(region)).toAlignedRect().adjusted(-2 - margin, -2 - margin, 2 + margin, 2 + margin).intersected(limit);
     if (src.isEmpty()) return;
@@ -354,8 +355,8 @@ void Compositor::drawLayerWithFx(QPainter& p, const Layer& l, const QRect& regio
         bp.setClipRect(src);
         drawLayerContent(bp, l, src, canvas, ctx, 1.0, BlendMode::Normal);
     }
-    if (!l.fx.effects.isEmpty()) fx::applyEffects(buf, l.fx.effects);
-    if (!l.fx.masks.isEmpty()) fx::applyCoverage(buf, fx::maskCoverage(l.fx.masks, src.size(), src.topLeft()));
+    if (!lfx.effects.isEmpty()) fx::applyEffects(buf, lfx.effects);
+    if (!lfx.masks.isEmpty()) fx::applyCoverage(buf, fx::maskCoverage(lfx.masks, src.size(), src.topLeft()));
     QImage comp(region.size(), QImage::Format_ARGB32_Premultiplied);
     comp.fill(Qt::transparent);
     {

@@ -52,10 +52,12 @@ const QVector<PropertyDef>& layerPropertyDefs() {
 }
 
 const PropertyDef* scene3DPropertyDef(const QString& id);     // Scene3D/Anim3D.cpp
+const PropertyDef* fxPropertyDef(const QString& id);           // Scene/LayerFx.cpp
 
 const PropertyDef* findPropertyDef(const QString& id) {
     for (const PropertyDef& d : layerPropertyDefs()) if (d.id == id) return &d;
     if (id.startsWith(QLatin1String("3d:"))) return scene3DPropertyDef(id);
+    if (id.startsWith(QLatin1String("fx:"))) return fxPropertyDef(id);
     return nullptr;
 }
 

@@ -1,4 +1,6 @@
 #pragma once
+#include <QDoubleSpinBox>
+#include <QToolButton>
 #include <QWidget>
 
 #include "Scene/LayerFx.h"
@@ -26,7 +28,17 @@ public:
     bool setMatte(const QUuid& layer, MatteMode mode);
     void edit(const QString& text, const QString& mergeKey, const std::function<void(LayerFx&)>& fn);
 
+    // Stopwatch of one number (see LayerFx.h for the ids): turn keyframing on at the current frame / off, freezing the value shown.
+    bool setNumberAnimated(const QString& propId, bool on);
+
 private:
+    struct ValueRow { QString id; QDoubleSpinBox* spin; QToolButton* watch; QToolButton* key; };
+    QWidget* valueRow(const QString& label, const QString& propId, double lo, double hi, int decimals, const QString& suffix);
+    void updateValues();
+    QVector<ValueRow> m_rows;
+    void watchDocument();
+    QVector<QMetaObject::Connection> m_conns;
+    Document* m_watched = nullptr;
     void rebuild();
     void refreshIfChanged();
     EditorSession* m_s;
