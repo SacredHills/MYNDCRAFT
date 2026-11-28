@@ -117,7 +117,7 @@ public:
     // Deep copy with fresh ids (for duplicate).
     LayerPtr cloneWithNewIds() const;
     // Deep copy keeping ids (for undo snapshots).
-    LayerPtr cloneExact() const;
+    LayerPtr cloneExact(bool copyImages = true) const;   // copyImages=false: images are shared copy-on-write (cheap snapshot for background rendering)
 };
 
 // A library symbol: a named layer tree (`root`, a group that owns the children) plus its own length.

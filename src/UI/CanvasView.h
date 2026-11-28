@@ -1,4 +1,5 @@
 #pragma once
+#include <QFutureWatcher>
 #include <QImage>
 #include <QPlainTextEdit>
 
@@ -41,7 +42,11 @@ public:
     bool hasHover() const { return m_hasHover; }
     Tool* currentTool() const { return m_tool.get(); }
     // Rendered composite at document resolution (cache). Used by tests and the eyedropper.
-    QImage compositeImage() const { return m_cache; }
+    // The composite as shown. Rendering runs on a worker thread (the interface keeps responding; the previous picture stays until the new one is
+    // ready); this waits for anything still being rendered so callers (tests, export previews) see the finished picture.
+    QImage compositeImage() { flushRender(); return m_cache; }
+    void flushRender();
+    bool rendering() const { return m_rRunning; }
     void rebuildCache();
     Compositor::Options renderOptions() const;
 
@@ -84,6 +89,16 @@ private:
     Document* m_doc = nullptr;
     std::unique_ptr<Tool> m_tool;
     QImage m_cache;
+    // background render: one job at a time, the newest request wins (a full redraw replaces any queued partial one; partial ones merge)
+    struct RenderJob { std::shared_ptr<const Compositor::Snapshot> snap; QRect rect; Compositor::Options opt; int frame = 0; quint64 epoch = 0; quint64 docGen = 0; bool full = true; };
+    QFutureWatcher<QImage>* m_rw = nullptr;
+    RenderJob m_runJob, m_nextJob;
+    bool m_rRunning = false, m_rHaveNext = false;
+    quint64 m_docGen = 0;                // bumped when the document is replaced: results of renders of the old one are dropped
+    quint64 m_epoch = 0;                 // bumped whenever the frame cache is dropped; results of older epochs are not cached
+    void requestRender(const QRect& rect, bool full);
+    void startJob(const RenderJob& j);
+    void applyRenderResult();
     // Playback frame cache: frames rendered while playing are kept so later loops just show them (like a RAM preview). Any edit drops it.
     QHash<int, QImage> m_frameCache;
     QList<int> m_frameOrder;

@@ -37,20 +37,45 @@ void Compositor::drawShapes(QPainter& p, const ShapeList& shapes) {
     for (const auto& s : shapes) drawShape(p, s);
 }
 
-QImage Compositor::render(const Document& doc, const QRect& region, const Options& opt) {
-    const QRect r = region.intersected(doc.canvasRect());
+static QImage renderTree(const Layer& root, const SymbolResolver* syms, const QSize& size, const QColor& background, int currentFrame,
+                         const QRect& region, const Compositor::Options& opt,
+                         void (*drawGroupFn)(QPainter&, const Layer&, const QRect&, const QSize&, const Compositor::Ctx&)) {
+    const QRect r = region.intersected(QRect(QPoint(0, 0), size));
     QImage out(r.size(), QImage::Format_ARGB32_Premultiplied);
     if (r.isEmpty()) return out;
-    out.fill(opt.includeBackground ? doc.comp().background : QColor(Qt::transparent));
+    out.fill(opt.includeBackground ? background : QColor(Qt::transparent));
     QPainter p(&out);
     p.setRenderHint(QPainter::Antialiasing);
     p.translate(-r.topLeft());
     p.setClipRect(r);
     QSet<QUuid> cards;
-    collectCardSources(*doc.root(), cards);
-    const Ctx ctx{opt.frame >= 0 ? opt.frame : doc.currentFrame(), &opt.onion, &doc, 0, opt.scene3dSupersample, &cards, doc.root(), 0};
-    drawGroup(p, *doc.root(), r, doc.canvasSize(), ctx);
+    Compositor::collectCardSources(root, cards);
+    const Compositor::Ctx ctx{opt.frame >= 0 ? opt.frame : currentFrame, &opt.onion, syms, 0, opt.scene3dSupersample, &cards, &root, 0};
+    drawGroupFn(p, root, r, size, ctx);
     return out;
+}
+
+QImage Compositor::render(const Document& doc, const QRect& region, const Options& opt) {
+    return renderTree(*doc.root(), &doc, doc.canvasSize(), doc.comp().background, doc.currentFrame(), region, opt, &Compositor::drawGroup);
+}
+
+QThreadPool* Compositor::backgroundPool() {
+    static QThreadPool* pool = [] { auto* p = new QThreadPool; p->setMaxThreadCount(2); p->setThreadPriority(QThread::LowPriority); return p; }();
+    return pool;
+}
+
+std::shared_ptr<const Compositor::Snapshot> Compositor::snapshot(const Document& doc) {
+    auto s = std::make_shared<Snapshot>();
+    s->root = doc.root()->cloneExact(false);
+    for (const SymbolDef& d : doc.symbols()) { SymbolDef c = d; if (d.root) c.root = d.root->cloneExact(false); s->symbols << c; }
+    s->size = doc.canvasSize();
+    s->background = doc.comp().background;
+    s->frame = doc.currentFrame();
+    return s;
+}
+
+QImage Compositor::render(const Snapshot& snap, const QRect& region, const Options& opt) {
+    return renderTree(*snap.root, &snap, snap.size, snap.background, snap.frame, region, opt, &Compositor::drawGroup);
 }
 
 static void collectVisibleScenes(const Layer& g, std::vector<const Layer*>& out) {

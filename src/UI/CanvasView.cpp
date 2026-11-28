@@ -1,6 +1,7 @@
 #include "UI/CanvasView.h"
 
 #include <QApplication>
+#include <QtConcurrent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QTabletEvent>
@@ -43,7 +44,7 @@ void CanvasView::setDocument(Document* d) {
     endTextEdit(false);
     if (m_conn) disconnect(m_conn);
     if (m_tool) m_tool->cancel();
-    m_doc = d;
+    m_doc = d; ++m_docGen; m_rHaveNext = false;
     m_tool = createTool(m_session->tool(), m_session, this);
     if (d) {
         m_conn = connect(d, &Document::contentChanged, this, &CanvasView::onContentChanged);
@@ -77,12 +78,81 @@ Compositor::Options CanvasView::renderOptions() const {
 
 void CanvasView::rebuildCache() {
     if (!m_doc) return;
-    m_cache = Compositor::render(*m_doc, m_doc->canvasRect(), renderOptions());
-    update();
+    requestRender(m_doc->canvasRect(), true);
+}
+
+void CanvasView::startJob(const RenderJob& j) {
+    if (!m_rw) {
+        m_rw = new QFutureWatcher<QImage>(this);
+        connect(m_rw, &QFutureWatcher<QImage>::finished, this, [this] { applyRenderResult(); });
+    }
+    m_rRunning = true; m_runJob = j;
+    m_rw->setFuture(QtConcurrent::run(Compositor::backgroundPool(), [j] { return Compositor::render(*j.snap, j.rect, j.opt); }));
+}
+
+void CanvasView::requestRender(const QRect& rect, bool full) {
+    if (!m_doc) return;
+    const bool busy = m_rRunning || m_rHaveNext;
+    // Small brush-sized patches are done right away (so strokes follow the pen) as long as no background render is in flight that could
+    // later overwrite them with an older picture.
+    if (!busy && !full && m_cache.size() == m_doc->canvasSize() && qint64(rect.width()) * rect.height() <= 96 * 96) {
+        const QImage part = Compositor::render(*m_doc, rect, renderOptions());
+        QPainter p(&m_cache);
+        p.setCompositionMode(QPainter::CompositionMode_Source);
+        p.drawImage(rect.topLeft(), part);
+        p.end();
+        update(docToView().mapRect(QRectF(rect)).toAlignedRect().adjusted(-3, -3, 3, 3));
+        return;
+    }
+    RenderJob j;
+    j.snap = Compositor::snapshot(*m_doc);
+    j.opt = renderOptions(); j.frame = m_doc->currentFrame(); j.epoch = m_epoch; j.docGen = m_docGen;
+    j.full = full || m_cache.size() != m_doc->canvasSize();
+    j.rect = j.full ? m_doc->canvasRect() : rect;
+    if (!m_rRunning) { startJob(j); return; }
+    if (m_rHaveNext) {                       // merge with the queued request; the newest snapshot has every change
+        if (m_nextJob.full) j.full = true;
+        j.rect = j.full ? m_doc->canvasRect() : m_nextJob.rect.united(j.rect);
+    }
+    m_nextJob = j; m_rHaveNext = true;
+}
+
+void CanvasView::applyRenderResult() {
+    if (!m_rRunning || !m_rw || !m_rw->future().isFinished()) return;
+    const QImage img = m_rw->future().result();
+    const RenderJob job = m_runJob;
+    m_rRunning = false;
+    if (m_doc && job.docGen == m_docGen) {
+        if (job.full && img.size() == m_doc->canvasSize()) {
+            m_cache = img;
+            if (m_session->playback()->isPlaying() && job.epoch == m_epoch && !job.opt.onion.enabled) {      // keep it for the next loop (RAM preview)
+                const qint64 bytes = img.sizeInBytes();
+                while (!m_frameOrder.isEmpty() && m_frameCacheBytes + bytes > (qint64(768) << 20)) {
+                    const int old = m_frameOrder.takeFirst();
+                    m_frameCacheBytes -= m_frameCache.take(old).sizeInBytes();
+                }
+                if (!m_frameCache.contains(job.frame)) { m_frameCache.insert(job.frame, img); m_frameOrder << job.frame; m_frameCacheBytes += bytes; }
+            }
+        } else if (!job.full && m_cache.size() == m_doc->canvasSize()) {
+            QPainter p(&m_cache);
+            p.setCompositionMode(QPainter::CompositionMode_Source);
+            p.drawImage(job.rect.topLeft(), img);
+            p.end();
+        }
+        update();
+    }
+    if (m_rHaveNext) { m_rHaveNext = false; startJob(m_nextJob); }
+}
+
+void CanvasView::flushRender() {
+    while (m_rRunning) {
+        if (m_rw) m_rw->future().waitForFinished();
+        applyRenderResult();
+    }
 }
 
 void CanvasView::clearFrameCache() {
-    m_frameCache.clear(); m_frameOrder.clear(); m_frameCacheBytes = 0;
+    m_frameCache.clear(); m_frameOrder.clear(); m_frameCacheBytes = 0; ++m_epoch;
 }
 
 void CanvasView::onContentChanged(const QRect& r) {
@@ -94,25 +164,13 @@ void CanvasView::onContentChanged(const QRect& r) {
         const int f = m_doc->currentFrame();
         auto it = m_frameCache.constFind(f);
         if (it != m_frameCache.constEnd() && it->size() == m_doc->canvasSize()) { m_cache = *it; ++m_frameHits; update(); return; }
-        m_cache = Compositor::render(*m_doc, m_doc->canvasRect(), renderOptions());
-        const qint64 bytes = m_cache.sizeInBytes();
-        while (!m_frameOrder.isEmpty() && m_frameCacheBytes + bytes > (qint64(768) << 20)) {
-            const int old = m_frameOrder.takeFirst();
-            m_frameCacheBytes -= m_frameCache.take(old).sizeInBytes();
-        }
-        m_frameCache.insert(f, m_cache); m_frameOrder << f; m_frameCacheBytes += bytes;
-        update();
+        requestRender(m_doc->canvasRect(), true);      // not rendered yet: shown when ready (playback keeps its pace; the newest frame wins)
         return;
     }
     if (m_cache.size() != m_doc->canvasSize() || r.isEmpty()) { rebuildCache(); return; }
     const QRect rr = r.adjusted(-2, -2, 2, 2).intersected(m_doc->canvasRect());
     if (rr.isEmpty()) return;
-    const QImage part = Compositor::render(*m_doc, rr, renderOptions());
-    QPainter p(&m_cache);
-    p.setCompositionMode(QPainter::CompositionMode_Source);
-    p.drawImage(rr.topLeft(), part);
-    p.end();
-    update(docToView().mapRect(QRectF(rr)).toAlignedRect().adjusted(-3, -3, 3, 3));
+    requestRender(rr, false);
 }
 
 // ------------------------------------------------------------------ view transform

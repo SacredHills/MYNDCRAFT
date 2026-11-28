@@ -314,7 +314,7 @@ Limitations (honest list):
 ## Multithreaded 3D renderer (implemented, headless-tested; not yet timed on Windows)
 - The CPU 3D renderer splits the image into horizontal bands (4 per core) and rasterises them in parallel with Qt Concurrent. Every pixel still sees the triangles in the same order, so the image is bit-identical to the single-threaded render (a test compares the two, with and without supersampling, on a scene with translucent surfaces).
 - Measured in the 2-core sandbox: 1200x720 scene with 15 spheres and a card, 143 ms single-threaded vs 88 ms banded. Expect more on a machine with more cores; not measured on Windows.
-- Not threaded yet: 2D compositing, drawing tools, playback frame generation and model import still run on the UI thread, so the interface can still stall during heavy work. `RenderOptions::threads` forces a thread count (1 = old behaviour).
+- (Superseded: 2D compositing, playback frames and model import now run in the background, see "Canvas rendering in the background". Drawing-tool strokes and the final merge of edits still run on the UI thread.) `RenderOptions::threads` forces a thread count (1 = old behaviour).
 
 ## 3D fixes: folded groups, selection box, texture repeat (implemented, headless-tested; not yet hand-tested on Windows)
 - **Folded groups** in the 3D Scene list stay folded when other objects are selected (the list used to re-expand everything on every rebuild); scroll position is kept too.
@@ -359,7 +359,7 @@ The Select tool (V) now covers Direct Selection and Transform Layer: on drawing/
 ## Responsiveness
 - **Model import runs on a worker thread** with a progress box and Cancel (Import 3D Model). OBJ, FBX and glTF importers report progress and stop soon after Cancel (polled per 16k OBJ lines, per FBX top-level record / object batch, per glTF mesh); a cancelled import changes nothing. Only the final merge into the scene runs on the UI thread. Tested at the importer level (cancel flag + progress), not by clicking the dialog.
 - **The 3D viewport's software render runs on a worker**; the newest request wins and the previous picture stays up meanwhile, so orbiting/typing never blocks on a heavy scene.
-- **Still on the UI thread (honest):** the 2D canvas compositor (including a 3D scene layer drawn inside the composition) and playback frame rendering. Moving them needs a snapshot of the document for the worker, which is a bigger change; not done.
+- (The 2D canvas compositor and playback frames are now rendered in the background too, see "Canvas rendering in the background".)
 
 ## Phase 9: masks, track mattes, effects
 - **Per-layer, all layer types** (raster, vector, text, 3D scene, group...). Order when drawn: effects → masks (in the layer's own space, so they move with the layer) → layer transform → track matte → opacity/blend. Saved in the project (`fx` on each layer), undoable, kept when a layer is duplicated, included in exports.
@@ -387,3 +387,9 @@ The Select tool (V) now covers Direct Selection and Transform Layer: on drawing/
 ## Effects, masks and mattes on 3D cards
 - A 2D layer shown as a card in a 3D scene now keeps its effects, masks and track matte (and their keyframes): the card's picture is the layer drawn through the same effects -> masks -> transform -> matte path as in 2D; the layer's opacity and blend mode still come from the card's material. Verified by test (mask, invert effect, alpha matte on a card).
 - Limit: effects run at canvas resolution and the result is scaled up when a card is rendered larger than the canvas (e.g. a camera close to the card), so blurs/shadows are not extra-sharp there.
+
+## Canvas rendering in the background
+- The canvas picture (2D compositing, effects/masks, 3D scene layers and cards inside the composition, playback frames) is now produced on a worker thread from a frozen snapshot of the document (`Compositor::snapshot`: layer tree and symbols, images shared copy-on-write, so it is cheap and edits made while rendering do not affect or race with it). One render runs at a time; the newest request wins (a queued full redraw replaces everything older, queued partial redraws merge). While a render runs the previous picture stays on screen, so scrubbing, editing values and playing with heavy effects/3D no longer freeze the interface; during playback a frame that is not ready yet is simply skipped to the newest one. Small brush-sized patches (<= 96x96 px) are still drawn immediately when nothing is rendering so strokes follow the pen.
+- The 3D viewport and the canvas render in a dedicated 2-thread pool (`Compositor::backgroundPool`); using the global pool for both deadlocked in the test run because the 3D renderer itself splits work over the global pool.
+- Tested (sandbox): render returns immediately and the newest edit wins, results equal a synchronous render, playback cache, all existing UI tests (they wait via `CanvasView::flushRender()` / `compositeImage()`).
+- Honest limits: the work is moved off the UI thread, not made faster (a heavy frame still takes as long, it just does not block); the snapshot copies the layer tree on the UI thread on every edit (cheap for images, proportional to the number of layers/shapes); drawing tool strokes, undo commands and project save still run on the UI thread; not run with a thread sanitizer, and not tried on Windows/macOS by me beyond CI.

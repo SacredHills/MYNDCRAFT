@@ -150,7 +150,7 @@ public:
             });
         }
         m_running = true; m_runKey = key;
-        m_watch->setFuture(QtConcurrent::run([sc, cam, size, ro] { return renderScene(*sc, cam, size, ro); }));
+        m_watch->setFuture(QtConcurrent::run(Compositor::backgroundPool(), [sc, cam, size, ro] { return renderScene(*sc, cam, size, ro); }));
     }
 
     // ---- painting ----

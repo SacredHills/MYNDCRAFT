@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QElapsedTimer>
 #include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QMenu>
@@ -782,6 +783,33 @@ private slots:
         px(10, 10);
     }
 
+    void theCanvasRendersInTheBackgroundAndTheNewestEditWins() {
+        auto* cv = w->findChild<CanvasView*>();
+        QVERIFY(cv);
+        const QUuid L = doc->addLayer(LayerType::Vector, "Heavy");
+        VectorShape r = VectorShape::makeRect(QRectF(0, 0, 300, 300)); r.fill.color = Qt::red; r.stroke.enabled = false;
+        doc->setShapes(L, {r}, "shape");
+        cv->flushRender();
+        // a big blur makes the full redraw slow enough to observe
+        LayerFx fx; Effect b = Effect::make(EffectType::Blur); b.p[0] = 40; fx.effects << b;
+        QElapsedTimer t; t.start();
+        doc->setLayerFx(L, fx, "blur");
+        const qint64 returnedAfter = t.elapsed();
+        QVERIFY(cv->rendering());                                      // the picture is being made on a worker, the call did not wait for it
+        // edit again while it runs: the first render works on a frozen copy, the newest request wins
+        VectorShape r2 = r; r2.fill.color = Qt::blue;
+        doc->setShapes(L, {r2}, "recolor");
+        const QImage done = cv->compositeImage();                       // waits for everything
+        QVERIFY(!cv->rendering());
+        const QImage expected = Compositor::render(*doc, doc->canvasRect(), cv->renderOptions());
+        QCOMPARE(done.size(), expected.size());
+        QCOMPARE(done.pixelColor(150, 150), expected.pixelColor(150, 150));
+        const QColor c = done.pixelColor(150, 150);
+        QVERIFY2(c.blue() > 200 && c.red() < 60, qPrintable(c.name()));
+        QVERIFY2(returnedAfter < 2000, qPrintable(QString::number(returnedAfter)));
+        doc->undoStack()->undo(); doc->undoStack()->undo(); cv->flushRender();
+    }
+
     void playbackShowsCachedFramesOnLaterLoopsAndAnEditDropsThem() {
         const QUuid L = doc->addLayer(LayerType::Vector, "V");
         auto* cv = w->findChild<CanvasView*>();
@@ -789,7 +817,7 @@ private slots:
         QApplication::processEvents();
         s->playback()->play();
         QVERIFY(s->playback()->isPlaying());
-        for (int f = 1; f < 10; ++f) { doc->setCurrentFrame(f); }
+        for (int f = 1; f < 10; ++f) { doc->setCurrentFrame(f); cv->flushRender(); }       // (frames are rendered in the background; here each one is waited for)
         QCOMPARE(cv->frameCacheSize(), 9);
         const int hits0 = cv->frameCacheHits();
         for (int f = 1; f < 10; ++f) { doc->setCurrentFrame(f - 1 >= 1 ? f - 1 : 20); doc->setCurrentFrame(f); }

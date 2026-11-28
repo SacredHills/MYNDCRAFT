@@ -188,11 +188,11 @@ QRectF Layer::contentBounds(int frame, const QSize& canvas, const SymbolResolver
     return {};
 }
 
-LayerPtr Layer::cloneExact() const {
+LayerPtr Layer::cloneExact(bool copyImages) const {
     auto c = std::make_shared<Layer>(type, props.name);
     c->id = id;
     c->props = props;
-    c->raster = raster.copy();
+    c->raster = copyImages ? raster.copy() : raster;
     c->shapes = shapes;
     c->morphShapes = morphShapes; c->morphExtra = morphExtra; c->editingPose = editingPose;
     c->textContent = textContent;
@@ -201,9 +201,9 @@ LayerPtr Layer::cloneExact() const {
     c->fx = fx;
     c->symbolId = symbolId; c->symbolPlay = symbolPlay; c->symbolFirstFrame = symbolFirstFrame;
     if (scene3d) c->scene3d = std::make_shared<mynd::Scene3D>(*scene3d);
-    for (const auto& [did, img] : drawingImages) c->drawingImages[did] = img.copy();
+    for (const auto& [did, img] : drawingImages) c->drawingImages[did] = copyImages ? img.copy() : img;
     for (const auto& ch : children) {
-        auto cc = ch->cloneExact();
+        auto cc = ch->cloneExact(copyImages);
         cc->parent = c.get();
         c->children.push_back(cc);
     }
