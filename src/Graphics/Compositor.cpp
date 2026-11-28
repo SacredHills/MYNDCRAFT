@@ -428,6 +428,7 @@ void Compositor::drawLayerWithFx(QPainter& p, const Layer& l, const QRect& regio
 }
 
 void Compositor::drawLayerImpl(QPainter& p, const Layer& l, const QRect& region, const QSize& canvas, const Ctx& ctx, bool ignoreHidden) {
+    if (l.type == LayerType::Audio) return;                                     // sound only: nothing to draw
     if (!l.props.visible && !ignoreHidden) return;
     if (!ignoreHidden && ctx.cards && ctx.cards->contains(l.id)) return;           // shown through a card in a 3D scene instead (or used as a track matte)
     if (l.fx.any()) { drawLayerWithFx(p, l, region, canvas, ctx); return; }

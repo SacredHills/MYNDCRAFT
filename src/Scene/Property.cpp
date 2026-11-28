@@ -54,7 +54,22 @@ const QVector<PropertyDef>& layerPropertyDefs() {
 const PropertyDef* scene3DPropertyDef(const QString& id);     // Scene3D/Anim3D.cpp
 const PropertyDef* fxPropertyDef(const QString& id);           // Scene/LayerFx.cpp
 
+// Audio layer properties: volume in % (0-400, 100 = unchanged) and pan (-100 left .. 100 right).
+static const QVector<PropertyDef>& audioPropertyDefs() {
+    static const QVector<PropertyDef> v = [] {
+      QVector<PropertyDef> r = {
+        mkDef("audio.volume", "Volume", PropType::Float, PropValue::of(100), 0, 400, {"%"}, "%", 1),
+        mkDef("audio.pan", "Pan", PropType::Float, PropValue::of(0), -100, 100, {"L-R"}, "", 1),
+      };
+      for (PropertyDef& d : r) d.group = "Audio";
+      return r;
+    }();
+    return v;
+}
+const QVector<PropertyDef>& audioPropertyDefList() { return audioPropertyDefs(); }
+
 const PropertyDef* findPropertyDef(const QString& id) {
+    if (id.startsWith(QLatin1String("audio."))) { for (const PropertyDef& d : audioPropertyDefs()) if (d.id == id) return &d; return nullptr; }
     for (const PropertyDef& d : layerPropertyDefs()) if (d.id == id) return &d;
     if (id.startsWith(QLatin1String("3d:"))) return scene3DPropertyDef(id);
     if (id.startsWith(QLatin1String("fx:"))) return fxPropertyDef(id);

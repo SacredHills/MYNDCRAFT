@@ -47,6 +47,7 @@ QString layerTypeKey(LayerType t) {
     case LayerType::Animation: return "animation";
     case LayerType::Symbol: return "symbol";
     case LayerType::Scene3D: return "scene3d";
+    case LayerType::Audio: return "audio";
     }
     return "raster";
 }
@@ -58,6 +59,7 @@ bool layerTypeFromKey(const QString& k, LayerType& out) {
     else if (k == "animation") out = LayerType::Animation;
     else if (k == "symbol") out = LayerType::Symbol;
     else if (k == "scene3d") out = LayerType::Scene3D;
+    else if (k == "audio") out = LayerType::Audio;
     else return false;
     return true;
 }
@@ -83,6 +85,12 @@ int symbolLocalFrame(const Layer& inst, const SymbolDef& def, int parentFrame) {
     case SymbolPlay::Loop: break;
     }
     return ((first + parentFrame) % n + n) % n;
+}
+
+double AudioParams::playLength(double dur) const {
+    const double in = std::clamp(trimIn, 0.0, dur);
+    const double out = trimOut > 0 ? std::clamp(trimOut, in, dur) : dur;
+    return std::max(0.0, out - in);
 }
 
 Layer::Layer(LayerType t, const QString& name) : id(QUuid::createUuid()), type(t) {
@@ -173,6 +181,7 @@ QRectF Layer::contentBounds(int frame, const QSize& canvas, const SymbolResolver
     }
     case LayerType::Text: return textContent.bounds();
     case LayerType::Scene3D: return QRectF(QPointF(0, 0), QSizeF(canvas));
+    case LayerType::Audio: return QRectF();
     case LayerType::Group: return childrenBounds(children, frame, canvas, syms);
     case LayerType::Symbol: {
         const SymbolDef* d = syms ? syms->findSymbol(symbolId) : nullptr;
@@ -200,6 +209,7 @@ LayerPtr Layer::cloneExact(bool copyImages) const {
     c->tracks = tracks;
     c->fx = fx;
     c->symbolId = symbolId; c->symbolPlay = symbolPlay; c->symbolFirstFrame = symbolFirstFrame;
+    c->audio = audio; c->audioParams = audioParams;
     if (scene3d) c->scene3d = std::make_shared<mynd::Scene3D>(*scene3d);
     for (const auto& [did, img] : drawingImages) c->drawingImages[did] = copyImages ? img.copy() : img;
     for (const auto& ch : children) {
@@ -220,6 +230,7 @@ LayerPtr Layer::cloneWithNewIds() const {
     c->anim = anim;
     c->tracks = tracks;
     c->fx = fx;
+    c->audio = audio; c->audioParams = audioParams;
     c->symbolId = symbolId; c->symbolPlay = symbolPlay; c->symbolFirstFrame = symbolFirstFrame;
     if (scene3d) {
         c->scene3d = std::make_shared<mynd::Scene3D>(*scene3d);

@@ -64,13 +64,19 @@ private:
     QVector<Row> m_rows;
     QMetaObject::Connection m_c1, m_c2, m_c3, m_c4, m_c5, m_c6, m_c7;
     int m_cellW = 16;
-    enum Drag { None, Scrub, Resize, SelectRange, KeyMove, Marquee } m_drag = None;
+    enum Drag { None, Scrub, Resize, SelectRange, KeyMove, Marquee, AudioMove, AudioTrimIn, AudioTrimOut } m_drag = None;
     QSet<QUuid> m_expanded;
     QPoint m_marqueeStart, m_marqueeNow;
     int m_keyGrabFrame = 0, m_keyDelta = 0;
     bool m_marqueeAdd = false;
     int m_anchor = 0;
     QUuid m_dragLayer;
+    // audio clip bars: geometry, hit test and drag state
+    QRect audioBar(const Layer* l, int rowY) const;       // viewport rectangle of the clip's first pass (width 0 for a missing clip)
+    void paintAudioBar(QPainter& p, const Layer* l, int y, int firstF, int lastF) const;
+    enum class AudioZone { None, Body, TrimIn, TrimOut };
+    AudioZone audioHit(const QPoint& p, int* row) const;
+    QUuid m_audioLayer; AudioParams m_audioOrig; int m_audioGrab = 0, m_audioDragId = 0;
     // resize state
     QUuid m_resizeLayer; int m_resizeStart = 0, m_resizeEnd = 0, m_resizeNewEnd = 0, m_resizeFrame = 0;
 };

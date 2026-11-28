@@ -65,7 +65,8 @@ void TimelineView::rebuildRows() {
                 Layer* c = g->children[i].get();
                 m_rows.append({c, depth, QString()});
                 if (m_expanded.contains(c->id)) {
-                    for (const PropertyDef& pd : layerPropertyDefs()) m_rows.append({c, depth + 1, pd.id});
+                    if (c->type == LayerType::Audio) { for (const PropertyDef& pd : audioPropertyDefList()) m_rows.append({c, depth + 1, pd.id}); }
+                    else for (const PropertyDef& pd : layerPropertyDefs()) m_rows.append({c, depth + 1, pd.id});
                     for (const QString& id : c->animated3DProperties()) m_rows.append({c, depth + 1, id});
                     for (const QString& id : c->fxProperties(false)) m_rows.append({c, depth + 1, id});      // effect and mask numbers
                 }
@@ -240,6 +241,8 @@ void TimelineView::paintEvent(QPaintEvent*) {
                 const int x = xOfFrame(m_resizeNewEnd);
                 p.drawLine(x, y + 1, x, y + kRowH - 1);
             }
+        } else if (l->type == LayerType::Audio) {
+            paintAudioBar(p, l, y, firstF, lastF);
         } else if (!l->isGroup()) {
             p.fillRect(QRect(xOfFrame(0), y + 8, frames * m_cellW, kRowH - 16), l->props.visible ? QColor(110, 110, 110, 150) : QColor(70, 70, 70, 80));
         }
@@ -347,6 +350,68 @@ void TimelineView::paintEvent(QPaintEvent*) {
     Q_UNUSED(hs);
 }
 
+QRect TimelineView::audioBar(const Layer* l, int y) const {
+    if (!l->audio) return QRect(xOfFrame(l->audioParams.startFrame), y + 3, 0, kRowH - 6);
+    const double fps = m_s->doc()->comp().fps.fps();
+    const int w = std::max(2, int(std::lround(l->audioParams.playLength(l->audio->duration()) * fps * m_cellW)));
+    return QRect(xOfFrame(l->audioParams.startFrame), y + 3, w, kRowH - 6);
+}
+
+void TimelineView::paintAudioBar(QPainter& p, const Layer* l, int y, int firstF, int lastF) const {
+    Q_UNUSED(firstF); Q_UNUSED(lastF);
+    if (!l->audio) {                                              // file could not be loaded: keep the place visible
+        p.fillRect(QRect(xOfFrame(l->audioParams.startFrame), y + 3, 60, kRowH - 6), QColor(120, 50, 50, 140));
+        return;
+    }
+    const AudioClip& c = *l->audio;
+    const double fps = m_s->doc()->comp().fps.fps();
+    const AudioParams& ap = l->audioParams;
+    const double len = ap.playLength(c.duration());
+    const int frames = m_s->doc()->durationFrames();
+    const QColor body = l->props.visible ? QColor(46, 125, 110, 190) : QColor(70, 90, 86, 110);
+    const QColor wave = l->props.visible ? QColor(190, 255, 240, 230) : QColor(150, 170, 166, 160);
+    const int viewR = viewport()->width();
+    // One pass, then (when looping) repeated passes until the composition ends.
+    const int passes = ap.loop && len > 0 ? std::max(1, int(std::ceil(std::max(0.0, double(frames - ap.startFrame) / fps) / len))) : 1;
+    for (int pass = 0; pass < passes; ++pass) {
+        const double passStart = ap.startFrame + pass * len * fps;
+        const QRect rc(xOfFrame(0) + int(std::lround(passStart * m_cellW)), y + 3, std::max(2, int(std::lround(len * fps * m_cellW))), kRowH - 6);
+        if (rc.right() < kNameW || rc.left() > viewR) continue;
+        p.fillRect(rc, pass == 0 ? body : body.darker(125));
+        const int mid = rc.center().y(), amp = rc.height() / 2 - 1;
+        p.setPen(wave);
+        const int x0 = std::max(rc.left(), kNameW), x1 = std::min(rc.right(), viewR);
+        for (int x = x0; x <= x1; ++x) {
+            const double t0 = ap.trimIn + double(x - rc.left()) / (len * fps * m_cellW) * len;
+            const double t1 = ap.trimIn + double(x + 1 - rc.left()) / (len * fps * m_cellW) * len;
+            const size_t i0 = size_t(std::max(0.0, t0 * kAudioRate / AudioClip::kPeakBlock));
+            const size_t i1 = std::min(c.peaks.size(), std::max(i0 + 1, size_t(std::max(0.0, t1 * kAudioRate / AudioClip::kPeakBlock)) + 1));
+            float pk = 0;
+            for (size_t i = i0; i < i1 && i < c.peaks.size(); ++i) pk = std::max(pk, c.peaks[i]);
+            const int h = std::clamp(int(std::lround(pk * amp)), pk > 0.002f ? 1 : 0, amp);
+            if (h > 0) p.drawLine(x, mid - h, x, mid + h);
+        }
+        p.setPen(QPen(QColor(0, 0, 0, 140), 1));
+        p.setBrush(Qt::NoBrush);
+        p.drawRect(rc.adjusted(0, 0, -1, -1));
+        if (pass == 0) { p.setPen(Qt::white); p.drawText(rc.adjusted(4, 0, -2, 0).intersected(QRect(kNameW, y, viewR, kRowH)), Qt::AlignTop | Qt::AlignLeft, c.name); }
+        // trim handles
+        p.fillRect(QRect(rc.left(), rc.top(), 3, rc.height()), QColor(255, 255, 255, 110));
+        p.fillRect(QRect(rc.right() - 2, rc.top(), 3, rc.height()), QColor(255, 255, 255, 110));
+    }
+}
+
+TimelineView::AudioZone TimelineView::audioHit(const QPoint& pt, int* row) const {
+    const int r = rowAtY(pt.y());
+    if (r < 0 || pt.x() < kNameW || !m_rows[r].prop.isEmpty() || m_rows[r].layer->type != LayerType::Audio || !m_rows[r].layer->audio) return AudioZone::None;
+    const QRect rc = audioBar(m_rows[r].layer, kRulerH + r * kRowH - verticalScrollBar()->value());
+    if (!rc.adjusted(-3, 0, 3, 0).contains(pt)) return AudioZone::None;
+    if (row) *row = r;
+    if (pt.x() <= rc.left() + 4) return AudioZone::TrimIn;
+    if (pt.x() >= rc.right() - 4) return AudioZone::TrimOut;
+    return AudioZone::Body;
+}
+
 bool TimelineView::hitExposureEdge(const QPoint& pt, int* row, int* exposureIndex) const {
     const int r = rowAtY(pt.y());
     if (r < 0 || m_rows[r].layer->type != LayerType::Animation) return false;
@@ -396,6 +461,18 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
         if (!m_marqueeAdd) m_s->clearKeySelection();
         d->setCurrentFrame(std::clamp(frameAtX(pt.x()), 0, d->durationFrames() - 1));
         return;
+    }
+    {   // audio clip bar: drag to move, drag an edge to trim
+        int ar;
+        const AudioZone z = audioHit(pt, &ar);
+        if (z != AudioZone::None) {
+            const Layer* l = m_rows[ar].layer;
+            m_s->playback()->pause();
+            if (l->props.locked) { emit m_s->message(tr("The layer is locked.")); return; }
+            m_audioLayer = l->id; m_audioOrig = l->audioParams; m_audioGrab = frameAtX(pt.x()); ++m_audioDragId;
+            m_drag = z == AudioZone::Body ? AudioMove : z == AudioZone::TrimIn ? AudioTrimIn : AudioTrimOut;
+            return;
+        }
     }
     int er, ei;
     if (pt.x() >= kNameW && hitExposureEdge(pt, &er, &ei)) {
@@ -449,6 +526,27 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e) {
             m_s->setFrameSelection(m_dragLayer, m_anchor, std::clamp(frameAtX(pt.x()), 0, d->durationFrames() - 1));
         return;
     }
+    if (m_drag == AudioMove || m_drag == AudioTrimIn || m_drag == AudioTrimOut) {
+        Document* d = m_s->doc();
+        const Layer* l = d ? d->findLayer(m_audioLayer) : nullptr;
+        if (!l || !l->audio) return;
+        const double fps = d->comp().fps.fps(), dur = l->audio->duration();
+        const int delta = frameAtX(pt.x()) - m_audioGrab;
+        AudioParams ap = m_audioOrig;
+        const double origOut = ap.trimOut > 0 ? ap.trimOut : dur;
+        if (m_drag == AudioMove) {
+            ap.startFrame = std::max(0, m_audioOrig.startFrame + delta);
+        } else if (m_drag == AudioTrimIn) {
+            int dl = std::max(delta, -std::min(m_audioOrig.startFrame, int(std::floor(m_audioOrig.trimIn * fps))));   // not before the clip's start or the timeline's 0
+            dl = std::min(dl, int(std::floor((origOut - m_audioOrig.trimIn - 0.01) * fps)));
+            ap.trimIn = m_audioOrig.trimIn + dl / fps;
+            ap.startFrame = m_audioOrig.startFrame + dl;
+        } else {
+            ap.trimOut = std::clamp(origOut + delta / fps, m_audioOrig.trimIn + 0.01, dur);
+        }
+        d->setAudioParams(m_audioLayer, ap, m_drag == AudioMove ? tr("Move Audio") : tr("Trim Audio"), QString("audio-drag-%1").arg(m_audioDragId));
+        return;
+    }
     if (m_drag == Resize) {
         const int f = int(std::lround(double(pt.x() - kNameW + horizontalScrollBar()->value()) / m_cellW));
         m_resizeNewEnd = std::max(m_resizeStart + 1, f);
@@ -456,6 +554,8 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e) {
         return;
     }
     int r, i;
+    const AudioZone az = audioHit(pt, &r);
+    if (az != AudioZone::None) { viewport()->setCursor(az == AudioZone::Body ? Qt::OpenHandCursor : Qt::SizeHorCursor); return; }
     viewport()->setCursor(pt.x() >= kNameW && hitExposureEdge(pt, &r, &i) ? Qt::SizeHorCursor : Qt::ArrowCursor);
 }
 
@@ -480,6 +580,7 @@ void TimelineView::mouseDoubleClickEvent(QMouseEvent* e) {
 }
 
 void TimelineView::mouseReleaseEvent(QMouseEvent*) {
+    if (m_drag == AudioMove || m_drag == AudioTrimIn || m_drag == AudioTrimOut) { m_drag = None; viewport()->update(); return; }
     if (m_drag == KeyMove) {
         const int delta = m_keyDelta;
         m_drag = None; m_keyDelta = 0;

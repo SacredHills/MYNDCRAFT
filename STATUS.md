@@ -117,7 +117,7 @@ Known limitations (Phase 2):
 - Drawings are **raster only**; there are no vector drawings inside animation layers yet.
 - Playback composites on the CPU every frame. At 1920×1080 with many layers it may not reach the frame rate; frames
   are then skipped (counted in `Playback::skippedFrames`) — it does not slow the clock. No frame cache yet.
-- No audio (so no audio sync), no video export (see Export below), no drag-and-drop of exposures,
+- No video export (see Export below), no drag-and-drop of exposures,
   no cross-layer ripple edits, no lip-sync/camera/peg features.
 - Onion skin applies to animation layers only.
 - Changing the frame rate keeps frame numbers (it retimes the animation; it does not resample).
@@ -130,7 +130,7 @@ Known limitations (Phase 2):
   optional 1-bit transparency, frame delays rounded with carried error so total length is exact) or a **PNG sequence**
   (`name_0001.png`…). Frame range defaults to the work area. Onion skin/overlays are never exported.
   Verified by decoding the GIF with an independent decoder in the tests, and by opening a generated file with ffmpeg/ImageMagick.
-- **No video encoder** is built in (no MP4/MOV/WebM, no audio). Use the PNG sequence with ffmpeg. GIF is 256 colours per frame,
+- **No video encoder** is built in (no MP4/MOV/WebM; audio can be exported separately as a WAV mixdown). Use the PNG sequence with ffmpeg. GIF is 256 colours per frame,
   1-bit transparency, and browsers play delays under 2 cs (above ~50 fps) slower than specified.
 - **Exposure sheet** now supports selecting several frames of one layer (drag / Shift+click); the selection is shared with the
   timeline, so Copy / Cut / Paste / Delete work from either.
@@ -414,3 +414,29 @@ The Select tool (V) now covers Direct Selection and Transform Layer: on drawing/
 - **Verified here:** against the CPU renderer on Mesa llvmpipe (a software OpenGL 4.5 driver via Xvfb): 15 tests - lit metal/rough primitives, supersampling, emissive/unlit/spot, tiled+offset textures, normal-less meshes, mirrored objects, intersecting see-through surfaces, a card with a transparent texture, background off, the compositor path, fallbacks, six threads at once. Differences were tiny (<= 0.005% of pixels differing by more than 24 levels, mean difference <= 0.13 of 255). The Linux CI job runs these tests under Xvfb; on the other jobs (no GL) they skip.
 - **Known differences from the CPU image:** edge pixels can differ by a level or a pixel (different rasterisation rules); fragments of see-through surfaces that are almost opaque (alpha >= 0.996) do not write depth on the GPU path.
 - **NOT verified:** anything on a real graphics card or on Windows/macOS drivers (the one thing llvmpipe cannot show: driver quirks, GLSL compiler differences), and **speed** - llvmpipe is software, so I have no honest timing. Not GPU yet: shadows/reflections (the renderer has none anyway), 2D drawing and compositing, the depth/alpha export passes, and displaying the canvas.
+
+## Phase 10: audio (implemented, headless-tested; NOT yet heard on a real sound card)
+What exists:
+- **Audio layers** (`LayerType::Audio`): File > Import Audio (Ctrl+Alt+I) or drag a file onto the window. The clip is decoded to 48 kHz stereo float
+  and the **original file is stored untouched inside the project** (`assets/audio/`, project format v6), decoded again on load.
+- **Decoding**: WAV (8/16/24/32-bit, float, any rate/channels, resampled) natively; MP3/OGG/FLAC/AAC/... through Qt Multimedia, then an `ffmpeg`
+  on PATH as a fallback. A file nothing can decode is refused with a message; a project whose audio file is missing/undecodable opens with a warning and a silent layer.
+- **Timeline**: the clip is drawn as a bar with its waveform (peaks), name and trim handles; drag the body to move it, drag an edge to trim
+  (one undo step per drag). Looping clips repeat until the composition ends. Layer eye = mute.
+- **Properties** (audio layer selected): start frame, trim in/out (seconds), loop, and **keyframable Volume (0-400 %) and Pan (-100..100)**
+  with stopwatch/keys like every other property (also in the timeline rows and the Graph Editor).
+- **Mixer** (`mixAudio`, pure code): multiple layers sum, trim/loop/start applied, volume/pan evaluated per 32-sample block from the keyframes
+  at the composition frame. Pan is a balance control (the far channel is attenuated), not equal-power.
+- **Playback** (`AudioEngine`, Qt `QAudioSink`): starts/stops with Playback; the picture stays the master clock, and the sound restarts at the
+  picture's position when they drift apart by more than ~120 ms or the playhead jumps (loop, seek). Edits while playing take effect (the mixer scene is swapped).
+  **Scrubbing**: a short snippet plays when you move/step the playhead (Preferences switch).
+- **Export Audio Mixdown** (File menu): the whole composition as a 16-bit stereo 48 kHz WAV.
+- Tests: `test_audio` (decoders, WAV round trip, peaks, trim/loop/volume/pan keyframes, mute, undo/merge, project save/load, MP3 when ffmpeg exists),
+  `test_ui_audio` (import, panel, timeline drag/trim, mixdown file, mixing device incl. 16-bit and scrub limit, save/reopen).
+Honest limits:
+- The sandbox has no sound card, so **actual output, latency and the drift correction have not been heard/measured**; only the mixing device behind them is tested.
+- Audio plays only at 100 % playback speed (other speeds are silent). Sound is not tied to the work range or to symbol timelines.
+- Nothing is resampled for non-100 % speed, no time-stretch, no per-clip fades/envelopes besides keyframed volume, no effects, no audio inside symbols.
+- Qt Multimedia is now a build dependency (CMake falls back to WAV + ffmpeg-CLI decoding and silent playback if it is missing; CI installs it).
+- Video export with audio muxing (Phase 11) is not done yet: use the mixdown WAV with ffmpeg.
+

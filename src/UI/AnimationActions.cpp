@@ -413,7 +413,7 @@ void AnimationActions::fillLayerKeyMenu(QMenu* m, const QUuid& layer) {
     connect(all, &QAction::triggered, m, [this, layer] { m_s->addKeysHere(layer); });
     QMenu* one = m->addMenu(tr("Add Keyframe For"));
     one->setEnabled(ok);
-    for (const PropertyDef& d : layerPropertyDefs()) {
+    for (const PropertyDef& d : (l && l->type == LayerType::Audio ? audioPropertyDefList() : layerPropertyDefs())) {
         if (d.id == "shape.morph" && !(l && l->hasShapeTween())) continue;
         const QString id = d.id;
         connect(one->addAction(d.label), &QAction::triggered, m, [this, layer, id] { m_s->addKeysHere(layer, id); });

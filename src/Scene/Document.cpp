@@ -225,6 +225,36 @@ QUuid Document::addScene3DLayer(const QString& name, QUuid parentId, int index) 
     m_undo.push(cmd);
     return id;
 }
+QUuid Document::addAudioLayer(AudioClipPtr clip, const QString& name, int startFrame, QUuid parentId, int index) {
+    if (!clip) return {};
+    auto l = std::make_shared<Layer>(LayerType::Audio, name.isEmpty() ? clip->name : name);
+    l->audio = clip;
+    l->audioParams.startFrame = std::max(0, startFrame);
+    const QUuid id = l->id;
+    auto* cmd = new AddLayerCommand(this, parentId, index, l);
+    cmd->setText(tr("Add Audio"));
+    m_undo.push(cmd);
+    return id;
+}
+void Document::setAudioParams(const QUuid& layer, const AudioParams& p, const QString& text, const QString& mergeKey) {
+    Layer* l = findLayer(layer);
+    if (!l || l->type != LayerType::Audio || !l->audio) return;
+    AudioParams c = p;
+    const double dur = l->audio->duration();
+    c.startFrame = std::max(0, c.startFrame);
+    c.trimIn = std::clamp(c.trimIn, 0.0, dur);
+    c.trimOut = c.trimOut <= 0 ? 0.0 : std::clamp(c.trimOut, c.trimIn, dur);
+    if (c.trimOut > 0 && c.trimOut - c.trimIn < 0.001) c.trimOut = std::min(dur, c.trimIn + 0.001);
+    if (c == l->audioParams) return;
+    m_undo.push(new AudioParamsCommand(this, layer, l->audioParams, c, text.isEmpty() ? tr("Edit Audio") : text, mergeKey));
+}
+void Document::applyAudioParams(const QUuid& layer, const AudioParams& p) {
+    Layer* l = findLayer(layer);
+    if (!l) return;
+    l->audioParams = p;
+    emitContentChanged({});
+    emit layerTreeChanged();
+}
 void Document::emitAnimationChanged(const QUuid& id) { emit animationChanged(id); emitContentChanged({}); }
 
 // ---------------- undoable edits ----------------

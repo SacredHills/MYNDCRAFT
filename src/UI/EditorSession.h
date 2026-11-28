@@ -78,6 +78,7 @@ public:
     QUuid addLayerAboveActive(LayerType t, const QString& name);
     QUuid addTextLayerAboveActive(const TextContent& c, const QString& name);
     QUuid addImageLayerAboveActive(const QImage& img, const QString& name);
+    QUuid addAudioLayerAboveActive(AudioClipPtr clip, int startFrame);
 
     const QSet<QUuid>& selectedShapes() const { return m_selected; }
     void setSelectedShapes(const QSet<QUuid>& s, bool pullStyle = true);
@@ -111,6 +112,7 @@ public:
 
     // ---- Animation ----
     Playback* playback() const { return m_playback; }
+    class AudioEngine* audio() const { return m_audio; }
     const Compositor::OnionSkin& onion() const { return m_onion; }
     void setOnion(const Compositor::OnionSkin& o);   // persisted in the user settings
     Layer* activeAnimationLayer() const;
@@ -233,6 +235,7 @@ private:
     TextContent m_textStyle;
     VectorStyle m_style;
     Playback* m_playback = nullptr;
+    class AudioEngine* m_audio = nullptr;
     QUuid m_selLayer;
     int m_selFirst = -1, m_selLast = -1;
     bool m_selInternal = false;

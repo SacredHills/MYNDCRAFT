@@ -412,7 +412,7 @@ private slots:
         QVERIFY(l->tracks == d->findLayer(id)->tracks);
         QCOMPARE(l->tracks["transform.rotation"].keys.size(), 2);
         // a project with a damaged track is refused with a message rather than loading garbage
-        QCOMPARE(kProjectFormatVersion, 5);
+        QCOMPARE(kProjectFormatVersion, 6);
     }
 };
 

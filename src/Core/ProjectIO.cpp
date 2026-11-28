@@ -11,6 +11,7 @@
 #include <QSet>
 #include <zip.h>
 
+#include "Audio/AudioClip.h"
 #include "Scene3D/Anim3D.h"
 
 namespace mynd {
@@ -30,6 +31,12 @@ QString meshAssetName(const QUuid& layer, const QUuid& mesh) {
 }
 QString textureAssetName(const QUuid& layer, const QUuid& tex) {
     return "assets/scene3d/" + layer.toString(QUuid::WithoutBraces) + "/textures/" + tex.toString(QUuid::WithoutBraces) + ".png";
+}
+
+QString audioAssetName(const QUuid& layer, const QString& ext) {
+    QString e = ext.isEmpty() ? QString("bin") : ext;
+    for (QChar& c : e) if (!c.isLetterOrNumber()) c = '_';
+    return "assets/audio/" + layer.toString(QUuid::WithoutBraces) + "." + e;
 }
 
 QJsonObject layerToJson(const Layer& l) {
@@ -53,6 +60,16 @@ QJsonObject layerToJson(const Layer& l) {
     if (l.type == LayerType::Text) o["text"] = l.textContent.toJson();
     if (l.type == LayerType::Scene3D && l.scene3d) o["scene3d"] = l.scene3d->toJson();
     if (l.type == LayerType::Animation) o["animation"] = l.anim.toJson();
+    if (l.type == LayerType::Audio && l.audio) {
+        QJsonObject a;
+        a["asset"] = audioAssetName(l.id, l.audio->format);
+        a["name"] = l.audio->name;
+        a["start"] = l.audioParams.startFrame;
+        a["trimIn"] = l.audioParams.trimIn;
+        a["trimOut"] = l.audioParams.trimOut;
+        a["loop"] = l.audioParams.loop;
+        o["audio"] = a;
+    }
     {
         // Keyframes of deleted 3D nodes/materials are dropped rather than saved as orphans.
         const PropertyTracks tr = l.scene3d ? pruneSceneTracks(*l.scene3d, l.tracks) : l.tracks;
@@ -73,7 +90,7 @@ QJsonObject layerToJson(const Layer& l) {
 
 void collectRaster(const Layer& g, QVector<const Layer*>& out) {
     for (const auto& c : g.children) {
-        if (c->type == LayerType::Raster || c->type == LayerType::Animation || c->type == LayerType::Scene3D) out.append(c.get());
+        if (c->type == LayerType::Raster || c->type == LayerType::Animation || c->type == LayerType::Scene3D || (c->type == LayerType::Audio && c->audio)) out.append(c.get());
         collectRaster(*c, out);
     }
 }
@@ -150,6 +167,10 @@ bool buildEntries(const Document& doc, std::vector<SnapEntry>& entries, QString*
     for (const SymbolDef& d : doc.symbols()) if (d.root) collectRaster(*d.root, rasters);
     for (const Layer* l : rasters) {
         if (!ok) break;
+        if (l->type == LayerType::Audio) {
+            ok = w.add(audioAssetName(l->id, l->audio->format), l->audio->original, false);   // already compressed (MP3/OGG) or raw PCM: stored as is
+            continue;
+        }
         if (l->type == LayerType::Scene3D) {
             if (!l->scene3d) continue;
             for (const auto& [mid, mesh] : l->scene3d->meshes) { ok = w.add(meshAssetName(l->id, mid), mesh->geometryBlob(), true); if (!ok) break; }
@@ -263,6 +284,7 @@ bool ProjectIO::save(Document& doc, const QString& path, QString* error, bool ke
 
 bool ProjectIO::migrate(QJsonObject&, int fromVersion, QString* error) {
     // v3 -> v4 also added shape tweens (morphShapes, the "shape.morph" property).
+    // v5 -> v6 added audio layers (assets/audio/<layer>.<ext> holds the imported file as is), optional as well.
     // v4 -> v5 added 3D scene layers (scene3d JSON + mesh/texture assets), optional as well.
     // v3 -> v4 added the symbol library and symbol-instance layers, also optional.
     // v2 -> v3 added per-layer property tracks (transform/opacity keyframes), also optional.
@@ -398,6 +420,24 @@ LayerPtr layerFromJson(const QJsonObject& o, zip_t* z, const Document& doc, QStr
             warnings << QString("3D scene '%1': animation of %2 missing node(s)/material(s) was dropped").arg(l->props.name).arg(l->tracks.size() - kept.size());
             l->tracks = kept;
         }
+    } else if (t == LayerType::Audio) {
+        const QJsonObject a = o["audio"].toObject();
+        const QString asset = a["asset"].toString();
+        bool found = false;
+        const QByteArray bytes = asset.startsWith("assets/audio/") && !asset.contains("..") ? readEntry(z, asset.toUtf8().constData(), &found) : QByteArray();
+        QString derr;
+        if (found) l->audio = decodeAudio(bytes, asset, &derr);
+        if (l->audio) {
+            auto c = std::make_shared<AudioClip>(*l->audio);
+            if (!a["name"].toString().isEmpty()) c->name = a["name"].toString();
+            l->audio = c;
+        } else {
+            warnings << QString("Audio layer '%1': %2; the layer is silent").arg(l->props.name, found ? derr : QString("audio file missing"));
+        }
+        l->audioParams.startFrame = std::max(0, a["start"].toInt(0));
+        l->audioParams.trimIn = std::max(0.0, a["trimIn"].toDouble(0));
+        l->audioParams.trimOut = std::max(0.0, a["trimOut"].toDouble(0));
+        l->audioParams.loop = a["loop"].toBool(false);
     } else if (t == LayerType::Symbol) {
         l->symbolId = QUuid(o["symbolId"].toString());
         if (!symbolPlayFromKey(o["play"].toString("loop"), l->symbolPlay)) {

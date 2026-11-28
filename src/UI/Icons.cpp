@@ -129,6 +129,11 @@ QIcon layerType(LayerType t) {
             QPolygonF top; top << QPointF(12, 3.5) << QPointF(19.5, 7.5) << QPointF(12, 11.5) << QPointF(4.5, 7.5);
             p.drawPolygon(top);
             p.drawLine(4.5, 7.5, 4.5, 16.5); p.drawLine(4.5, 16.5, 12, 20.5); p.drawLine(12, 20.5, 19.5, 16.5); p.drawLine(19.5, 16.5, 19.5, 7.5); p.drawLine(12, 11.5, 12, 20.5);
+        } else if (t == LayerType::Audio) {       // speaker with sound waves
+            QPolygonF sp; sp << QPointF(3.5, 9.5) << QPointF(8, 9.5) << QPointF(13, 5) << QPointF(13, 19) << QPointF(8, 14.5) << QPointF(3.5, 14.5);
+            p.drawPolygon(sp);
+            p.drawArc(QRectF(10, 7.5, 7, 9), -60 * 16, 120 * 16);
+            p.drawArc(QRectF(10, 4, 11, 16), -60 * 16, 120 * 16);
         } else {
             QPainterPath f; f.moveTo(3.5, 7); f.lineTo(9, 7); f.lineTo(11, 9); f.lineTo(20.5, 9);
             f.lineTo(20.5, 19.5); f.lineTo(3.5, 19.5); f.closeSubpath(); p.drawPath(f);

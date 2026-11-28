@@ -51,6 +51,11 @@ public:
     void newDocument(const CompositionSettings& s, bool withLayer = true);
     bool openFile(const QString& path, QString* error = nullptr);
     bool importImage(const QString& path, QString* error = nullptr);
+    // Decodes an audio file (WAV, MP3, ... see Audio/AudioClip.h) into a new audio layer starting at the playhead.
+    bool importAudio(const QString& path, QString* error = nullptr);
+    // Writes the mix of all audible layers for the whole composition as a 16-bit stereo 48 kHz WAV.
+    bool exportAudioMixdown(const QString& path, QString* error = nullptr);
+    static bool isAudioFile(const QString& path);
     bool saveFile(const QString& path, QString* error = nullptr);
     bool exportImage(const QString& path, QString* error = nullptr);
     void adoptDocument(std::unique_ptr<Document> d);
@@ -80,6 +85,8 @@ private:
     void actExport();
     void actExportAnimation();
     void actImport();
+    void actImportAudio();
+    void actExportAudio();
     void actPreferences();
     void applyGpuSetting();
     void actAbout();
@@ -111,7 +118,7 @@ private:
     QMap<QString, ads::CDockWidget*> m_docks;
     QActionGroup* m_toolGroup;
     QMap<ToolId, QAction*> m_toolActions;
-    QAction *aNew, *aOpen, *aSave, *aSaveAs, *aExport, *aExportAnim, *aImport, *aPrefs, *aQuit;
+    QAction *aNew, *aOpen, *aSave, *aSaveAs, *aExport, *aExportAnim, *aImport, *aImportAudio, *aExportAudio, *aPrefs, *aQuit;
     QAction *aUndo, *aRedo, *aSelAll, *aDeselect, *aDeleteSel;
     QAction *aZoomIn, *aZoomOut, *aFit, *aActual, *aRotL, *aRotR, *aRotReset, *aGrid, *aRulers, *aGuides, *aMaskLines, *aSnap, *aClearGuides;
     QAction *aGroupShapes, *aUngroupShapes, *aFront, *aForward, *aBackward, *aBack;

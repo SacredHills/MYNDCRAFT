@@ -128,6 +128,17 @@ private:
     Document* m_doc; QUuid m_layer; LayerFx m_before, m_after; QString m_key;
 };
 
+class AudioParamsCommand : public QUndoCommand {
+public:
+    AudioParamsCommand(Document* d, const QUuid& layer, const AudioParams& before, const AudioParams& after, const QString& text, const QString& mergeKey);
+    void undo() override;
+    void redo() override;
+    int id() const override { return m_key.isEmpty() ? -1 : 1004; }
+    bool mergeWith(const QUndoCommand* other) override;
+private:
+    Document* m_doc; QUuid m_layer; AudioParams m_before, m_after; QString m_key;
+};
+
 class BackgroundCommand : public QUndoCommand {
 public:
     BackgroundCommand(Document* d, const QColor& before, const QColor& after, const QString& text);

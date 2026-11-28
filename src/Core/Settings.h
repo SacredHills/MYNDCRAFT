@@ -12,6 +12,8 @@ bool gpuEffects();                   // experimental: run layer effects through 
 void setGpuEffects(bool on);
 bool gpu3D();                        // experimental: draw 3D scenes in the previews with OpenGL (exports always use the CPU renderer)
 void setGpu3D(bool on);
+bool audioScrub();                   // play a short snippet of the sound while dragging the playhead (on by default)
+void setAudioScrub(bool on);
 int autosaveIntervalSeconds();
 void setAutosaveIntervalSeconds(int s);
 double defaultGridSize();

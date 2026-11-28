@@ -20,6 +20,10 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFileDialog>
+#include <QGuiApplication>
+#include <QSaveFile>
+#include "Audio/AudioMixer.h"
+#include "UI/AudioEngine.h"
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QImageReader>
@@ -181,6 +185,54 @@ bool MainWindow::importImage(const QString& path, QString* error) {
     return true;
 }
 
+bool MainWindow::isAudioFile(const QString& path) {
+    static const QStringList exts = {"wav", "mp3", "ogg", "oga", "flac", "aac", "m4a", "opus", "wma", "aif", "aiff"};
+    return exts.contains(QFileInfo(path).suffix().toLower());
+}
+
+bool MainWindow::importAudio(const QString& path, QString* error) {
+    if (!m_doc) { if (error) *error = tr("No document is open."); return false; }
+    QFileInfo fi(path);
+    if (fi.size() > 600LL * 1024 * 1024) { if (error) *error = tr("The audio file is larger than 600 MB."); return false; }
+    QGuiApplication::setOverrideCursor(Qt::WaitCursor);
+    QString err;
+    const AudioClipPtr clip = decodeAudioFile(path, &err);
+    QGuiApplication::restoreOverrideCursor();
+    if (!clip) { if (error) *error = err; return false; }
+    if (clip->duration() > 4 * 3600.0) { if (error) *error = tr("The audio is longer than 4 hours."); return false; }
+    m_session->addAudioLayerAboveActive(clip, m_doc->currentFrame());
+    statusBar()->showMessage(tr("Imported %1 (%2 s)").arg(fi.fileName()).arg(clip->duration(), 0, 'f', 1), 5000);
+    return true;
+}
+
+bool MainWindow::exportAudioMixdown(const QString& path, QString* error) {
+    if (!m_doc) return false;
+    const AudioScene sc = audioSceneOf(*m_doc->sceneRoot(), m_doc->sceneComp().fps, m_doc->sceneComp().durationFrames);
+    if (sc.sources.empty()) { if (error) *error = tr("There is no audible audio layer to export."); return false; }
+    const QByteArray wav = encodeWav(renderAudioMix(sc));
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly) || f.write(wav) != wav.size() || !f.commit()) { if (error) *error = tr("Could not write %1.").arg(path); return false; }
+    return true;
+}
+
+void MainWindow::actImportAudio() {
+    if (!m_doc) return;
+    const QString path = QFileDialog::getOpenFileName(this, tr("Import Audio"), QString(),
+        tr("Audio (*.wav *.mp3 *.ogg *.oga *.flac *.aac *.m4a *.opus *.aif *.aiff);;All files (*)"));
+    if (path.isEmpty()) return;
+    QString err;
+    if (!importAudio(path, &err)) QMessageBox::warning(this, tr("Cannot import audio"), err);
+}
+
+void MainWindow::actExportAudio() {
+    if (!m_doc) return;
+    const QString path = QFileDialog::getSaveFileName(this, tr("Export Audio Mixdown"), QString(), tr("WAV audio (*.wav)"));
+    if (path.isEmpty()) return;
+    QString err;
+    if (!exportAudioMixdown(path.endsWith(".wav", Qt::CaseInsensitive) ? path : path + ".wav", &err)) QMessageBox::warning(this, tr("Cannot export audio"), err);
+    else statusBar()->showMessage(tr("Audio mixdown written"), 5000);
+}
+
 void MainWindow::actImport() {
     QStringList exts;
     for (const QByteArray& f : QImageReader::supportedImageFormats()) exts << "*." + QString::fromLatin1(f).toLower();
@@ -203,6 +255,8 @@ void MainWindow::dropEvent(QDropEvent* e) {
         if (p.endsWith(".studio", Qt::CaseInsensitive)) {
             if (!maybeSave()) return;
             if (!openFile(p, &err) && !m_doc) QMessageBox::warning(this, tr("Cannot open project"), err);
+        } else if (isAudioFile(p)) {
+            if (!importAudio(p, &err)) QMessageBox::warning(this, tr("Cannot import audio"), err);
         } else if (!importImage(p, &err)) {
             QMessageBox::warning(this, tr("Cannot import image"), err);
         }
@@ -289,6 +343,8 @@ void MainWindow::buildActions() {
     aSaveAs = mk(tr("Save &As…"), QKeySequence::SaveAs); connect(aSaveAs, &QAction::triggered, this, [this] { actSaveAs(); });
     aImport = mk(tr("&Import Image…"), QKeySequence("Ctrl+Shift+I")); connect(aImport, &QAction::triggered, this, &MainWindow::actImport);
     aExport = mk(tr("&Export Image…"), QKeySequence("Ctrl+E")); connect(aExport, &QAction::triggered, this, &MainWindow::actExport);
+    aImportAudio = mk(tr("Import A&udio…"), QKeySequence("Ctrl+Alt+I")); connect(aImportAudio, &QAction::triggered, this, &MainWindow::actImportAudio);
+    aExportAudio = mk(tr("Export Audio &Mixdown…")); connect(aExportAudio, &QAction::triggered, this, &MainWindow::actExportAudio);
     aExportAnim = mk(tr("Export &Animation…"), QKeySequence("Ctrl+Shift+E")); connect(aExportAnim, &QAction::triggered, this, &MainWindow::actExportAnimation);
     aPrefs = mk(tr("&Preferences…"), QKeySequence::Preferences); connect(aPrefs, &QAction::triggered, this, &MainWindow::actPreferences);
     aQuit = mk(tr("&Quit"), QKeySequence::Quit); connect(aQuit, &QAction::triggered, this, &QWidget::close);
@@ -642,7 +698,7 @@ void MainWindow::buildMenus() {
     file->addSeparator();
     file->addActions({aSave, aSaveAs});
     file->addSeparator();
-    file->addActions({aImport, aExport, aExportAnim});
+    file->addActions({aImport, aImportAudio, aExport, aExportAnim, aExportAudio});
     file->addSeparator();
     file->addActions({aPrefs, aQuit});
     updateRecentMenu();
@@ -1021,6 +1077,10 @@ void MainWindow::actPreferences() {
                         "software one; scenes it cannot draw (layer blend modes on surfaces, more than 16 lights, transparent textures on opaque materials, depth output) "
                         "are drawn by the software renderer automatically. Exporting always uses the software renderer so final frames do not depend on your graphics card."));
     form->addRow(gpu3);
+    auto* scrub = new QCheckBox(tr("Play a short sound snippet when moving the playhead"));
+    scrub->setChecked(settings::audioScrub());
+    scrub->setToolTip(tr("Lets you hear the audio layers while dragging the playhead or stepping through frames."));
+    form->addRow(scrub);
     auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     form->addRow(bb);
     connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
@@ -1029,6 +1089,8 @@ void MainWindow::actPreferences() {
     settings::setAutosaveEnabled(on->isChecked());
     settings::setAutosaveIntervalSeconds(iv->value());
     settings::setDefaultGridSize(gs->value());
+    settings::setAudioScrub(scrub->isChecked());
+    m_session->audio()->setScrubEnabled(scrub->isChecked());
     if (gpu->isChecked() != settings::gpuEffects() || gpu3->isChecked() != settings::gpu3D()) {
         settings::setGpuEffects(gpu->isChecked());
         settings::setGpu3D(gpu3->isChecked());

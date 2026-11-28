@@ -8,6 +8,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Test Concurrent OpenGL)
+find_package(Qt6 6.4 QUIET OPTIONAL_COMPONENTS Multimedia)
 # libzip: pkg-config first (Linux/Homebrew; Debian's CMake package config is broken),
 # then the CMake package (vcpkg on Windows).
 find_package(PkgConfig QUIET)
@@ -55,6 +56,8 @@ add_library(myndcore STATIC
   src/Scene/LayerFx.cpp
   src/Graphics/Effects.cpp
   src/Graphics/GpuEffects.cpp
+  src/Audio/AudioClip.cpp
+  src/Audio/AudioMixer.cpp
   src/Scene/Document.cpp
   src/Drawing/BrushEngine.cpp
   src/Drawing/FloodFill.cpp
@@ -69,6 +72,13 @@ add_library(myndcore STATIC
   src/Scene3D/ImportFbx.cpp
 )
 target_include_directories(myndcore PUBLIC src)
+if(TARGET Qt6::Multimedia)
+  target_link_libraries(myndcore PUBLIC Qt6::Multimedia)
+  target_compile_definitions(myndcore PUBLIC MYND_HAS_MULTIMEDIA)
+  message(STATUS "Qt Multimedia found: audio decoding (MP3/OGG/...) and playback enabled")
+else()
+  message(WARNING "Qt Multimedia not found: audio playback and non-WAV decoding are disabled")
+endif()
 target_link_libraries(myndcore PUBLIC Qt6::Core Qt6::Gui Qt6::Concurrent Qt6::OpenGL ${MYND_ZIP_TARGET})
 
 # ---- Application UI ----
@@ -90,6 +100,7 @@ add_library(myndui STATIC
   src/UI/Scene3DActions.cpp
   src/UI/Scene3DPanel.cpp
   src/UI/Viewport3D.cpp
+  src/UI/AudioEngine.cpp
   src/UI/Workspaces.cpp
   src/UI/MainWindow.cpp
 )
@@ -142,4 +153,6 @@ myndcraft_test(test_compositor)
 myndcraft_test(test_ui_workflow)
 myndcraft_test(test_ui_animation)
 myndcraft_test(test_ui_keyframes)
+myndcraft_test(test_audio)
+myndcraft_test(test_ui_audio)
 myndcraft_test(test_ui_3d)

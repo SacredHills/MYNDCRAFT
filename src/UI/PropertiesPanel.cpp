@@ -65,11 +65,13 @@ PropertiesPanel::PropertiesPanel(EditorSession* s, AnimationActions* a, QWidget*
     connect(m_s, &EditorSession::autoKeyChanged, this, [this] { QSignalBlocker b(m_auto); m_auto->setChecked(m_s->autoKey()); });
     lay->addWidget(m_auto);
 
+    m_xformBox = new QWidget;
+    auto* xl = new QVBoxLayout(m_xformBox); xl->setContentsMargins(0, 0, 0, 0);
     auto* grid = new QGridLayout;
     grid->setHorizontalSpacing(4);
     grid->setVerticalSpacing(6);
     int row = 0;
-    for (const PropertyDef& d : layerPropertyDefs()) {
+    auto buildRow = [this](QGridLayout* grid, int& row, const PropertyDef& d) {
         Row r;
         r.watch = new QToolButton; r.watch->setCheckable(true); r.watch->setAutoRaise(true);
         r.watch->setToolTip(tr("Animate %1 (stopwatch)").arg(d.label));
@@ -107,7 +109,11 @@ PropertiesPanel::PropertiesPanel(EditorSession* s, AnimationActions* a, QWidget*
         grid->addLayout(nav, row, 3);
         m_rows.insert(id, r);
         ++row;
-        if (id == "transform.scale") {
+    };
+    for (const PropertyDef& d : layerPropertyDefs()) {
+        buildRow(grid, row, d);
+
+        if (d.id == "transform.scale") {
             m_link = new QCheckBox(tr("Keep proportions"));
             m_link->setChecked(true);
             grid->addWidget(m_link, row, 2);
@@ -115,12 +121,39 @@ PropertiesPanel::PropertiesPanel(EditorSession* s, AnimationActions* a, QWidget*
         }
     }
     grid->setColumnStretch(2, 1);
-    lay->addLayout(grid);
+    xl->addLayout(grid);
     auto* hint = new QLabel(tr("Anchor and Position are offsets in pixels from the layer's untransformed place; "
                                "Scale and Opacity are percentages. Use the Select tool (V) to drag the layer on the canvas."));
     hint->setWordWrap(true);
     hint->setStyleSheet("color: gray");
-    lay->addWidget(hint);
+    xl->addWidget(hint);
+    lay->addWidget(m_xformBox);
+    // Audio layer: placement of the clip and its keyframable volume / pan.
+    m_audioBox = new QGroupBox(tr("Audio"));
+    auto* al = new QVBoxLayout(m_audioBox);
+    m_audioInfo = new QLabel; m_audioInfo->setWordWrap(true); m_audioInfo->setStyleSheet("color:#8a8f98;");
+    al->addWidget(m_audioInfo);
+    auto* af = new QFormLayout;
+    auto mkSpin = [](double lo, double hi, int dec, const QString& suffix) {
+        auto* sp = new ScrubSpinBox; sp->setRange(lo, hi); sp->setDecimals(dec); sp->setSuffix(suffix);
+        sp->setKeyboardTracking(false); sp->setAccelerated(true); return sp;
+    };
+    m_audStart = mkSpin(1, 1000000, 0, QString()); m_audStart->setToolTip(tr("Frame where the sound starts (1 = first frame)"));
+    m_audIn = mkSpin(0, 100000, 2, tr(" s")); m_audIn->setToolTip(tr("Seconds cut from the beginning of the clip"));
+    m_audOut = mkSpin(0, 100000, 2, tr(" s")); m_audOut->setToolTip(tr("Where the clip ends, in seconds from its beginning (0 = play to the end)"));
+    m_audLoop = new QCheckBox(tr("Loop until the composition ends"));
+    af->addRow(tr("Start frame"), m_audStart); af->addRow(tr("Trim in"), m_audIn); af->addRow(tr("Trim out"), m_audOut);
+    af->addRow(m_audLoop);
+    al->addLayout(af);
+    auto* ag = new QGridLayout; ag->setHorizontalSpacing(4); ag->setVerticalSpacing(6);
+    int arow = 0;
+    for (const PropertyDef& d : audioPropertyDefList()) buildRow(ag, arow, d);
+    ag->setColumnStretch(2, 1);
+    al->addLayout(ag);
+    lay->addWidget(m_audioBox);
+    m_audioBox->setVisible(false);
+    for (QDoubleSpinBox* sp : {m_audStart, m_audIn, m_audOut}) connect(sp, &QDoubleSpinBox::valueChanged, this, [this] { audioEdited(); });
+    connect(m_audLoop, &QCheckBox::toggled, this, [this] { audioEdited(); });
     // Symbol instance: which symbol, and how its own timeline maps onto this one.
     m_instBox = new QGroupBox(tr("Symbol instance"));
     auto* ib = new QFormLayout(m_instBox);
@@ -163,6 +196,20 @@ QDoubleSpinBox* PropertiesPanel::field(const QString& prop, int component) const
     return component >= 0 && component < r.spins.size() ? r.spins[component] : nullptr;
 }
 
+void PropertiesPanel::audioEdited() {
+    if (m_busy) return;
+    const Layer* l = m_s->activeLayer();
+    if (!l || l->type != LayerType::Audio || !l->audio || l->props.locked || !m_s->doc()) return;
+    AudioParams p;
+    p.startFrame = int(std::lround(m_audStart->value())) - 1;
+    p.trimIn = m_audIn->value();
+    p.trimOut = m_audOut->value();
+    p.loop = m_audLoop->isChecked();
+    if (!m_lastEdit.isValid() || m_lastEdit.elapsed() > 1000) ++m_editCounter;
+    m_lastEdit.restart();
+    m_s->doc()->setAudioParams(l->id, p, tr("Edit Audio"), QString("audio-panel-%1").arg(m_editCounter));
+}
+
 void PropertiesPanel::instanceEdited() {
     if (m_busy) return;
     const Layer* l = m_s->activeLayer();
@@ -187,6 +234,27 @@ void PropertiesPanel::refresh() {
             m_instFirst->setValue(l->symbolFirstFrame + 1);
         }
     }
+    const bool isAudio = l && l->type == LayerType::Audio;
+    m_xformBox->setVisible(!isAudio);
+    m_audioBox->setVisible(isAudio);
+    m_effects->setVisible(!isAudio);
+    if (isAudio) {
+        if (l->audio) {
+            m_audioInfo->setText(tr("%1 · %2 s · %3 · stereo %4 kHz").arg(l->audio->name).arg(l->audio->duration(), 0, 'f', 2)
+                                     .arg(l->audio->format.toUpper()).arg(kAudioRate / 1000));
+            m_audStart->setRange(1, std::max(1, m_s->doc() ? m_s->doc()->durationFrames() : 1));
+            m_audIn->setMaximum(l->audio->duration()); m_audOut->setMaximum(l->audio->duration());
+        } else {
+            m_audioInfo->setText(tr("The audio of this layer could not be loaded."));
+        }
+        const bool en = l->audio && !l->props.locked;
+        for (QWidget* w : {static_cast<QWidget*>(m_audStart), static_cast<QWidget*>(m_audIn), static_cast<QWidget*>(m_audOut), static_cast<QWidget*>(m_audLoop)}) w->setEnabled(en);
+        QSignalBlocker b1(m_audStart), b2(m_audIn), b3(m_audOut), b4(m_audLoop);
+        m_audStart->setValue(l->audioParams.startFrame + 1);
+        m_audIn->setValue(l->audioParams.trimIn);
+        m_audOut->setValue(l->audioParams.trimOut);
+        m_audLoop->setChecked(l->audioParams.loop);
+    }
     const bool on = l && !l->props.locked;
     m_layerName->setText(l ? l->props.name : tr("No layer selected"));
     {
@@ -195,7 +263,9 @@ void PropertiesPanel::refresh() {
     }
     const int frame = m_s->doc() ? m_s->doc()->currentFrame() : 0;
     const QPalette pal = palette();
-    for (const PropertyDef& d : layerPropertyDefs()) {
+    QVector<PropertyDef> allDefs = layerPropertyDefs();
+    allDefs += audioPropertyDefList();
+    for (const PropertyDef& d : allDefs) {
         Row& r = m_rows[d.id];
         const bool shown = d.id != "shape.morph" || (l && l->hasShapeTween());      // the morph row only exists for shape tweens
         for (QWidget* w : {static_cast<QWidget*>(r.watch), static_cast<QWidget*>(r.label), static_cast<QWidget*>(r.key),

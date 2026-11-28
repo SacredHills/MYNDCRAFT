@@ -1,4 +1,5 @@
 #include "UI/EditorSession.h"
+#include "UI/AudioEngine.h"
 
 #include <QSettings>
 
@@ -38,6 +39,7 @@ EditorSession::EditorSession(QObject* parent) : QObject(parent) {
     m_eraser = BrushSettings{};
     m_eraser.size = 40; m_eraser.hardness = 0.9;
     m_playback = new Playback(this);
+    m_audio = new AudioEngine(m_playback, this);
     {   // onion skin preferences persist between runs
         QSettings st(QSettings::NativeFormat, QSettings::UserScope, "MyndCraft", "MyndCraft");
         m_onion.enabled = st.value("onion/enabled", false).toBool();
@@ -57,6 +59,7 @@ void EditorSession::setDocument(Document* d) {
     m_doc = d;
     m_layerClip.reset();
     m_playback->setDocument(d);
+    m_audio->setDocument(d);
     clearFrameSelection();
     if (d) connect(d, &Document::frameChanged, this, [this] { if (!m_selInternal) clearFrameSelection(); });
     m_selected.clear();
@@ -186,6 +189,18 @@ QUuid EditorSession::addImageLayerAboveActive(const QImage& img, const QString& 
         else { parent = a->parent && a->parent != m_doc->root() ? a->parent->id : QUuid(); idx = m_doc->indexInParent(a) + 1; }
     }
     const QUuid id = m_doc->addImageLayer(img, name, parent, idx);
+    if (!id.isNull()) setActiveLayer(id);
+    return id;
+}
+
+QUuid EditorSession::addAudioLayerAboveActive(AudioClipPtr clip, int startFrame) {
+    if (!m_doc || !clip) return {};
+    QUuid parent; int idx = -1;
+    if (Layer* a = activeLayer()) {
+        if (a->isGroup()) parent = a->id;
+        else { parent = a->parent && a->parent != m_doc->root() ? a->parent->id : QUuid(); idx = m_doc->indexInParent(a) + 1; }
+    }
+    const QUuid id = m_doc->addAudioLayer(clip, {}, startFrame, parent, idx);
     if (!id.isNull()) setActiveLayer(id);
     return id;
 }
@@ -520,7 +535,7 @@ bool EditorSession::addKeysHere(const QUuid& layer, const QString& prop) {
         trk.setKey(d, f, cur);
         ++added;
     };
-    if (prop.isEmpty()) { for (const PropertyDef& d : layerPropertyDefs()) key(d); }
+    if (prop.isEmpty()) { for (const PropertyDef& d : (l->type == LayerType::Audio ? audioPropertyDefList() : layerPropertyDefs())) key(d); }
     else if (const PropertyDef* d = findPropertyDef(prop)) key(*d);
     if (!added) return false;
     m_doc->editTracks(layer, t, tr("Add Keyframe"));

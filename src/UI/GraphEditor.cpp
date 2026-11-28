@@ -475,7 +475,7 @@ void GraphEditorPanel::rebuildProps() {
     m_props->blockSignals(true);
     m_props->clear();
     if (const Layer* l = m_s->activeLayer()) {
-        for (const PropertyDef& d : layerPropertyDefs()) {
+        for (const PropertyDef& d : (l->type == LayerType::Audio ? audioPropertyDefList() : layerPropertyDefs())) {
             auto it = l->tracks.constFind(d.id);
             if (it != l->tracks.constEnd() && it->animated()) m_props->addItem(d.label, d.id);
         }

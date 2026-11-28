@@ -17,6 +17,8 @@ bool gpuEffects() { return s().value("render/gpuEffects", false).toBool(); }
 void setGpuEffects(bool on) { s().setValue("render/gpuEffects", on); }
 bool gpu3D() { return s().value("render/gpu3d", false).toBool(); }
 void setGpu3D(bool on) { s().setValue("render/gpu3d", on); }
+bool audioScrub() { return s().value("audio/scrub", true).toBool(); }
+void setAudioScrub(bool on) { s().setValue("audio/scrub", on); }
 int autosaveIntervalSeconds() { return qBound(10, s().value("autosave/interval", 120).toInt(), 3600); }
 void setAutosaveIntervalSeconds(int v) { s().setValue("autosave/interval", qBound(10, v, 3600)); }
 double defaultGridSize() { return qBound(2.0, s().value("canvas/gridSize", 50.0).toDouble(), 1000.0); }

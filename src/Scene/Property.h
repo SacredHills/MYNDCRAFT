@@ -41,6 +41,7 @@ struct PropertyDef {
 
 // Properties every layer has. The list order is the display order.
 const QVector<PropertyDef>& layerPropertyDefs();
+const QVector<PropertyDef>& audioPropertyDefList();                  // "audio.volume", "audio.pan" (audio layers only)
 const PropertyDef* findPropertyDef(const QString& id);
 PropValue clampValue(const PropertyDef& d, PropValue v);   // range + type rules (int rounding, bool 0/1)
 

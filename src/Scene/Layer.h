@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 
+#include "Audio/AudioClip.h"
 #include "Scene/Animation.h"
 #include "Scene/Property.h"
 #include "Scene3D/Scene3D.h"
@@ -15,7 +16,7 @@
 
 namespace mynd {
 
-enum class LayerType { Raster, Vector, Group, Text, Animation, Symbol, Scene3D };
+enum class LayerType { Raster, Vector, Group, Text, Animation, Symbol, Scene3D, Audio };
 // Symbols: reusable artwork with its own timeline. A Graphic symbol's time follows the timeline it sits in (with
 // loop / play-once / single-frame control); a Movie Clip runs on its own and always loops from its first frame.
 enum class SymbolKind { Graphic, MovieClip };
@@ -43,6 +44,18 @@ struct LayerProps {
         return name == o.name && visible == o.visible && locked == o.locked &&
                opacity == o.opacity && blend == o.blend;
     }
+};
+
+// Audio layers: where the clip sits on the timeline and which part of it plays. Times inside the clip are in seconds;
+// `trimOut` 0 means "to the end of the clip". A looping clip repeats its trimmed part until the composition ends.
+struct AudioParams {
+    int startFrame = 0;
+    double trimIn = 0, trimOut = 0;
+    bool loop = false;
+    bool operator==(const AudioParams& o) const { return startFrame == o.startFrame && trimIn == o.trimIn && trimOut == o.trimOut && loop == o.loop; }
+    bool operator!=(const AudioParams& o) const { return !(*this == o); }
+    // Seconds of the clip that play per pass (>= 0).
+    double playLength(double clipDuration) const;
 };
 
 class Layer;
@@ -86,6 +99,9 @@ public:
     int symbolFirstFrame = 0;
     // Scene3D layers: a 3D scene rendered through its active camera into the composition (never null for that type).
     std::shared_ptr<mynd::Scene3D> scene3d;
+    // Audio layers: the decoded clip (shared, immutable) and its placement. Volume/pan are keyframe tracks ("audio.volume", "audio.pan").
+    std::shared_ptr<const mynd::AudioClip> audio;
+    AudioParams audioParams;
     // The 3D scene as it looks at `frame` (animated properties overlaid); the stored scene itself when nothing is animated.
     std::shared_ptr<const mynd::Scene3D> sceneAt(double frame) const;
     // Animated 3D properties of this layer's scene (ids understood by findPropertyDef), in scene order; empty for other layers.

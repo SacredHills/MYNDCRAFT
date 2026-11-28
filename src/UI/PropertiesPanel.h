@@ -29,6 +29,11 @@ public:
     QSpinBox* instanceFirstFrame() const { return m_instFirst; }
     QGroupBox* instanceBox() const { return m_instBox; }
     class EffectsPanel* effects() const { return m_effects; }
+    QGroupBox* audioBox() const { return m_audioBox; }
+    QDoubleSpinBox* audioStart() const { return m_audStart; }
+    QDoubleSpinBox* audioTrimIn() const { return m_audIn; }
+    QDoubleSpinBox* audioTrimOut() const { return m_audOut; }
+    QCheckBox* audioLoop() const { return m_audLoop; }
 
 private:
     struct Row {
@@ -50,6 +55,12 @@ private:
     QComboBox* m_instMode = nullptr;
     QSpinBox* m_instFirst = nullptr;
     void instanceEdited();
+    void audioEdited();
+    QWidget* m_xformBox = nullptr;
+    QGroupBox* m_audioBox = nullptr;
+    QLabel* m_audioInfo = nullptr;
+    QDoubleSpinBox *m_audStart = nullptr, *m_audIn = nullptr, *m_audOut = nullptr;
+    QCheckBox* m_audLoop = nullptr;
     bool m_busy = false;
     QElapsedTimer m_lastEdit;
     int m_editCounter = 0;
