@@ -328,6 +328,8 @@ void MainWindow::buildActions() {
     aGrid = toggle(tr("Show &Grid"), QKeySequence("Ctrl+'"), &m_session->gridVisible);
     aRulers = toggle(tr("Show &Rulers"), QKeySequence("Ctrl+R"), &m_session->rulersVisible);
     aGuides = toggle(tr("Show G&uides"), QKeySequence("Ctrl+Shift+;"), &m_session->guidesVisible);
+    aMaskLines = toggle(tr("Show &Mask Outlines"), QKeySequence("Ctrl+Shift+H"), &m_session->maskOutlinesVisible);
+    aMaskLines->setToolTip(tr("Show or hide the yellow mask outlines on the canvas. Masks still apply; the outline is only an editing aid."));
     aSnap = toggle(tr("&Snap to Grid / Guides"), QKeySequence("Ctrl+;"), &m_session->snapEnabled);
     aDetachCanvas = mk(tr("New Canvas Window"));
     aDetachCanvas->setToolTip(tr("Opens another view of this document in its own window that can be dragged anywhere (or onto another screen). The main canvas stays where it is."));
@@ -652,7 +654,7 @@ void MainWindow::buildMenus() {
     view->addSeparator();
     view->addActions({aRotL, aRotR, aRotReset});
     view->addSeparator();
-    view->addActions({aGrid, aRulers, aGuides, aSnap, aClearGuides});
+    view->addActions({aGrid, aRulers, aGuides, aMaskLines, aSnap, aClearGuides});
     view->addSeparator();
     view->addAction(aDetachCanvas);
     view->addSeparator();

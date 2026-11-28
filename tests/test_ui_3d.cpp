@@ -577,6 +577,18 @@ private slots:
         QVERIFY(l->fx.masks[0].shape.nodes[0].smooth);
     }
 
+    void theViewMenuCanHideTheMaskOutlines() {
+        QAction* act = nullptr;
+        for (QAction* m : w->menuBar()->actions()) if (m->menu() && m->text().remove('&') == "View")
+            for (QAction* a : m->menu()->actions()) if (a->text().remove('&') == "Show Mask Outlines") act = a;
+        QVERIFY(act && act->isCheckable() && act->isChecked());
+        QVERIFY(s->maskOutlinesVisible);
+        act->trigger();
+        QVERIFY(!s->maskOutlinesVisible);
+        act->trigger();
+        QVERIFY(s->maskOutlinesVisible);
+    }
+
     void theMaskToolEditsPointsOnTheCanvasWithUndo() {
         auto* fxp = w->effectsPanel();
         const QUuid art = doc->addLayer(LayerType::Vector, "MaskEdit");
@@ -848,6 +860,32 @@ private slots:
         QVERIFY2(c.blue() > 200 && c.red() < 60, qPrintable(c.name()));
         QVERIFY2(returnedAfter < 2000, qPrintable(QString::number(returnedAfter)));
         doc->undoStack()->undo(); doc->undoStack()->undo(); cv->flushRender();
+    }
+
+    void anOlderFramesLateRenderNeverReplacesTheFrameShownDuringPlayback() {
+        const QUuid L = doc->addLayer(LayerType::Vector, "Loop");
+        VectorShape r = VectorShape::makeRect(QRectF(0, 0, 300, 300)); r.fill.color = Qt::red; r.stroke.enabled = false;
+        doc->setShapes(L, {r}, "shape");
+        auto* cv = w->findChild<CanvasView*>();
+        cv->flushRender();
+        // frame 3 is heavy and unrelated frames follow: whatever order renders finish in, the canvas ends on the playhead's frame
+        LayerFx fx; Effect b = Effect::make(EffectType::Blur); b.p[0] = 30; fx.effects << b;
+        doc->setLayerFx(L, fx, "blur");
+        cv->flushRender();
+        s->playback()->play();
+        for (int f = 1; f < 6; ++f) { doc->setCurrentFrame(f); cv->flushRender(); }
+        for (int f = 1; f < 6; ++f) {                                  // second loop: cached frames shown while older renders may still be running
+            doc->setCurrentFrame(f);
+            doc->setCurrentFrame(f == 5 ? 1 : f + 1);
+        }
+        s->playback()->pause();
+        const int cur = doc->currentFrame();
+        Compositor::Options o; o.frame = cur;
+        const QImage expected = Compositor::render(*doc, doc->canvasRect(), o);
+        const QImage shown = cv->compositeImage();
+        QCOMPARE(shown.pixelColor(150, 150), expected.pixelColor(150, 150));
+        QCOMPARE(shown.pixelColor(2, 2), expected.pixelColor(2, 2));
+        doc->undoStack()->undo(); cv->flushRender();
     }
 
     void playbackShowsCachedFramesOnLaterLoopsAndAnEditDropsThem() {

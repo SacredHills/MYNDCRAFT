@@ -193,7 +193,7 @@ public:
     int bucketTolerance = 24;
 
     // View toggles (persisted by MainWindow)
-    bool gridVisible = false, rulersVisible = true, guidesVisible = true, snapEnabled = false;
+    bool gridVisible = false, rulersVisible = true, guidesVisible = true, snapEnabled = false, maskOutlinesVisible = true;
 
     // Layer clipboard (within the open document): copies are detached snapshots, so later edits to the original do not change what gets pasted.
     bool copyLayer(const QUuid& id);

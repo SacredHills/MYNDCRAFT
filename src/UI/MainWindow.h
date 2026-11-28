@@ -112,7 +112,7 @@ private:
     QMap<ToolId, QAction*> m_toolActions;
     QAction *aNew, *aOpen, *aSave, *aSaveAs, *aExport, *aExportAnim, *aImport, *aPrefs, *aQuit;
     QAction *aUndo, *aRedo, *aSelAll, *aDeselect, *aDeleteSel;
-    QAction *aZoomIn, *aZoomOut, *aFit, *aActual, *aRotL, *aRotR, *aRotReset, *aGrid, *aRulers, *aGuides, *aSnap, *aClearGuides;
+    QAction *aZoomIn, *aZoomOut, *aFit, *aActual, *aRotL, *aRotR, *aRotReset, *aGrid, *aRulers, *aGuides, *aMaskLines, *aSnap, *aClearGuides;
     QAction *aGroupShapes, *aUngroupShapes, *aFront, *aForward, *aBackward, *aBack;
     QAction *aNewRaster, *aNewVector, *aNewGroup, *aDup, *aDelLayer, *aGroupLayer, *aUngroupLayer, *aUp, *aDown, *aToggleVis, *aToggleLock, *aCopyLayer, *aCutLayer, *aPasteLayer, *aRenameLayer, *aTopLayer, *aBottomLayer;
     QMenu *m_recentMenu, *m_workspaceMenu;

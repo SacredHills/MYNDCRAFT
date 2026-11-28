@@ -123,8 +123,9 @@ void CanvasView::applyRenderResult() {
     const RenderJob job = m_runJob;
     m_rRunning = false;
     if (m_doc && job.docGen == m_docGen) {
+        const bool stale = job.frame != m_doc->currentFrame();      // the playhead has moved on (playback, scrubbing, a cached frame was shown): never put an older frame on screen
         if (job.full && img.size() == m_doc->canvasSize()) {
-            m_cache = img;
+            if (!stale) m_cache = img;
             if (m_session->playback()->isPlaying() && job.epoch == m_epoch && !job.opt.onion.enabled) {      // keep it for the next loop (RAM preview)
                 const qint64 bytes = img.sizeInBytes();
                 while (!m_frameOrder.isEmpty() && m_frameCacheBytes + bytes > (qint64(768) << 20)) {
@@ -133,7 +134,7 @@ void CanvasView::applyRenderResult() {
                 }
                 if (!m_frameCache.contains(job.frame)) { m_frameCache.insert(job.frame, img); m_frameOrder << job.frame; m_frameCacheBytes += bytes; }
             }
-        } else if (!job.full && m_cache.size() == m_doc->canvasSize()) {
+        } else if (!job.full && !stale && m_cache.size() == m_doc->canvasSize()) {
             QPainter p(&m_cache);
             p.setCompositionMode(QPainter::CompositionMode_Source);
             p.drawImage(job.rect.topLeft(), img);
@@ -163,7 +164,7 @@ void CanvasView::onContentChanged(const QRect& r) {
     else if (m_session->playback()->isPlaying() && m_cache.size() == m_doc->canvasSize()) {
         const int f = m_doc->currentFrame();
         auto it = m_frameCache.constFind(f);
-        if (it != m_frameCache.constEnd() && it->size() == m_doc->canvasSize()) { m_cache = *it; ++m_frameHits; update(); return; }
+        if (it != m_frameCache.constEnd() && it->size() == m_doc->canvasSize()) { m_cache = *it; m_rHaveNext = false; ++m_frameHits; update(); return; }
         requestRender(m_doc->canvasRect(), true);      // not rendered yet: shown when ready (playback keeps its pace; the newest frame wins)
         return;
     }

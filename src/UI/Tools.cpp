@@ -1383,7 +1383,7 @@ static QTransform activeLayerMatrix(EditorSession* s) {
 
 void paintMaskOutlines(QPainter& p, EditorSession* s, const QTransform& docToView, int selMask, int selNode) {
     Layer* l = s->activeLayer();
-    if (!l || !s->doc() || l->fx.masks.isEmpty()) return;
+    if (!s->maskOutlinesVisible || !l || !s->doc() || l->fx.masks.isEmpty()) return;
     const QTransform t = activeLayerMatrix(s) * docToView;
     p.setRenderHint(QPainter::Antialiasing);
     const LayerFx fx = l->fxAt(s->doc()->currentFrame());

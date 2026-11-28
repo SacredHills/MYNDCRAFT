@@ -396,3 +396,7 @@ The Select tool (V) now covers Direct Selection and Transform Layer: on drawing/
 
 ## Drawing masks by clicking
 - With the Mask tool (W, or Layer > Mask > Draw Mask / Edit Masks) click on an empty part of the canvas (not on an existing mask) to start a new mask on the active layer: each click adds a corner point, click-and-drag pulls out smooth handles, click the first point (or press Enter / double-click) to close it, Esc cancels, Backspace removes the last point. The mask is one undo step and is then edited with the same tool. Points are stored in the layer's own space. Tested by simulated pointer events; not tried by hand on Windows. No rectangle/ellipse drag-to-draw with the tool yet (use Layer > Mask > New Rectangle/Ellipse Mask, then edit).
+
+## Hide mask outlines; playback glitch fix
+- View > Show Mask Outlines (Ctrl+Shift+H) hides the yellow/red/blue mask lines (and points) on the canvas; masks still apply. Not saved with the project (a view setting that starts on).
+- Playback glitch after the first loop: a background render of an older frame could finish after a cached frame had already been shown and overwrite it, so the picture jumped back. Results for a frame other than the playhead's are no longer shown (they are still kept in the frame cache), and showing a cached frame drops any queued render. Covered by a test that waits for the final state; I could not reproduce the exact visual glitch by eye here, so tell me if it still happens on the Windows build.
