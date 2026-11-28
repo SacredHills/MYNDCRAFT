@@ -206,6 +206,7 @@ signals:
     void nodeSelectionChanged(const QUuid& id);
     void selectionChanged();
     void toolChanged(ToolId t);
+    void toolGestureChanged();          // a tool started/ended something Undo should act on (a mask being drawn)
     void colorsChanged();
     void styleChanged();
     void textStyleChanged();

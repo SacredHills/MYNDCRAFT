@@ -1531,9 +1531,9 @@ public:
     bool keyPress(QKeyEvent* k) override {
         if (m_drawing) {
             Layer* dl = m_s->activeLayer();
-            if (k->key() == Qt::Key_Escape) { m_drawing = false; m_draw.clear(); m_c->update(); return true; }
+            if (k->key() == Qt::Key_Escape) { m_drawing = false; m_draw.clear(); emit m_s->toolGestureChanged(); m_c->update(); return true; }
             if ((k->key() == Qt::Key_Return || k->key() == Qt::Key_Enter) && dl) { closeDrawing(*dl); return true; }
-            if ((k->key() == Qt::Key_Backspace || k->key() == Qt::Key_Delete) && !m_draw.isEmpty()) { m_draw.removeLast(); if (m_draw.isEmpty()) m_drawing = false; m_c->update(); return true; }
+            if ((k->key() == Qt::Key_Backspace || k->key() == Qt::Key_Delete) && !m_draw.isEmpty()) { m_draw.removeLast(); if (m_draw.isEmpty()) m_drawing = false; emit m_s->toolGestureChanged(); m_c->update(); return true; }
             return false;
         }
         if (k->key() != Qt::Key_Delete && k->key() != Qt::Key_Backspace) return false;
@@ -1554,7 +1554,16 @@ public:
         m_c->update();
         return true;
     }
-    void cancel() override { restore(); m_drawing = false; m_draw.clear(); }
+    void cancel() override { restore(); const bool was = m_drawing; m_drawing = false; m_draw.clear(); if (was) emit m_s->toolGestureChanged(); }
+    bool hasUndoStep() const override { return m_drawing && !m_draw.isEmpty(); }
+    bool undoStep() override {            // each click of a mask being drawn is its own undo step
+        if (!m_drawing || m_draw.isEmpty()) return false;
+        m_draw.removeLast();
+        if (m_draw.isEmpty()) m_drawing = false;
+        emit m_s->toolGestureChanged();
+        m_c->update();
+        return true;
+    }
     void paintOverlay(QPainter& p, const QTransform& t) override {
         paintMaskOutlines(p, m_s, t, m_mask, m_node);
         if (!m_drawing || m_draw.isEmpty()) return;
@@ -1593,6 +1602,7 @@ private:
     void drawPress(Layer& l, const QPointF& q, double tol) {
         if (m_draw.size() >= 3 && QLineF(q, m_draw.first().pos).length() <= tol) { closeDrawing(l); return; }     // click on the first point closes the mask
         PathNode n; n.pos = q; m_draw << n;
+        emit m_s->toolGestureChanged();
         m_drag = DrawHandle;                                    // dragging from the new point pulls out smooth handles
         m_c->update();
     }
@@ -1606,6 +1616,7 @@ private:
             m_mask = after.masks.size() - 1; m_node = -1;
         } else emit m_s->message(QObject::tr("A mask needs at least 3 points."));
         m_drawing = false; m_drag = None; m_draw.clear();
+        emit m_s->toolGestureChanged();
         m_c->update();
     }
     void restore() {

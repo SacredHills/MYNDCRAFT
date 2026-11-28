@@ -35,6 +35,8 @@ public:
     virtual void doubleClick(const PointerEvent&) {}
     virtual bool keyPress(QKeyEvent*) { return false; }
     virtual void cancel() {}
+    virtual bool hasUndoStep() const { return false; }
+    virtual bool undoStep() { return false; }   // Undo while a multi-click gesture is in progress (e.g. drawing a mask): takes back the last click; false = nothing of its own to undo
     virtual void paintOverlay(QPainter&, const QTransform& docToView) {}
     virtual QCursor cursor() const { return Qt::CrossCursor; }
     virtual bool busy() const { return false; }  // a gesture is in progress

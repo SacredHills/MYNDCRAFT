@@ -293,7 +293,7 @@ void MainWindow::buildActions() {
     aUndo = mk(tr("&Undo"), QKeySequence::Undo);
     aRedo = mk(tr("&Redo"), QKeySequence::Redo);
     aUndo->setEnabled(false); aRedo->setEnabled(false);
-    connect(aUndo, &QAction::triggered, this, [this] { if (m_doc) m_doc->undoStack()->undo(); });
+    connect(aUndo, &QAction::triggered, this, [this] { if (m_canvas->toolUndo()) return; if (m_doc) m_doc->undoStack()->undo(); });
     connect(aRedo, &QAction::triggered, this, [this] { if (m_doc) m_doc->undoStack()->redo(); });
 
     aSelAll = mk(tr("Select &All Shapes"), QKeySequence::SelectAll);
@@ -792,12 +792,13 @@ void MainWindow::bindUndo() {
     m_undoConns.clear();
     QUndoStack* st = m_doc->undoStack();
     auto refresh = [this, st] {
-        aUndo->setEnabled(st->canUndo());
+        aUndo->setEnabled(st->canUndo() || m_canvas->toolHasUndo());
         aRedo->setEnabled(st->canRedo());
         aUndo->setText(st->canUndo() ? tr("&Undo %1").arg(st->undoText()) : tr("&Undo"));
         aRedo->setText(st->canRedo() ? tr("&Redo %1").arg(st->redoText()) : tr("&Redo"));
     };
-    m_undoConns << connect(st, &QUndoStack::indexChanged, this, refresh)
+    m_undoConns << connect(m_session, &EditorSession::toolGestureChanged, this, refresh)
+                << connect(st, &QUndoStack::indexChanged, this, refresh)
                 << connect(st, &QUndoStack::canUndoChanged, this, refresh)
                 << connect(st, &QUndoStack::canRedoChanged, this, refresh);
     refresh();

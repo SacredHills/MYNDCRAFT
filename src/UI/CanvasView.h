@@ -46,6 +46,8 @@ public:
     // ready); this waits for anything still being rendered so callers (tests, export previews) see the finished picture.
     QImage compositeImage() { flushRender(); return m_cache; }
     void flushRender();
+    bool toolHasUndo() const { return m_tool && m_tool->hasUndoStep(); }
+    bool toolUndo() { return m_tool && m_tool->undoStep(); }
     bool rendering() const { return m_rRunning; }
     void rebuildCache();
     Compositor::Options renderOptions() const;

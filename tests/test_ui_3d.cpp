@@ -589,6 +589,54 @@ private slots:
         QVERIFY(s->maskOutlinesVisible);
     }
 
+    void undoTakesBackOneMaskPointAtATimeWhileDrawingAndEachEditAfterwards() {
+        const QUuid art = doc->addLayer(LayerType::Vector, "UndoPts");
+        VectorShape r = VectorShape::makeRect(QRectF(0, 0, 300, 300)); r.fill.color = Qt::red; r.stroke.enabled = false;
+        doc->setShapes(art, {r}, "shape");
+        s->setActiveLayer(art);
+        Layer* l = doc->findLayer(art);
+        CanvasView* cv = w->canvas();
+        s->setTool(ToolId::Mask);
+        QAction* undo = nullptr;
+        for (QAction* m : w->menuBar()->actions()) if (m->menu() && m->text().remove('&') == "Edit")
+            for (QAction* a : m->menu()->actions()) if (a->text().remove('&').startsWith("Undo")) undo = a;
+        QVERIFY(undo);
+        const int base = doc->undoStack()->index();
+        auto clickDoc = [&](QPointF p) { const QPoint v = cv->docToView().map(p).toPoint(); QTest::mouseClick(cv, Qt::LeftButton, {}, v); };
+        clickDoc({50, 50}); clickDoc({200, 50}); clickDoc({200, 200});
+        QVERIFY(l->fx.masks.isEmpty());
+        QVERIFY(undo->isEnabled());                                   // enabled even though nothing is on the undo stack yet
+        undo->trigger();                                              // takes back the third point only
+        QVERIFY(l->fx.masks.isEmpty());
+        clickDoc({200, 200});                                         // put it back, then finish with Enter
+        QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+        QApplication::sendEvent(cv, &enter);
+        QCOMPARE(l->fx.masks.size(), 1);
+        QCOMPARE(l->fx.masks[0].shape.nodes.size(), 3);
+        QCOMPARE(doc->undoStack()->index(), base + 1);
+        // each later edit of a point is its own step, in order
+        const QPointF p0 = l->fx.masks[0].shape.nodes[0].pos;
+        auto tool = createTool(ToolId::Mask, s, cv);
+        auto ev = [](QPointF p) { PointerEvent e; e.doc = p; return e; };
+        const QTransform lm = l->xformAt(doc->currentFrame()).matrix(QPointF(doc->canvasSize().width() / 2.0, doc->canvasSize().height() / 2.0));
+        tool->press(ev(lm.map(p0))); tool->release(ev(lm.map(p0)));
+        QVERIFY(!l->fx.masks.isEmpty());
+        for (int i = 0; i < 3; ++i) {
+            const QPointF cur = l->fx.masks[0].shape.nodes[i].pos;
+            tool->press(ev(lm.map(cur))); tool->move(ev(lm.map(cur + QPointF(5, 7)))); tool->release(ev(lm.map(cur + QPointF(5, 7))));
+        }
+        QCOMPARE(doc->undoStack()->index(), base + 4);
+        const QPointF moved1 = l->fx.masks[0].shape.nodes[1].pos;
+        undo->trigger();                                              // last point back
+        QCOMPARE(doc->undoStack()->index(), base + 3);
+        QCOMPARE(l->fx.masks[0].shape.nodes[1].pos, moved1);          // the others keep their edits
+        undo->trigger(); undo->trigger();
+        QCOMPARE(l->fx.masks[0].shape.nodes[0].pos, p0);
+        undo->trigger();
+        QVERIFY(l->fx.masks.isEmpty());
+        s->setTool(ToolId::Select);
+    }
+
     void theMaskToolEditsPointsOnTheCanvasWithUndo() {
         auto* fxp = w->effectsPanel();
         const QUuid art = doc->addLayer(LayerType::Vector, "MaskEdit");
