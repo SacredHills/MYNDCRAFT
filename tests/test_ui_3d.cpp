@@ -537,6 +537,46 @@ private slots:
         QVERIFY(!blur->isEnabled());
     }
 
+    void clickingPointsWithTheMaskToolDrawsANewMask() {
+        const QUuid art = doc->addLayer(LayerType::Vector, "ClickMask");
+        VectorShape r = VectorShape::makeRect(QRectF(0, 0, 300, 300)); r.fill.color = Qt::red; r.stroke.enabled = false;
+        doc->setShapes(art, {r}, "shape");
+        s->setActiveLayer(art);
+        Layer* l = doc->findLayer(art);
+        QVERIFY(l->fx.masks.isEmpty());
+        auto tool = createTool(ToolId::Mask, s, w->canvas());
+        auto ev = [](QPointF p) { PointerEvent e; e.doc = p; return e; };
+        const QSize cs = doc->canvasSize();
+        const QTransform lm = l->xformAt(doc->currentFrame()).matrix(QPointF(cs.width() / 2.0, cs.height() / 2.0));
+        const QPointF a(50, 50), b(200, 50), c(200, 200);
+        for (QPointF p : {a, b, c}) { tool->press(ev(lm.map(p))); tool->release(ev(lm.map(p))); }
+        QVERIFY(l->fx.masks.isEmpty());                                 // still drawing
+        tool->press(ev(lm.map(a))); tool->release(ev(lm.map(a)));      // click on the first point closes it
+        QCOMPARE(l->fx.masks.size(), 1);
+        QCOMPARE(l->fx.masks[0].shape.nodes.size(), 3);
+        QVERIFY(l->fx.masks[0].shape.closed);
+        const QImage img = Compositor::render(*doc, doc->canvasRect(), {});
+        QVERIFY(img.pixelColor(150, 100).red() > 200 && img.pixelColor(150, 100).green() < 60);   // inside the triangle: still red
+        QVERIFY(img.pixelColor(60, 180).red() > 200 && img.pixelColor(60, 180).green() > 200);     // outside it: masked away (white background)
+        doc->undoStack()->undo();
+        QVERIFY(l->fx.masks.isEmpty());
+        // Escape cancels a mask being drawn, Enter finishes one
+        tool->press(ev(lm.map(a))); tool->release(ev(lm.map(a)));
+        QKeyEvent esc(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        QVERIFY(tool->keyPress(&esc));
+        QVERIFY(l->fx.masks.isEmpty());
+        for (QPointF p : {a, b, c}) { tool->press(ev(lm.map(p))); tool->release(ev(lm.map(p))); }
+        QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+        QVERIFY(tool->keyPress(&enter));
+        QCOMPARE(l->fx.masks.size(), 1);
+        // dragging out of a new point makes it smooth
+        doc->undoStack()->undo();
+        tool->press(ev(lm.map(a))); tool->move(ev(lm.map(a + QPointF(30, 0)))); tool->release(ev(lm.map(a + QPointF(30, 0))));
+        for (QPointF p : {b, c}) { tool->press(ev(lm.map(p))); tool->release(ev(lm.map(p))); }
+        tool->keyPress(&enter);
+        QVERIFY(l->fx.masks[0].shape.nodes[0].smooth);
+    }
+
     void theMaskToolEditsPointsOnTheCanvasWithUndo() {
         auto* fxp = w->effectsPanel();
         const QUuid art = doc->addLayer(LayerType::Vector, "MaskEdit");

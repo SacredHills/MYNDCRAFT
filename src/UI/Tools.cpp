@@ -1422,11 +1422,12 @@ public:
     void press(const PointerEvent& e) override {
         if (e.button != Qt::LeftButton) return;
         Layer* l = m_s->activeLayer();
-        if (!l || l->fx.masks.isEmpty()) { emit m_s->message(QObject::tr("This layer has no masks. Layer > Mask adds one.")); return; }
+        if (!l) { emit m_s->message(QObject::tr("Select a layer to mask.")); return; }
         if (l->props.locked) return;
         const QPointF q = toLocal(e.doc);
         const double tol = kHitPx / m_c->zoom();
         m_before = l->fx;
+        if (m_drawing) return drawPress(*l, q, tol);
         if (valid(*l)) {
             const Mask& m = l->fx.masks[m_mask];
             if (m_node >= 0 && m_node < m.shape.nodes.size()) {
@@ -1452,10 +1453,21 @@ public:
             const VectorShape::SegmentHit h = sh.nearestSegment(q);
             if ((h.seg >= 0 && h.distance <= tol) || sh.path().contains(q)) pick = i;
         }
-        m_mask = pick; m_node = -1;
-        m_c->update();
+        if (pick >= 0) { m_mask = pick; m_node = -1; m_c->update(); return; }
+        // empty area: start drawing a new mask by clicking its points (After Effects style)
+        m_mask = -1; m_node = -1;
+        m_drawing = true; m_draw.clear();
+        drawPress(*l, q, tol);
     }
     void move(const PointerEvent& e) override {
+        if (m_drag == DrawHandle) {
+            if (m_draw.isEmpty()) return;
+            PathNode& n = m_draw.last();
+            const QPointF off = toLocal(e.doc) - n.pos;
+            if (QLineF(QPointF(0, 0), off).length() * m_c->zoom() > 3) { n.out = off; n.in = -off; n.smooth = true; }
+            m_c->update();
+            return;
+        }
         if (m_drag == None) return;
         Layer* l = m_s->activeLayer();
         if (!l || !valid(*l)) return;
@@ -1479,9 +1491,17 @@ public:
         }
         m_s->doc()->emitContentChanged({});
     }
-    void release(const PointerEvent&) override { finish(QObject::tr("Edit Mask")); }
+    void release(const PointerEvent&) override {
+        if (m_drag == DrawHandle) { m_drag = None; m_c->update(); return; }
+        finish(QObject::tr("Edit Mask"));
+    }
     void doubleClick(const PointerEvent& e) override {
         Layer* l = m_s->activeLayer();
+        if (m_drawing) {                                       // the second click of a double-click already added a duplicate point
+            if (m_draw.size() > 1 && QLineF(m_draw.last().pos, m_draw[m_draw.size() - 2].pos).length() * m_c->zoom() < 4) m_draw.removeLast();
+            if (l) closeDrawing(*l);
+            return;
+        }
         if (!l || l->props.locked || !valid(*l)) return;
         const QPointF q = toLocal(e.doc);
         const double tol = kHitPx / m_c->zoom();
@@ -1509,6 +1529,13 @@ public:
         }
     }
     bool keyPress(QKeyEvent* k) override {
+        if (m_drawing) {
+            Layer* dl = m_s->activeLayer();
+            if (k->key() == Qt::Key_Escape) { m_drawing = false; m_draw.clear(); m_c->update(); return true; }
+            if ((k->key() == Qt::Key_Return || k->key() == Qt::Key_Enter) && dl) { closeDrawing(*dl); return true; }
+            if ((k->key() == Qt::Key_Backspace || k->key() == Qt::Key_Delete) && !m_draw.isEmpty()) { m_draw.removeLast(); if (m_draw.isEmpty()) m_drawing = false; m_c->update(); return true; }
+            return false;
+        }
         if (k->key() != Qt::Key_Delete && k->key() != Qt::Key_Backspace) return false;
         Layer* l = m_s->activeLayer();
         if (!l || l->props.locked || !valid(*l)) return false;
@@ -1527,13 +1554,30 @@ public:
         m_c->update();
         return true;
     }
-    void cancel() override { restore(); }
-    void paintOverlay(QPainter& p, const QTransform& t) override { paintMaskOutlines(p, m_s, t, m_mask, m_node); }
+    void cancel() override { restore(); m_drawing = false; m_draw.clear(); }
+    void paintOverlay(QPainter& p, const QTransform& t) override {
+        paintMaskOutlines(p, m_s, t, m_mask, m_node);
+        if (!m_drawing || m_draw.isEmpty()) return;
+        VectorShape sh; sh.nodes = m_draw; sh.closed = false;
+        const QTransform lt = activeLayerMatrix(m_s) * t;
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(QColor(0, 0, 0, 160), 3)); p.drawPath(lt.map(sh.path()));
+        p.setPen(QPen(QColor(255, 220, 60), 1.4)); p.drawPath(lt.map(sh.path()));
+        for (int i = 0; i < m_draw.size(); ++i) {
+            const QPointF a = lt.map(m_draw[i].pos);
+            p.setPen(QPen(Qt::black, 1)); p.setBrush(i == 0 && m_draw.size() >= 3 ? QColor(255, 220, 60) : Qt::white);
+            p.drawRect(QRectF(a.x() - 3.5, a.y() - 3.5, 7, 7));
+        }
+    }
+    bool drawing() const { return m_drawing; }
 
     int selectedMask() const { return m_mask; }
 
 private:
-    enum Drag { None, Node, HandleIn, HandleOut, Segment };
+    enum Drag { None, Node, HandleIn, HandleOut, Segment, DrawHandle };
+    bool m_drawing = false;
+    QVector<PathNode> m_draw;                                   // the mask being drawn, in layer space
     Drag m_drag = None;
     int m_mask = -1, m_node = -1, m_seg = -1;
     double m_segT = 0.5;
@@ -1546,6 +1590,24 @@ private:
     }
     bool valid(const Layer& l) const { return m_mask >= 0 && m_mask < l.fx.masks.size(); }
     void begin(Drag d) { m_drag = d; m_c->update(); }
+    void drawPress(Layer& l, const QPointF& q, double tol) {
+        if (m_draw.size() >= 3 && QLineF(q, m_draw.first().pos).length() <= tol) { closeDrawing(l); return; }     // click on the first point closes the mask
+        PathNode n; n.pos = q; m_draw << n;
+        m_drag = DrawHandle;                                    // dragging from the new point pulls out smooth handles
+        m_c->update();
+    }
+    void closeDrawing(Layer& l) {
+        const bool ok = m_draw.size() >= 3;
+        if (ok) {
+            LayerFx after = l.fx;
+            Mask m; m.shape.nodes = m_draw; m.shape.closed = true; m.shape.fill.color = Qt::white; m.name = QObject::tr("Mask %1").arg(after.masks.size() + 1);
+            after.masks << m;
+            m_s->doc()->setLayerFx(l.id, after, QObject::tr("Draw Mask"));
+            m_mask = after.masks.size() - 1; m_node = -1;
+        } else emit m_s->message(QObject::tr("A mask needs at least 3 points."));
+        m_drawing = false; m_drag = None; m_draw.clear();
+        m_c->update();
+    }
     void restore() {
         Layer* l = m_s->activeLayer();
         if (m_drag != None && l) { l->fx = m_before; m_s->doc()->emitContentChanged({}); }

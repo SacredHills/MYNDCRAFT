@@ -598,7 +598,7 @@ void MainWindow::buildEffectMenus(QMenu* layerMenu) {
     needLayer << mask->addAction(tr("New Rectangle Mask"), this, [fx] { fx->addRectangleMask(); });
     needLayer << mask->addAction(tr("New Ellipse Mask"), this, [fx] { fx->addEllipseMask(); });
     needLayer << mask->addAction(tr("Mask from Selected Shape"), this, [fx] { fx->addMaskFromSelectedShapes(); });
-    needLayer << mask->addAction(tr("Edit Masks (W)"), this, [this] { m_session->setTool(ToolId::Mask); });
+    needLayer << mask->addAction(tr("Draw Mask / Edit Masks (W)"), this, [this] { m_session->setTool(ToolId::Mask); });
     needLayer << mask->addAction(tr("Remove All Masks"), this, [fx] { fx->clearMasks(); });
     QMenu* matte = layerMenu->addMenu(tr("Track Matte"));
     connect(matte, &QMenu::aboutToShow, matte, [this, matte, fx] {
