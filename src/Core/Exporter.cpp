@@ -214,6 +214,7 @@ bool writeGif(const Document& doc, const QString& path, const ExportOptions& opt
 
     for (int i = 0; i < count; ++i) {
         Compositor::Options co;
+        co.allowGpu = false;                 // final output always comes from the CPU renderer
         co.includeBackground = !opt.transparentBackground;
         co.scene3dSupersample = 2;
         co.frame = first + i;
@@ -260,6 +261,7 @@ bool writePngSequence(const Document& doc, const QString& dir, const QString& ba
                           "# Distances are in scene units in front of the camera; the value is linear in distance: v = 65535*(0.1 + 0.9*(far - d)/(far - near)).\n";
     for (int i = 0; i < count; ++i) {
         Compositor::Options co;
+        co.allowGpu = false;                 // final output always comes from the CPU renderer
         co.includeBackground = !opt.transparentBackground;
         co.scene3dSupersample = 2;
         co.frame = opt.firstFrame + i;

@@ -13,11 +13,13 @@ jobs:
       - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
       - run: cmake --build build
       - run: QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
-      - name: GPU effects path on software OpenGL (Mesa llvmpipe under Xvfb)
+      - name: GPU effects and GPU 3D renderer on software OpenGL (Mesa llvmpipe under Xvfb)
         run: |
           export LIBGL_ALWAYS_SOFTWARE=1 QT_QPA_PLATFORM=xcb
           xvfb-run -a ./build/test_gpu_effects | tee gpu.log
           grep -q "llvmpipe" gpu.log && ! grep -q "SKIP" gpu.log
+          xvfb-run -a ./build/test_gpu_render3d | tee gpu3d.log
+          grep -q "llvmpipe" gpu3d.log && ! grep -q "SKIP" gpu3d.log
 
   windows:
     runs-on: windows-latest

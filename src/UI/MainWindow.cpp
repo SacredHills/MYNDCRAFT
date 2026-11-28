@@ -39,6 +39,7 @@
 #include "Core/Exporter.h"
 #include "Core/Settings.h"
 #include "Graphics/GpuEffects.h"
+#include "Scene3D/RenderGpu.h"
 #include "Graphics/Compositor.h"
 #include "UI/ExposureSheet.h"
 #include "UI/Icons.h"
@@ -76,7 +77,7 @@ MainWindow::MainWindow() {
     setCentralWidget(m_dockManager);
     m_autosave = new Autosaver(this);
     m_autosave->setEnabled(settings::autosaveEnabled());
-    if (settings::gpuEffects()) QTimer::singleShot(0, this, [this] { applyGpuSetting(); });     // after the window exists (the OpenGL surface is made on the GUI thread)
+    if (settings::gpuEffects() || settings::gpu3D()) QTimer::singleShot(0, this, [this] { applyGpuSetting(); });     // after the window exists (the OpenGL surface is made on the GUI thread)
     m_autosave->setInterval(settings::autosaveIntervalSeconds());
 
     buildActions();
@@ -1013,6 +1014,13 @@ void MainWindow::actPreferences() {
         if (!have) gpu->setChecked(false);
     }
     form->addRow(gpuInfo);
+    auto* gpu3 = new QCheckBox(tr("Use the GPU to draw 3D scenes in previews (experimental)"));
+    gpu3->setChecked(settings::gpu3D());
+    gpu3->setEnabled(gpu->isEnabled());
+    gpu3->setToolTip(tr("Draws 3D scenes (the 3D viewport and 3D layers in the canvas) with OpenGL 3.3 instead of the software renderer. The picture is very close to the "
+                        "software one; scenes it cannot draw (layer blend modes on surfaces, more than 16 lights, transparent textures on opaque materials, depth output) "
+                        "are drawn by the software renderer automatically. Exporting always uses the software renderer so final frames do not depend on your graphics card."));
+    form->addRow(gpu3);
     auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     form->addRow(bb);
     connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
@@ -1021,8 +1029,9 @@ void MainWindow::actPreferences() {
     settings::setAutosaveEnabled(on->isChecked());
     settings::setAutosaveIntervalSeconds(iv->value());
     settings::setDefaultGridSize(gs->value());
-    if (gpu->isChecked() != settings::gpuEffects()) {
+    if (gpu->isChecked() != settings::gpuEffects() || gpu3->isChecked() != settings::gpu3D()) {
         settings::setGpuEffects(gpu->isChecked());
+        settings::setGpu3D(gpu3->isChecked());
         applyGpuSetting();
     }
     m_autosave->setEnabled(on->isChecked());
@@ -1031,12 +1040,17 @@ void MainWindow::actPreferences() {
 }
 
 void MainWindow::applyGpuSetting() {
-    bool on = settings::gpuEffects();
-    if (on && !fx::gpu::available() && !fx::gpu::initialize()) {
-        on = false;
-        statusBar()->showMessage(tr("OpenGL 3.3 is not available: effects stay on the CPU."), 6000);
+    bool on = settings::gpuEffects(), on3d = settings::gpu3D();
+    if ((on || on3d) && !fx::gpu::available() && !fx::gpu::initialize()) {
+        on = on3d = false;
+        statusBar()->showMessage(tr("OpenGL 3.3 is not available: effects and 3D stay on the CPU."), 6000);
+    }
+    if (on3d && !gpu3d::available() && !gpu3d::initialize()) {
+        on3d = false;
+        statusBar()->showMessage(tr("OpenGL 3.3 could not be set up for 3D: 3D stays on the CPU."), 6000);
     }
     fx::gpu::setEnabled(on);
+    gpu3d::setEnabled(on3d);
     if (m_canvas) m_canvas->rebuildCache();
 }
 

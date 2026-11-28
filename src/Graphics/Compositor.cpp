@@ -2,6 +2,7 @@
 #include <cmath>
 #include "Graphics/Compositor.h"
 #include "Graphics/GpuEffects.h"
+#include "Scene3D/RenderGpu.h"
 #include <atomic>
 #include "Graphics/Effects.h"
 
@@ -52,7 +53,7 @@ static QImage renderTree(const Layer& root, const SymbolResolver* syms, const QS
     p.setClipRect(r);
     QSet<QUuid> cards;
     Compositor::collectCardSources(root, cards);
-    const Compositor::Ctx ctx{opt.frame >= 0 ? opt.frame : currentFrame, &opt.onion, syms, 0, opt.scene3dSupersample, &cards, &root, 0};
+    const Compositor::Ctx ctx{opt.frame >= 0 ? opt.frame : currentFrame, &opt.onion, syms, 0, opt.scene3dSupersample, &cards, &root, 0, opt.allowGpu};
     drawGroupFn(p, root, r, size, ctx);
     return out;
 }
@@ -302,20 +303,22 @@ void Compositor::drawScene3D(QPainter& p, const Layer& l, const QRect& region, c
     const std::shared_ptr<const Scene3D> scene = sceneForDrawing(l, ctx.frame, canvas, ctx.syms, ss);
     // The software renderer draws the whole canvas, so keep the last few results: repaints of other layers, partial redraws and
     // scrubbing over frames where the scene did not change are free.
-    struct Entry { quint64 rev; QSize size; int ss; QImage img; };
+    struct Entry { quint64 rev; QSize size; int ss; bool gpu; QImage img; };
+    const bool useGpu = ctx.allowGpu && gpu3d::enabled();
     static std::mutex mu;
     static std::vector<Entry> cache;
     QImage img;
     {
         std::lock_guard<std::mutex> lock(mu);
-        for (const Entry& e : cache) if (e.rev == scene->revision && e.size == canvas && e.ss == ss) { img = e.img; break; }
+        for (const Entry& e : cache) if (e.rev == scene->revision && e.size == canvas && e.ss == ss && e.gpu == useGpu) { img = e.img; break; }
     }
     if (img.isNull()) {
         RenderOptions ro;
         ro.supersample = ss;
+        ro.useGpu = useGpu;
         img = renderScene(*scene, sceneCamera(*scene, double(canvas.width()) / canvas.height()), canvas, ro);
         std::lock_guard<std::mutex> lock(mu);
-        cache.insert(cache.begin(), Entry{scene->revision, canvas, ss, img});
+        cache.insert(cache.begin(), Entry{scene->revision, canvas, ss, useGpu, img});
         if (cache.size() > 4) cache.pop_back();
     }
     p.drawImage(region.topLeft(), img, region);

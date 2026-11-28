@@ -1,4 +1,5 @@
 #include "Scene3D/Render3D.h"
+#include "Scene3D/RenderGpu.h"
 
 #include <QThread>
 #include <set>
@@ -319,6 +320,10 @@ void drawClipped(Target& T, const Vtx& a, const Vtx& b, const Vtx& c, const Shad
 }  // namespace
 
 QImage renderScene(const Scene3D& s, const RenderCamera& cam, const QSize& size, const RenderOptions& opt) {
+    if (opt.useGpu && gpu3d::enabled()) {
+        QImage g = gpu3d::render(s, cam, size, opt);
+        if (!g.isNull()) return g;                       // else: not supported / failed there, draw it here
+    }
     const int ss = std::clamp(opt.supersample, 1, 3);
     const int W = std::max(1, size.width() * ss), H = std::max(1, size.height() * ss);
     QImage img(W, H, QImage::Format_ARGB32_Premultiplied);

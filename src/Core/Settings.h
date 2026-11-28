@@ -10,6 +10,8 @@ bool autosaveEnabled();
 void setAutosaveEnabled(bool on);
 bool gpuEffects();                   // experimental: run layer effects through OpenGL (off by default)
 void setGpuEffects(bool on);
+bool gpu3D();                        // experimental: draw 3D scenes in the previews with OpenGL (exports always use the CPU renderer)
+void setGpu3D(bool on);
 int autosaveIntervalSeconds();
 void setAutosaveIntervalSeconds(int s);
 double defaultGridSize();

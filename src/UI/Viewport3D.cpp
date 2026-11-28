@@ -172,7 +172,7 @@ public:
         p.fillRect(vr, QColor(52, 56, 62));
         p.translate(vr.topLeft());
         drawGrid(p, cam, vr.size());
-        RenderOptions ro; ro.supersample = 1;
+        RenderOptions ro; ro.supersample = 1; ro.useGpu = true;
         {
             // cards show their 2D layer's current content, so the viewport draws the same scene the composition does
             const auto drawn = Compositor::sceneForDrawing(*l, m_v->m_s->doc()->currentFrame(), m_v->m_s->doc()->canvasSize(), m_v->m_s->doc());

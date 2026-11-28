@@ -62,6 +62,7 @@ add_library(myndcore STATIC
   src/Scene3D/Scene3D.cpp
   src/Scene3D/Anim3D.cpp
   src/Scene3D/Render3D.cpp
+  src/Scene3D/RenderGpu.cpp
   src/Scene3D/ModelImport.cpp
   src/Scene3D/ImportObj.cpp
   src/Scene3D/ImportGltf.cpp
@@ -132,6 +133,7 @@ myndcraft_test(test_anim3d)
 myndcraft_test(test_layer3d)
 myndcraft_test(test_effects)
 myndcraft_test(test_gpu_effects)
+myndcraft_test(test_gpu_render3d)
 myndcraft_test(test_export)
 myndcraft_test(test_document)
 myndcraft_test(test_projectio)

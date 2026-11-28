@@ -26,6 +26,8 @@ struct RenderCamera {
 struct RenderOptions {
     int supersample = 1;            // 1 = fastest (editing), 2 = anti-aliased (export / final preview)
     bool drawBackground = true;     // fill with Scene3D::background first
+    bool useGpu = false;            // may be drawn by the OpenGL renderer (RenderGpu.h) when that is enabled and supports the scene; the result is
+                                    // close to, not identical with, the CPU image. Exports leave this off.
     int threads = 0;                // 0 = one per core; 1 = single-threaded (the image is identical either way)
     // When set: filled with one value per output pixel (size.width()*size.height(), row by row) = distance in front of the camera, in scene
     // units, of the nearest OPAQUE surface; +infinity where nothing was drawn. See-through surfaces do not write depth.

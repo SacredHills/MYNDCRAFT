@@ -31,9 +31,10 @@ public:
         bool includeBackground = true;
         int frame = -1;          // -1 = the document's current frame
         OnionSkin onion;
+        bool allowGpu = true;    // 3D scenes may be drawn by the OpenGL renderer when it is switched on (previews); exports set this to false
         int scene3dSupersample = 0;   // 0 = automatic (2x anti-aliasing unless the canvas is large), 1 = fastest, 2 = anti-aliased (export)
     };
-    struct Ctx { int frame; const OnionSkin* onion; const SymbolResolver* syms = nullptr; int depth = 0; int ss3d = 1; const QSet<QUuid>* cards = nullptr; const Layer* root = nullptr; int matteDepth = 0; };
+    struct Ctx { int frame; const OnionSkin* onion; const SymbolResolver* syms = nullptr; int depth = 0; int ss3d = 1; const QSet<QUuid>* cards = nullptr; const Layer* root = nullptr; int matteDepth = 0; bool allowGpu = true; };
     static QImage render(const Document& doc, const QRect& region, const Options& opt);
     // A frozen copy of what render() reads from a Document (layer tree, symbols, size, background, current frame; images shared copy-on-write),
     // so a render can run on a worker thread while the document keeps being edited.
